@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html>
+<head><title>Registrar</title></head>
+<body>
+<% layout('layout') %>
+<div class="max-w-md mx-auto bg-black/50 p-6 rounded-lg">
+  <h2 class="text-xl font-semibold mb-4">Registrar</h2>
+  <form action="/auth/register" method="post" class="space-y-4">
+    <input name="nickname" required class="w-full p-2 rounded bg-white/5" placeholder="Nickname" />
+    <input name="email" type="email" required class="w-full p-2 rounded bg-white/5" placeholder="Email" />
+    <input name="password" type="password" required class="w-full p-2 rounded bg-white/5" placeholder="Senha" />
+    <input name="confirmPassword" type="password" required class="w-full p-2 rounded bg-white/5" placeholder="Confirmar senha" />
+    <button type="submit" class="px-4 py-2 bg-purple-700 rounded">Registrar</button>
+  </form>
+</div>
+</body>
+</html>

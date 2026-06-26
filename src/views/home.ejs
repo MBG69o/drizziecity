@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html>
+<head><title>Home</title></head>
+<body>
+<% layout('layout') %>
+<section class="grid grid-cols-1 md:grid-cols-2 gap-6">
+  <div class="p-6 bg-gradient-to-br from-black/40 to-black/30 rounded-xl border border-white/5 shadow-lg">
+    <h2 class="text-xl font-bold">Bem-vindo a Drizzie City</h2>
+    <p class="text-gray-300 mt-2">Portal oficial do servidor SA-MP / Open.MP — integração direta com o banco do servidor.</p>
+    <div class="mt-6 flex gap-3">
+      <a href="/play" class="px-4 py-2 bg-purple-700 text-white rounded-lg">Jogar Agora</a>
+      <a href="/auth/login" class="px-4 py-2 border border-white/10 rounded-lg">Painel do Jogador</a>
+    </div>
+  </div>
+  <div class="p-6 bg-gradient-to-br from-black/40 to-black/30 rounded-xl border border-white/5 shadow-lg">
+    <h3 class="font-semibold">Status do servidor (em tempo real)</h3>
+    <div id="server-status" class="mt-4">
+      <p>Jogadores online: <span id="online">—</span></p>
+      <p>Status: <span id="status">—</span></p>
+    </div>
+  </div>
+</section>
+</body>
+</html>

@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Drizzie City</title>
+  <link rel="stylesheet" href="/css/tailwind.css" />
+</head>
+<body class="bg-black text-white antialiased">
+  <div class="min-h-screen bg-[url('/images/bg.jpg')] bg-cover bg-center">
+    <div class="backdrop-blur-sm bg-black/40 min-h-screen">
+      <header class="container mx-auto p-6 flex items-center justify-between">
+        <div class="flex items-center gap-4">
+          <div class="w-12 h-12 bg-gradient-to-br from-purple-700 to-indigo-600 rounded-lg flex items-center justify-center font-bold">D</div>
+          <h1 class="text-2xl font-semibold">Drizzie City</h1>
+        </div>
+        <nav class="flex items-center gap-4">
+          <a class="text-gray-300 hover:text-white" href="/">Home</a>
+          <a class="text-gray-300 hover:text-white" href="/news">Notícias</a>
+          <a class="text-gray-300 hover:text-white" href="/shop">Loja</a>
+          <a class="text-gray-300 hover:text-white" href="/rules">Regras</a>
+          <a class="text-gray-300 hover:text-white" href="/faq">FAQ</a>
+          <% if (typeof user !== 'undefined' && user) { %>
+            <a class="text-gray-300 hover:text-white" href="/player/me">Painel</a>
+            <a class="text-gray-300 hover:text-white" href="/auth/logout">Sair</a>
+          <% } else { %>
+            <a class="text-gray-300 hover:text-white" href="/auth/login">Entrar</a>
+          <% } %>
+        </nav>
+      </header>
+      <main class="container mx-auto p-6">
+        <%- body %>
+      </main>
+    </div>
+  </div>
+  <script src="/js/main.js"></script>
+</body>
+</html>

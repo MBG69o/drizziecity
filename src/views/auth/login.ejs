@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html>
+<head><title>Login</title></head>
+<body>
+<% layout('layout') %>
+<div class="max-w-md mx-auto bg-black/50 p-6 rounded-lg">
+  <h2 class="text-xl font-semibold mb-4">Entrar</h2>
+  <form id="loginForm" action="/auth/login" method="post" class="space-y-4">
+    <div>
+      <label class="block text-sm text-gray-300">Nickname</label>
+      <input name="nickname" required class="w-full mt-1 p-2 rounded bg-white/5 border border-white/5" />
+    </div>
+    <div>
+      <label class="block text-sm text-gray-300">Senha</label>
+      <input name="password" type="password" required class="w-full mt-1 p-2 rounded bg-white/5 border border-white/5" />
+    </div>
+    <div class="flex gap-2">
+      <button type="submit" class="px-4 py-2 bg-purple-700 rounded">Entrar</button>
+      <a href="/auth/discord" class="px-4 py-2 border rounded">Discord</a>
+    </div>
+  </form>
+</div>
+</body>
+</html>
