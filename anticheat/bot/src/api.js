@@ -1,19 +1,13 @@
 'use strict';
 
 const http = require('http');
-const crypto = require('crypto');
 const { URL, URLSearchParams } = require('url');
 const { buildConfigResponse } = require('./config-format');
 const { byId } = require('./protections');
 
 const MAX_BODY = 4096;
-
-function safeEqual(a, b) {
-  const ba = Buffer.from(String(a));
-  const bb = Buffer.from(String(b));
-  if (ba.length !== bb.length) return false;
-  return crypto.timingSafeEqual(ba, bb);
-}
+const REGISTER_LIMIT = 5;              // registros por IP (padrão)
+const REGISTER_WINDOW_MS = 60 * 60 * 1000;
 
 function clientIp(req) {
   return (req.socket.remoteAddress || '').replace(/^::ffff:/, '');
@@ -29,12 +23,38 @@ function toInt(v, def = 0) {
   return Number.isFinite(n) ? n : def;
 }
 
+function cleanName(name) {
+  // remove códigos de cor {FFFFFF} e caracteres de controle do hostname
+  return String(name || '').replace(/\{[0-9A-Fa-f]{6}\}/g, '').replace(/[\x00-\x1f]/g, '').trim().slice(0, 64);
+}
+
 /**
  * API HTTP consumida pelo include Pawn (native HTTP do SA-MP/open.mp).
- *   GET  /ac/config?key=&v=&players=&max=&ack=   -> configuração em texto
- *   POST /ac/report?key=  (x-www-form-urlencoded) -> registra detecção
+ *   GET  /ac/register?rk=&host=&port=                         -> REG <id> <token> <chave>
+ *   GET  /ac/config?id=&token=&v=&players=&max=&ack=&host=    -> configuração em texto
+ *   POST /ac/report?id=&token=  (x-www-form-urlencoded)        -> registra detecção
  */
-function startApi({ store, apiKey, host, port, allowedIps, onDetection, logger = console }) {
+function startApi({
+  store, host, port, allowedIps = [], registerKey = '', registerLimit = REGISTER_LIMIT, onDetection, onRegister = () => {}, logger = console,
+}) {
+  const registrations = new Map(); // ip -> [timestamps]
+
+  function canRegister(ip) {
+    const now = Date.now();
+    const list = (registrations.get(ip) || []).filter((t) => now - t < REGISTER_WINDOW_MS);
+    if (list.length >= registerLimit) return false;
+    list.push(now);
+    registrations.set(ip, list);
+    return true;
+  }
+
+  function authenticate(url, res) {
+    const result = store.authServer(url.searchParams.get('id'), url.searchParams.get('token'));
+    if (result.error === 'unknown') { send(res, 410, 'unknown server'); return null; }
+    if (result.error) { send(res, 401, 'unauthorized'); return null; }
+    return result.server;
+  }
+
   const server = http.createServer((req, res) => {
     let url;
     try {
@@ -45,23 +65,39 @@ function startApi({ store, apiKey, host, port, allowedIps, onDetection, logger =
 
     const ip = clientIp(req);
     if (allowedIps.length && !allowedIps.includes(ip)) return send(res, 403, 'forbidden');
-    if (!safeEqual(url.searchParams.get('key') || '', apiKey)) return send(res, 401, 'unauthorized');
+
+    if (req.method === 'GET' && url.pathname === '/ac/register') {
+      if (registerKey && url.searchParams.get('rk') !== registerKey) return send(res, 403, 'invalid register key');
+      if (!canRegister(ip)) return send(res, 429, 'too many registrations');
+      const { server: srv, token } = store.createServer({ name: cleanName(url.searchParams.get('host')), ip });
+      logger.log(`[api] novo servidor registrado: ${srv.id} (${srv.name}) de ${ip}`);
+      onRegister(srv);
+      return send(res, 200, `REG ${srv.id} ${token} ${srv.loginKey}\nEND\n`);
+    }
 
     if (req.method === 'GET' && url.pathname === '/ac/config') {
+      const srv = authenticate(url, res);
+      if (!srv) return undefined;
       const clientVersion = toInt(url.searchParams.get('v'), -1);
       const ack = toInt(url.searchParams.get('ack'), 0);
-      store.server = {
-        lastSeen: Date.now(),
+      store.setStatus(srv, {
         players: toInt(url.searchParams.get('players')),
         maxPlayers: toInt(url.searchParams.get('max')),
+        port: toInt(url.searchParams.get('port')),
         address: ip,
         configVersion: clientVersion,
-      };
-      const commands = store.pendingCommands(ack);
-      return send(res, 200, buildConfigResponse(store.state, clientVersion, commands));
+      });
+      const hostname = cleanName(url.searchParams.get('host'));
+      if (hostname && !srv.customName && hostname !== srv.name) {
+        store.updateServer(srv, (s) => { s.name = hostname; }, { bump: false });
+      }
+      const commands = store.pendingCommands(srv, ack);
+      return send(res, 200, buildConfigResponse(srv, clientVersion, commands));
     }
 
     if (req.method === 'POST' && url.pathname === '/ac/report') {
+      const srv = authenticate(url, res);
+      if (!srv) return undefined;
       let body = '';
       let aborted = false;
       req.on('data', (chunk) => {
@@ -81,7 +117,7 @@ function startApi({ store, apiKey, host, port, allowedIps, onDetection, logger =
         const det = {
           time: Date.now(),
           playerId: toInt(p.get('id'), -1),
-          name: (p.get('nome') || '?').slice(0, 24),
+          name: (p.get('nome') || '?').slice(0, 32),
           ip: (p.get('ip') || '').slice(0, 15),
           code,
           key: prot.key,
@@ -90,9 +126,9 @@ function startApi({ store, apiKey, host, port, allowedIps, onDetection, logger =
           tolerance: toInt(p.get('tol'), 1),
           detail: (p.get('det') || '-').slice(0, 128),
         };
-        store.addDetection(det);
+        store.addDetection(srv, det);
         try {
-          onDetection(det);
+          onDetection(srv, det);
         } catch (err) {
           logger.error('[api] erro ao processar detecção', err);
         }
@@ -108,4 +144,4 @@ function startApi({ store, apiKey, host, port, allowedIps, onDetection, logger =
   return server;
 }
 
-module.exports = { startApi, safeEqual };
+module.exports = { startApi };

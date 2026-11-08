@@ -3,8 +3,9 @@
  */
 #include <a_samp>   // ou <open.mp>
 
+// IP:porta do bot (sem http://). Na primeira inicialização o servidor se
+// registra sozinho e mostra no console o ID fixo e a chave de login.
 #define DCAC_API_HOST "127.0.0.1:8090"
-#define DCAC_API_KEY  "troque_esta_chave_super_secreta"
 #include <drizzie_ac>
 
 main() {}
@@ -45,6 +46,13 @@ public OnAntiCheatPunish(playerid, code, action, const detail[])
 public OnAntiCheatAdminCheck(playerid)
 {
 	return IsPlayerAdmin(playerid);
+}
+
+// (opcional) entregar itens de pickups/checkpoints sem falso positivo
+public OnPlayerPickUpPickup(playerid, pickupid)
+{
+	// GivePlayerWeapon / SetPlayerHealth já registram tudo no AC
+	return 1;
 }
 
 public OnPlayerCommandText(playerid, cmdtext[])

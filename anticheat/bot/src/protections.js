@@ -8,38 +8,66 @@
  * tolerance: quantas detecções em 60s antes de punir
  * value: limite numérico da proteção (quando houver - ver valueLabel)
  */
+const CATEGORIES = [
+  { key: 'jogador', name: 'Jogador', emoji: '🧍' },
+  { key: 'armas', name: 'Armas e combate', emoji: '🔫' },
+  { key: 'movimento', name: 'Movimento', emoji: '🏃' },
+  { key: 'veiculos', name: 'Veículos', emoji: '🚗' },
+  { key: 'rede', name: 'Rede, chat e servidor', emoji: '🌐' },
+];
+
+const p = (id, key, cat, name, desc, valueLabel, enabled, action, tolerance, value) => ({
+  id, key, cat, name, desc, valueLabel, defaults: { enabled, action, tolerance, value },
+});
+
 const PROTECTIONS = [
-  { id: 0,  key: 'dinheiro',        name: 'Dinheiro',              desc: 'Money hack: dinheiro criado no cliente é removido.',                  valueLabel: null,                     defaults: { enabled: true,  action: 1, tolerance: 3, value: 0 } },
-  { id: 1,  key: 'vida',            name: 'Vida',                  desc: 'Health hack: vida acima do que o servidor deu.',                       valueLabel: null,                     defaults: { enabled: true,  action: 1, tolerance: 3, value: 0 } },
-  { id: 2,  key: 'colete',          name: 'Colete',                desc: 'Armour hack: colete acima do que o servidor deu.',                     valueLabel: null,                     defaults: { enabled: true,  action: 1, tolerance: 3, value: 0 } },
-  { id: 3,  key: 'armas',           name: 'Armas',                 desc: 'Weapon hack: armas que o servidor não deu.',                           valueLabel: null,                     defaults: { enabled: true,  action: 1, tolerance: 2, value: 0 } },
-  { id: 4,  key: 'velocidade_pe',   name: 'Velocidade a pé',       desc: 'Speed hack a pé.',                                                     valueLabel: 'km/h máximo',            defaults: { enabled: true,  action: 1, tolerance: 3, value: 70 } },
-  { id: 5,  key: 'velocidade_veic', name: 'Velocidade em veículo', desc: 'Speed hack em veículos.',                                              valueLabel: 'km/h máximo',            defaults: { enabled: true,  action: 1, tolerance: 3, value: 360 } },
-  { id: 6,  key: 'teleporte',       name: 'Teleporte',             desc: 'Teleporte não feito pelo servidor.',                                   valueLabel: 'metros por segundo',     defaults: { enabled: true,  action: 1, tolerance: 3, value: 80 } },
-  { id: 7,  key: 'airbreak',        name: 'Airbreak/Fly',          desc: 'Movimento sem velocidade (airbreak, fly, noclip).',                    valueLabel: 'm/s mínimo para detectar', defaults: { enabled: true, action: 1, tolerance: 3, value: 14 } },
-  { id: 8,  key: 'jetpack',         name: 'Jetpack',               desc: 'Jetpack que o servidor não deu.',                                      valueLabel: null,                     defaults: { enabled: true,  action: 1, tolerance: 1, value: 0 } },
-  { id: 9,  key: 'reparo_veiculo',  name: 'Reparo de veículo',     desc: 'Car godmode / reparo instantâneo de veículo.',                         valueLabel: null,                     defaults: { enabled: true,  action: 1, tolerance: 3, value: 0 } },
-  { id: 10, key: 'fakekill',        name: 'Fake kill',             desc: 'Mortes falsas e flood de mortes.',                                     valueLabel: 'mortes máximas em 5s',   defaults: { enabled: true,  action: 1, tolerance: 1, value: 4 } },
-  { id: 11, key: 'rapidfire',       name: 'Rapid fire',            desc: 'Tiros rápidos demais (minigun ignorada).',                             valueLabel: 'tiros por segundo',      defaults: { enabled: true,  action: 1, tolerance: 3, value: 25 } },
-  { id: 12, key: 'flood',           name: 'Flood',                 desc: 'Flood de chat e comandos.',                                            valueLabel: 'mensagens em 3s',        defaults: { enabled: true,  action: 1, tolerance: 3, value: 5 } },
-  { id: 13, key: 'puxar_veiculo',   name: 'Puxar veículo',         desc: 'Entrar em veículo distante (car warp).',                               valueLabel: 'metros',                 defaults: { enabled: true,  action: 1, tolerance: 2, value: 30 } },
-  { id: 14, key: 'veiculo_troll',   name: 'Veículo troll',         desc: 'Mover/arremessar veículos desocupados.',                               valueLabel: 'metros por atualização', defaults: { enabled: true,  action: 1, tolerance: 2, value: 20 } },
-  { id: 15, key: 'ping',            name: 'Ping alto',             desc: 'Ping acima do limite por 5 segundos seguidos.',                        valueLabel: 'ms',                     defaults: { enabled: false, action: 1, tolerance: 1, value: 800 } },
-  { id: 16, key: 'conexoes_ip',     name: 'Conexões por IP',       desc: 'Muitas contas do mesmo IP (bots / flood de conexão).',                valueLabel: 'conexões máximas',       defaults: { enabled: true,  action: 1, tolerance: 1, value: 3 } },
-  { id: 17, key: 'tuning',          name: 'Tuning inválido',       desc: 'Tuning fora da oficina (crasher / tuning hack).',                     valueLabel: null,                     defaults: { enabled: true,  action: 1, tolerance: 1, value: 0 } },
-  { id: 18, key: 'dialog',          name: 'Dialog falso',          desc: 'Resposta de dialog que não foi aberto (SA-MP; no open.mp é nativo).', valueLabel: null,                     defaults: { enabled: true,  action: 1, tolerance: 1, value: 0 } },
+  p(0,  'dinheiro',         'jogador',   'Dinheiro',              'Money hack: dinheiro criado no cliente é removido.',                 null,                       true,  1, 3, 0),
+  p(1,  'vida',             'jogador',   'Vida',                  'Vida acima do que o servidor deu.',                                  null,                       true,  1, 3, 0),
+  p(2,  'colete',           'jogador',   'Colete',                'Colete acima do que o servidor deu.',                                null,                       true,  1, 3, 0),
+  p(3,  'armas',            'armas',     'Armas',                 'Armas que o servidor não deu (e tiros com elas).',                   null,                       true,  1, 2, 0),
+  p(4,  'velocidade_pe',    'movimento', 'Velocidade a pé',       'Speed hack a pé.',                                                   'km/h máximo',              true,  1, 3, 70),
+  p(5,  'velocidade_veic',  'veiculos',  'Velocidade em veículo', 'Speed hack em veículos.',                                            'km/h máximo',              true,  1, 3, 360),
+  p(6,  'teleporte',        'movimento', 'Teleporte',             'Teleporte não feito pelo servidor.',                                 'metros por segundo',       true,  1, 3, 80),
+  p(7,  'airbreak',         'movimento', 'Airbreak/Fly',          'Movimento sem velocidade (airbreak, fly, noclip).',                  'm/s mínimo',               true,  1, 3, 14),
+  p(8,  'jetpack',          'jogador',   'Jetpack',               'Jetpack que o servidor não deu.',                                    null,                       true,  1, 1, 0),
+  p(9,  'reparo_veiculo',   'veiculos',  'Reparo de veículo',     'Car godmode / reparo instantâneo de veículo.',                       null,                       true,  1, 3, 0),
+  p(10, 'fakekill',         'armas',     'Fake kill',             'Mortes falsas e flood de mortes.',                                   'mortes máximas em 5s',     true,  1, 1, 4),
+  p(11, 'rapidfire',        'armas',     'Rapid fire',            'Tiros rápidos demais (minigun ignorada).',                           'tiros por segundo',        true,  1, 3, 25),
+  p(12, 'flood',            'rede',      'Flood',                 'Flood de chat e comandos.',                                          'mensagens em 3s',          true,  1, 3, 5),
+  p(13, 'puxar_veiculo',    'veiculos',  'Puxar veículo',         'Entrar em veículo distante (car warp).',                             'metros',                   true,  1, 2, 30),
+  p(14, 'veiculo_troll',    'veiculos',  'Veículo troll',         'Mover/arremessar veículos desocupados e puxar trailers.',            'metros por atualização',   true,  1, 2, 20),
+  p(15, 'ping',             'rede',      'Ping alto',             'Ping acima do limite por 5 segundos seguidos.',                      'ms',                       false, 1, 1, 800),
+  p(16, 'conexoes_ip',      'rede',      'Conexões por IP',       'Muitas contas simultâneas do mesmo IP.',                             'conexões máximas',         true,  1, 1, 3),
+  p(17, 'tuning',           'veiculos',  'Tuning inválido',       'Tuning fora da oficina (crasher / tuning hack).',                    null,                       true,  1, 1, 0),
+  p(18, 'dialog',           'rede',      'Dialog falso',          'Resposta de dialog não aberto (SA-MP; no open.mp é nativo).',        null,                       true,  1, 1, 0),
+  p(19, 'godmode',          'jogador',   'Godmode',               'Leva tiros e a vida não diminui.',                                   'tiros sem perder vida',    true,  1, 2, 6),
+  p(20, 'alcance',          'armas',     'Alcance de tiro',       'Acerto além do alcance da arma (silent aim / range hack).',          '% acima do alcance',       true,  1, 3, 30),
+  p(21, 'dano',             'armas',     'Dano hack',             'Dano acima do máximo da arma.',                                      null,                       true,  1, 2, 0),
+  p(22, 'municao',          'armas',     'Munição',               'Munição criada no cliente ou infinita.',                             'tiros sem gastar munição', true,  1, 2, 12),
+  p(23, 'crasher',          'rede',      'Crasher',               'Dados inválidos: bala, assento, posição ou sync de veículo.',        null,                       true,  1, 1, 0),
+  p(24, 'spawn_falso',      'jogador',   'Spawn falso',           'Spawnar sem permissão do servidor (ex.: pular o login).',            null,                       true,  1, 1, 0),
+  p(25, 'divulgacao',       'rede',      'Divulgação',            'IPs/portas de outros servidores no chat e comandos.',                null,                       true,  1, 2, 0),
+  p(26, 'spam_veiculo',     'veiculos',  'Spam de veículo',       'Entrar e sair de veículos em excesso (crasher/lag).',                'entradas/saídas em 5s',    true,  1, 2, 8),
+  p(27, 'pickup_falso',     'movimento', 'Pickup falso',          'Pegar pickup estando longe dele.',                                   'metros',                   true,  1, 2, 15),
+  p(28, 'checkpoint_falso', 'movimento', 'Checkpoint falso',      'Entrar em checkpoint estando longe dele.',                           'metros além do raio',      true,  1, 2, 10),
+  p(29, 'cbug',             'armas',     'C-Bug',                 'Agachar logo após atirar (deagle, shotgun, rifles).',                'ms entre tiro e agachar',  false, 0, 3, 600),
+  p(30, 'rcon',             'rede',      'RCON brute force',      'Senhas RCON erradas: o IP é bloqueado por 1h.',                      'tentativas',               true,  1, 1, 3),
+  p(31, 'npc_falso',        'rede',      'NPC falso',             'Conexão externa se passando por NPC.',                               null,                       true,  1, 1, 0),
+  p(32, 'reconexao',        'rede',      'Flood de reconexão',    'Muitas conexões do mesmo IP em 30s (bots).',                         'conexões em 30s',          true,  1, 1, 5),
+  p(33, 'aimbot',           'armas',     'Aimbot',                'Taxa de acerto em jogadores suspeita (janela de 40 tiros).',         '% de acerto',              true,  0, 2, 92),
 ];
 
 const ACTIONS = ['aviso', 'kick', 'ban'];
 const ACTION_LABELS = ['⚠️ Aviso', '👢 Kick', '🔨 Ban'];
 
-const byKey = new Map(PROTECTIONS.map((p) => [p.key, p]));
-const byId = new Map(PROTECTIONS.map((p) => [p.id, p]));
+const byKey = new Map(PROTECTIONS.map((x) => [x.key, x]));
+const byId = new Map(PROTECTIONS.map((x) => [x.id, x]));
+const byCategory = new Map(CATEGORIES.map((c) => [c.key, PROTECTIONS.filter((x) => x.cat === c.key)]));
 
 function defaultProtectionState() {
   const out = {};
-  for (const p of PROTECTIONS) out[p.key] = { ...p.defaults };
+  for (const x of PROTECTIONS) out[x.key] = { ...x.defaults };
   return out;
 }
 
-module.exports = { PROTECTIONS, ACTIONS, ACTION_LABELS, byKey, byId, defaultProtectionState };
+module.exports = { PROTECTIONS, CATEGORIES, ACTIONS, ACTION_LABELS, byKey, byId, byCategory, defaultProtectionState };

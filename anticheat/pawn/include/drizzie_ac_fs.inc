@@ -242,6 +242,129 @@ stock DCACFS_T_BOOL:DCACFS_SetPlayerSpecialAction(playerid, DCACFS_T_SACTION:act
 #endif
 #define SetPlayerSpecialAction DCACFS_SetPlayerSpecialAction
 
+// ---------- munição
+stock DCACFS_T_BOOL:DCACFS_SetPlayerAmmo(playerid, DCACFS_T_WEAPON:weaponid, ammo)
+{
+	if (DCACFS_ON()) return DCACFS_T_BOOL:CallRemoteFunction("DCAC_R_SetAmmo", "iii", playerid, _:weaponid, ammo);
+	return SetPlayerAmmo(playerid, weaponid, ammo);
+}
+#if defined _ALS_SetPlayerAmmo
+	#undef SetPlayerAmmo
+#else
+	#define _ALS_SetPlayerAmmo
+#endif
+#define SetPlayerAmmo DCACFS_SetPlayerAmmo
+
+// ---------- spawn
+stock DCACFS_T_BOOL:DCACFS_SpawnPlayer(playerid)
+{
+	if (DCACFS_ON()) CallRemoteFunction("DCAC_R_Spawn", "i", playerid);
+	return SpawnPlayer(playerid);
+}
+#if defined _ALS_SpawnPlayer
+	#undef SpawnPlayer
+#else
+	#define _ALS_SpawnPlayer
+#endif
+#define SpawnPlayer DCACFS_SpawnPlayer
+
+stock DCACFS_T_BOOL:DCACFS_TogglePlayerSpectating(playerid, DCACFS_T_BOOL:toggle)
+{
+	if (DCACFS_ON())
+	{
+		CallRemoteFunction("DCAC_R_PosImmunity", "ii", playerid, 5000);
+		if (!toggle) CallRemoteFunction("DCAC_R_Spawn", "i", playerid);
+	}
+	return TogglePlayerSpectating(playerid, toggle);
+}
+#if defined _ALS_TogglePlayerSpectating
+	#undef TogglePlayerSpectating
+#else
+	#define _ALS_TogglePlayerSpectating
+#endif
+#define TogglePlayerSpectating DCACFS_TogglePlayerSpectating
+
+// ---------- checkpoints
+#if defined _INC_open_mp
+	#define DCACFS_T_CPTYPE CP_TYPE
+#else
+	#define DCACFS_T_CPTYPE _
+#endif
+
+stock DCACFS_T_BOOL:DCACFS_SetPlayerCheckpoint(playerid, Float:x, Float:y, Float:z, Float:size)
+{
+	if (DCACFS_ON()) CallRemoteFunction("DCAC_R_Checkpoint", "iiffff", playerid, 0, x, y, z, size);
+	return SetPlayerCheckpoint(playerid, x, y, z, size);
+}
+#if defined _ALS_SetPlayerCheckpoint
+	#undef SetPlayerCheckpoint
+#else
+	#define _ALS_SetPlayerCheckpoint
+#endif
+#define SetPlayerCheckpoint DCACFS_SetPlayerCheckpoint
+
+stock DCACFS_T_BOOL:DCACFS_DisablePlayerCheckpoint(playerid)
+{
+	if (DCACFS_ON()) CallRemoteFunction("DCAC_R_Checkpoint", "iiffff", playerid, 0, 0.0, 0.0, 0.0, -1.0);
+	return DisablePlayerCheckpoint(playerid);
+}
+#if defined _ALS_DisablePlayerCheckpoint
+	#undef DisablePlayerCheckpoint
+#else
+	#define _ALS_DisablePlayerCheckpoint
+#endif
+#define DisablePlayerCheckpoint DCACFS_DisablePlayerCheckpoint
+
+stock DCACFS_T_BOOL:DCACFS_SetPlayerRaceCP(playerid, DCACFS_T_CPTYPE:type, Float:x, Float:y, Float:z, Float:nextx, Float:nexty, Float:nextz, Float:size)
+{
+	if (DCACFS_ON()) CallRemoteFunction("DCAC_R_Checkpoint", "iiffff", playerid, 1, x, y, z, size);
+	return SetPlayerRaceCheckpoint(playerid, type, x, y, z, nextx, nexty, nextz, size);
+}
+#if defined _ALS_SetPlayerRaceCheckpoint
+	#undef SetPlayerRaceCheckpoint
+#else
+	#define _ALS_SetPlayerRaceCheckpoint
+#endif
+#define SetPlayerRaceCheckpoint DCACFS_SetPlayerRaceCP
+
+stock DCACFS_T_BOOL:DCACFS_DisablePlayerRaceCP(playerid)
+{
+	if (DCACFS_ON()) CallRemoteFunction("DCAC_R_Checkpoint", "iiffff", playerid, 1, 0.0, 0.0, 0.0, -1.0);
+	return DisablePlayerRaceCheckpoint(playerid);
+}
+#if defined _ALS_DisablePlayerRaceCP
+	#undef DisablePlayerRaceCheckpoint
+#else
+	#define _ALS_DisablePlayerRaceCP
+#endif
+#define DisablePlayerRaceCheckpoint DCACFS_DisablePlayerRaceCP
+
+// ---------- pickups (o pool de pickups é compartilhado com o gamemode)
+stock DCACFS_CreatePickup(model, type, Float:x, Float:y, Float:z, virtualworld = 0)
+{
+	new id = CreatePickup(model, type, x, y, z, virtualworld);
+	if (id != -1 && DCACFS_ON()) CallRemoteFunction("DCAC_R_Pickup", "ifff", id, x, y, z);
+	return id;
+}
+#if defined _ALS_CreatePickup
+	#undef CreatePickup
+#else
+	#define _ALS_CreatePickup
+#endif
+#define CreatePickup DCACFS_CreatePickup
+
+stock DCACFS_T_BOOL:DCACFS_DestroyPickup(pickupid)
+{
+	if (DCACFS_ON()) CallRemoteFunction("DCAC_R_Pickup", "ifff", pickupid, -99999.0, 0.0, 0.0);
+	return DestroyPickup(pickupid);
+}
+#if defined _ALS_DestroyPickup
+	#undef DestroyPickup
+#else
+	#define _ALS_DestroyPickup
+#endif
+#define DestroyPickup DCACFS_DestroyPickup
+
 // ---------- dialogs (somente SA-MP)
 #if !DCACFS_OMP
 stock DCACFS_ShowPlayerDialog(playerid, dialogid, style, const caption[], const info[], const button1[], const button2[])

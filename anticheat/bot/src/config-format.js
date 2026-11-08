@@ -6,6 +6,7 @@ const { PROTECTIONS } = require('./protections');
  * Monta a resposta em texto que o include Pawn entende (Pawn não tem parser JSON).
  *
  *   DCAC <versao> <global> <pollSegundos>
+ *   K <chave de login do Discord>
  *   P <id> <ativo> <acao> <tolerancia> <valor>
  *   W <nick>
  *   C <id> <tipo> <argumento>
@@ -17,6 +18,7 @@ function buildConfigResponse(state, clientVersion, commands) {
   const lines = [];
   if (clientVersion !== state.version) {
     lines.push(`DCAC ${state.version} ${state.global ? 1 : 0} ${state.pollSeconds}`);
+    if (state.loginKey) lines.push(`K ${state.loginKey}`);
     for (const p of PROTECTIONS) {
       const s = state.protections[p.key];
       lines.push(`P ${p.id} ${s.enabled ? 1 : 0} ${s.action} ${s.tolerance} ${Math.trunc(s.value) || 0}`);

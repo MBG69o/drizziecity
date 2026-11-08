@@ -4,30 +4,37 @@ function parseIds(value) {
   return String(value || '').split(',').map((s) => s.trim()).filter((s) => /^\d{5,25}$/.test(s));
 }
 
+function memberRoleIds(interaction) {
+  const roles = interaction.member && interaction.member.roles;
+  if (!roles) return [];
+  // GuildMemberRoleManager (cache) ou array de IDs (APIInteractionGuildMember)
+  return Array.isArray(roles) ? roles : [...roles.cache.keys()];
+}
+
+/**
+ * Permissões por servidor do jogo:
+ *  - administradores do bot (.env AC_BOT_ADMIN_IDS): tudo, em qualquer servidor
+ *  - donos: quem fez /ac login com a chave do servidor (podem gerenciar permissões)
+ *  - admins/cargos: adicionados pelos donos (podem configurar proteções)
+ */
 class Permissions {
-  constructor(store, { ownerIds = [], roleIds = [] } = {}) {
-    this.store = store;
-    this.ownerIds = ownerIds;
-    this.roleIds = roleIds;
+  constructor({ botAdminIds = [] } = {}) {
+    this.botAdminIds = botAdminIds;
   }
 
-  /** Super donos: definidos no .env ou dono do servidor do Discord. */
-  isSuperOwner(interaction) {
-    return this.ownerIds.includes(interaction.user.id)
-      || (interaction.guild && interaction.guild.ownerId === interaction.user.id);
+  isBotAdmin(interaction) {
+    return this.botAdminIds.includes(interaction.user.id);
   }
 
-  /** Pode configurar o anti-cheat. */
-  isAllowed(interaction) {
-    if (this.isSuperOwner(interaction)) return true;
-    const { owners, roles } = this.store.state;
-    if (owners.includes(interaction.user.id)) return true;
-    const memberRoles = interaction.member && interaction.member.roles;
-    if (!memberRoles) return false;
-    const allowedRoles = new Set([...roles, ...this.roleIds]);
-    // GuildMemberRoleManager (cache) ou array de IDs (APIInteractionGuildMember)
-    const ids = Array.isArray(memberRoles) ? memberRoles : [...memberRoles.cache.keys()];
-    return ids.some((id) => allowedRoles.has(id));
+  isOwner(server, interaction) {
+    return this.isBotAdmin(interaction) || server.owners.includes(interaction.user.id);
+  }
+
+  isAllowed(server, interaction) {
+    if (this.isOwner(server, interaction)) return true;
+    if (server.admins.includes(interaction.user.id)) return true;
+    const roles = new Set(server.roles);
+    return memberRoleIds(interaction).some((id) => roles.has(id));
   }
 }
 
