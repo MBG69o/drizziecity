@@ -43,7 +43,7 @@ function buildPanelEmbed(store, server, guildId, catKey = CATEGORIES[0].key) {
     return `${c.emoji} ${c.name}: ${on}/${list.length}`;
   }).join(' · ');
   return new EmbedBuilder()
-    .setTitle('🛡️ Drizzie City Anti-Cheat')
+    .setTitle('🦅 EagleEYE Anti-Cheat')
     .setColor(server.global ? COLORS.ok : COLORS.off)
     .setDescription([
       ...headerLines(store, server, guildId),
@@ -76,14 +76,14 @@ function buildPanelComponents(server, catKey = CATEGORIES[0].key) {
   const sid = server.id;
 
   const cats = new ActionRowBuilder().addComponents(CATEGORIES.map((c) => new ButtonBuilder()
-    .setCustomId(`dcac:cat:${sid}:${c.key}`)
+    .setCustomId(`ee:cat:${sid}:${c.key}`)
     .setLabel(c.name.split(' ')[0])
     .setEmoji(c.emoji)
     .setStyle(c.key === cat.key ? ButtonStyle.Primary : ButtonStyle.Secondary)));
 
   const list = byCategory.get(cat.key);
   const select = new StringSelectMenuBuilder()
-    .setCustomId(`dcac:toggle:${sid}:${cat.key}`)
+    .setCustomId(`ee:toggle:${sid}:${cat.key}`)
     .setPlaceholder(`Ligar/desligar: ${cat.name}…`)
     .setMinValues(1)
     .setMaxValues(list.length)
@@ -98,12 +98,12 @@ function buildPanelComponents(server, catKey = CATEGORIES[0].key) {
     }));
 
   const buttons = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId(`dcac:global:${sid}:${cat.key}`)
+    new ButtonBuilder().setCustomId(`ee:global:${sid}:${cat.key}`)
       .setLabel(server.global ? 'Desligar anti-cheat' : 'Ligar anti-cheat')
       .setStyle(server.global ? ButtonStyle.Danger : ButtonStyle.Success),
-    new ButtonBuilder().setCustomId(`dcac:allon:${sid}:${cat.key}`).setLabel('Ativar categoria').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId(`dcac:alloff:${sid}:${cat.key}`).setLabel('Desativar categoria').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId(`dcac:refresh:${sid}:${cat.key}`).setLabel('Atualizar').setEmoji('🔄').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(`ee:allon:${sid}:${cat.key}`).setLabel('Ativar categoria').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(`ee:alloff:${sid}:${cat.key}`).setLabel('Desativar categoria').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(`ee:refresh:${sid}:${cat.key}`).setLabel('Atualizar').setEmoji('🔄').setStyle(ButtonStyle.Secondary),
   );
 
   return [cats, new ActionRowBuilder().addComponents(select), buttons];

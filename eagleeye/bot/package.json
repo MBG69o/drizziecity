@@ -1,8 +1,8 @@
 {
-  "name": "drizzie-anticheat-bot",
+  "name": "eagleeye-bot",
   "version": "1.0.0",
   "private": true,
-  "description": "Bot do Discord que configura o Drizzie City Anti-Cheat (SA-MP/open.mp) e recebe os logs de detecção.",
+  "description": "Bot do Discord que configura o EagleEYE Anti-Cheat (SA-MP/open.mp) e recebe os logs de detecção.",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",

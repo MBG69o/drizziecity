@@ -126,12 +126,12 @@ function createDiscordBot({ store, permissions, token, projectGuildId, logger = 
     const rows = [];
     if (slice.length) {
       rows.push(new ActionRowBuilder().addComponents(slice.map((b) => new ButtonBuilder()
-        .setCustomId(`dcac:unban:${server.id}:${b.id}`).setLabel(`Desbanir #${b.id}`).setStyle(ButtonStyle.Danger))));
+        .setCustomId(`ee:unban:${server.id}:${b.id}`).setLabel(`Desbanir #${b.id}`).setStyle(ButtonStyle.Danger))));
     }
     if (pages > 1) {
       rows.push(new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId(`dcac:banpage:${server.id}:${p - 1}`).setLabel('◀').setStyle(ButtonStyle.Secondary).setDisabled(p === 0),
-        new ButtonBuilder().setCustomId(`dcac:banpage:${server.id}:${p + 1}`).setLabel('▶').setStyle(ButtonStyle.Secondary).setDisabled(p >= pages - 1),
+        new ButtonBuilder().setCustomId(`ee:banpage:${server.id}:${p - 1}`).setLabel('◀').setStyle(ButtonStyle.Secondary).setDisabled(p === 0),
+        new ButtonBuilder().setCustomId(`ee:banpage:${server.id}:${p + 1}`).setLabel('▶').setStyle(ButtonStyle.Secondary).setDisabled(p >= pages - 1),
       ));
     }
     return { embeds: [embed], components: rows, flags: MessageFlags.Ephemeral };
@@ -192,8 +192,8 @@ function createDiscordBot({ store, permissions, token, projectGuildId, logger = 
           : 'Clique em **Confirmar** para ligar o anti-cheat nesse servidor. Ele começa a valer em até alguns segundos.',
       ].join('\n'));
     const components = server.activated ? [] : [new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId(`dcac:confirm:${server.id}:${userId}`).setLabel('Confirmar e ativar').setEmoji('✅').setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId(`dcac:cancel:${server.id}:${userId}`).setLabel('Agora não').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(`ee:confirm:${server.id}:${userId}`).setLabel('Confirmar e ativar').setEmoji('✅').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId(`ee:cancel:${server.id}:${userId}`).setLabel('Agora não').setStyle(ButtonStyle.Secondary),
     )];
     return { embeds: [embed], components, flags: MessageFlags.Ephemeral, allowedMentions: { parse: [] } };
   }
@@ -209,7 +209,7 @@ function createDiscordBot({ store, permissions, token, projectGuildId, logger = 
       if (!server || !store.checkLoginKey(server, key)) {
         loginFails.get(userId).push(Date.now());
         audit(interaction, server, 'login FALHOU');
-        return reply(interaction, '❌ ID ou chave inválidos. Confira no console do servidor (digite `dcac` no console).');
+        return reply(interaction, '❌ ID ou chave inválidos. Confira no console do servidor (digite `eagleeye` no console).');
       }
       store.updateServer(server, (s) => {
         if (!s.owners.includes(userId)) s.owners.push(userId);
@@ -301,7 +301,7 @@ function createDiscordBot({ store, permissions, token, projectGuildId, logger = 
         return reply(interaction, [
           `🔐 Novo token da API de ${serverLabel(server)} gerado. **O servidor do jogo vai parar de se conectar até você atualizar o token.**`,
           '',
-          'Edite `scriptfiles/dcac_servidor.cfg` no servidor e deixe assim:',
+          'Edite `scriptfiles/eagleeye_servidor.cfg` no servidor e deixe assim:',
           '```',
           `id=${server.id}`,
           `token=${tok}`,
@@ -439,7 +439,7 @@ function createDiscordBot({ store, permissions, token, projectGuildId, logger = 
 
       case 'exportar': {
         const data = JSON.stringify(store.exportConfig(server), null, 2);
-        const file = new AttachmentBuilder(Buffer.from(data, 'utf8'), { name: `dcac-${server.id}.json` });
+        const file = new AttachmentBuilder(Buffer.from(data, 'utf8'), { name: `eagleeye-${server.id}.json` });
         audit(interaction, server, 'exportar configuração');
         return interaction.reply({ content: `📦 Configuração de ${serverLabel(server)}. Use \`/ac protecao importar\` para aplicar em outro servidor.`, files: [file], flags: MessageFlags.Ephemeral });
       }
@@ -609,7 +609,7 @@ function createDiscordBot({ store, permissions, token, projectGuildId, logger = 
   }
 
   async function handleComponent(interaction) {
-    // dcac:<acao>:<serverId>:<categoria>
+    // ee:<acao>:<serverId>:<categoria>
     const [, action, serverId, catKey] = interaction.customId.split(':');
     const server = store.getServer(normalizeId(serverId));
     if (!server) return reply(interaction, '❌ Esse servidor não existe mais.');
@@ -670,7 +670,7 @@ function createDiscordBot({ store, permissions, token, projectGuildId, logger = 
       }
       if (interaction.isAutocomplete() && interaction.commandName === 'ac') return await handleAutocomplete(interaction);
       if (interaction.isChatInputCommand() && interaction.commandName === 'ac') return await handleCommand(interaction);
-      if ((interaction.isStringSelectMenu() || interaction.isButton()) && interaction.customId.startsWith('dcac:')) {
+      if ((interaction.isStringSelectMenu() || interaction.isButton()) && interaction.customId.startsWith('ee:')) {
         return await handleComponent(interaction);
       }
     } catch (err) {

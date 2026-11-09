@@ -22,7 +22,7 @@ async function register(host = 'Meu%20Servidor') {
 }
 
 before(async () => {
-  dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dcac-'));
+  dir = fs.mkdtempSync(path.join(os.tmpdir(), 'eagleeye-'));
   store = new Store(dir).load();
   server = startApi({ store, host: '127.0.0.1', port: 0, registerLimit: 1000, onDetection: (s, d) => detections.push([s.id, d]), logger: quiet });
   await new Promise((r) => server.once('listening', r));
@@ -32,7 +32,7 @@ after(() => server.close());
 
 test('registro cria ID fixo, token e chave de login', async () => {
   const r = await register();
-  assert.match(r.text, /^REG DC-[2-9A-Z]{6} [0-9a-f]{64} [2-9A-Z]{4}-[2-9A-Z]{4}-[2-9A-Z]{4}\nEND\n$/);
+  assert.match(r.text, /^REG EE-[2-9A-Z]{6} [0-9a-f]{64} [2-9A-Z]{4}-[2-9A-Z]{4}-[2-9A-Z]{4}\nEND\n$/);
   const srv = store.getServer(r.id);
   assert.strictEqual(srv.name, 'Meu Servidor');
   assert.notStrictEqual(srv.tokenHash, r.token, 'o token não pode ser salvo em texto puro');
@@ -42,14 +42,14 @@ test('registro cria ID fixo, token e chave de login', async () => {
 test('config exige token correto e responde 410 para ID desconhecido', async () => {
   const r = await register();
   assert.strictEqual((await fetch(`${base}/ac/config?id=${r.id}&token=errado&v=0`)).status, 401);
-  assert.strictEqual((await fetch(`${base}/ac/config?id=DC-ZZZZZZ&token=${r.token}&v=0`)).status, 410);
+  assert.strictEqual((await fetch(`${base}/ac/config?id=EE-ZZZZZZ&token=${r.token}&v=0`)).status, 410);
 });
 
 test('config completa inclui chave de login e todas as proteções', async () => {
   const r = await register();
   const text = await (await fetch(`${base}/ac/config?id=${r.id}&token=${r.token}&v=0&players=5&max=100&ack=0`)).text();
   const lines = text.trim().split('\n');
-  assert.strictEqual(lines[0], 'DCAC 1 0 10'); // desligado até o dono confirmar
+  assert.strictEqual(lines[0], 'EAGLE 1 0 10'); // desligado até o dono confirmar
   assert.strictEqual(lines[1], `K ${r.key}`);
   assert.strictEqual(lines.filter((l) => l.startsWith('P ')).length, PROTECTIONS.length);
   assert.strictEqual(lines.at(-1), 'END');
@@ -130,10 +130,10 @@ test('anti-cheat só liga depois que o dono confirma', async () => {
   const srv = store.getServer(r.id);
   assert.strictEqual(srv.activated, false);
   let text = await (await fetch(`${base}/ac/config?id=${r.id}&token=${r.token}&v=0`)).text();
-  assert.match(text, /^DCAC \d+ 0 /, 'antes da confirmação o global vai desligado');
+  assert.match(text, /^EAGLE \d+ 0 /, 'antes da confirmação o global vai desligado');
   store.activate(srv);
   text = await (await fetch(`${base}/ac/config?id=${r.id}&token=${r.token}&v=0`)).text();
-  assert.match(text, /^DCAC \d+ 1 /);
+  assert.match(text, /^EAGLE \d+ 1 /);
 });
 
 test('permissões e servidor ativo por usuário', async () => {
@@ -188,19 +188,19 @@ test('validações', () => {
 });
 
 test('proteções: IDs sequenciais, batem com o include Pawn e cabem nos menus', () => {
-  const inc = fs.readFileSync(path.join(__dirname, '../../pawn/include/drizzie_ac.inc'), 'utf8');
-  const max = Number(/#define DCAC_MAX\s+\((\d+)\)/.exec(inc)[1]);
+  const inc = fs.readFileSync(path.join(__dirname, '../../pawn/include/eagleeye.inc'), 'utf8');
+  const max = Number(/#define EE_MAX\s+\((\d+)\)/.exec(inc)[1]);
   assert.strictEqual(PROTECTIONS.length, max);
   PROTECTIONS.forEach((p, i) => assert.strictEqual(p.id, i));
   // nomes do Pawn na mesma ordem
-  const names = /gDCAC_Names\[DCAC_MAX\]\[\] =\s*\{([\s\S]*?)\};/.exec(inc)[1].match(/"[^"]+"/g);
+  const names = /gEE_Names\[EE_MAX\]\[\] =\s*\{([\s\S]*?)\};/.exec(inc)[1].match(/"[^"]+"/g);
   assert.strictEqual(names.length, max);
   // defaults do Pawn iguais aos do bot
-  const defs = /gDCAC_Defaults\[DCAC_MAX\]\[E_DCAC_PROT\] =\s*\{([\s\S]*?)\n\};/.exec(inc)[1]
-    .match(/\{(true|false),\s*DCAC_ACTION_(WARN|KICK|BAN),\s*(\d+),\s*(\d+)\}/g);
+  const defs = /gEE_Defaults\[EE_MAX\]\[E_EE_PROT\] =\s*\{([\s\S]*?)\n\};/.exec(inc)[1]
+    .match(/\{(true|false),\s*EE_ACTION_(WARN|KICK|BAN),\s*(\d+),\s*(\d+)\}/g);
   assert.strictEqual(defs.length, max);
   defs.forEach((d, i) => {
-    const [, en, act, tol, val] = /\{(true|false),\s*DCAC_ACTION_(WARN|KICK|BAN),\s*(\d+),\s*(\d+)\}/.exec(d);
+    const [, en, act, tol, val] = /\{(true|false),\s*EE_ACTION_(WARN|KICK|BAN),\s*(\d+),\s*(\d+)\}/.exec(d);
     const exp = PROTECTIONS[i].defaults;
     assert.deepStrictEqual([en === 'true', ['WARN', 'KICK', 'BAN'].indexOf(act), +tol, +val], [exp.enabled, exp.action, exp.tolerance, exp.value], PROTECTIONS[i].key);
   });

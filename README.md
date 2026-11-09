@@ -117,4 +117,4 @@ Privado
 
 ## Anti-Cheat (SA-MP / open.mp) configurável pelo Discord
 
-Veja [`anticheat/README.md`](anticheat/README.md): include Pawn (`drizzie_ac.inc` / `drizzie_ac_fs.inc`) + bot do Discord com comandos `/ac` para ativar/desativar proteções.
+Veja [`eagleeye/README.md`](eagleeye/README.md): include Pawn (`eagleeye.inc` / `eagleeye_fs.inc`) + bot do Discord com comandos `/ac` para ativar/desativar proteções.

@@ -19,7 +19,7 @@ function randomCode(len) {
   return out;
 }
 
-const newServerId = () => `DC-${randomCode(6)}`;
+const newServerId = () => `EE-${randomCode(6)}`;
 const newLoginKey = () => `${randomCode(4)}-${randomCode(4)}-${randomCode(4)}`;
 const newToken = () => crypto.randomBytes(32).toString('hex');
 const hashToken = (token) => crypto.createHash('sha256').update(String(token)).digest('hex');
@@ -347,7 +347,7 @@ class Store {
   // ------------------------------------------------- exportar / importar
   exportConfig(server) {
     return {
-      formato: 'dcac-config',
+      formato: 'eagleeye-config',
       versao: 1,
       exportadoEm: new Date().toISOString(),
       servidor: server.name,
@@ -361,7 +361,7 @@ class Store {
 
   /** Valida e aplica um arquivo exportado. Lança Error com mensagem amigável. */
   importConfig(server, data) {
-    if (!data || data.formato !== 'dcac-config') throw new Error('Arquivo não é uma configuração do DCAC.');
+    if (!data || data.formato !== 'eagleeye-config') throw new Error('Arquivo não é uma configuração do EAGLE.');
     const protections = defaultProtectionState();
     for (const prot of PROTECTIONS) {
       const p = data.protections && data.protections[prot.key];
@@ -387,7 +387,7 @@ class Store {
   // ------------------------------------------ donos (arquivo donos.json)
   /**
    * donos.json:
-   *   { "<ID do Discord>": { "servidor": "Nome do servidor", "IDF": "DC-XXXXXX" } }
+   *   { "<ID do Discord>": { "servidor": "Nome do servidor", "IDF": "EE-XXXXXX" } }
    */
   getDono(userId) {
     return this.donos[userId] || null;

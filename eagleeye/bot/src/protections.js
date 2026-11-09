@@ -2,7 +2,7 @@
 
 /**
  * Lista de proteções do anti-cheat.
- * IMPORTANTE: os IDs DEVEM ser iguais aos de anticheat/pawn/include/drizzie_ac.inc
+ * IMPORTANTE: os IDs DEVEM ser iguais aos de eagleeye/pawn/include/eagleeye.inc
  *
  * action: 0 = aviso (só loga), 1 = kick, 2 = ban
  * tolerance: quantas detecções em 60s antes de punir

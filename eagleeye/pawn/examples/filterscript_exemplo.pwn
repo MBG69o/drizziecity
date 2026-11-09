@@ -1,9 +1,9 @@
 /*
- *  Exemplo de filterscript compatível com o Drizzie City Anti-Cheat.
+ *  Exemplo de filterscript compatível com o EagleEYE Anti-Cheat.
  */
 #define FILTERSCRIPT
 #include <a_samp>   // ou <open.mp>
-#include <drizzie_ac_fs>
+#include <eagleeye_fs>
 
 public OnPlayerCommandText(playerid, cmdtext[])
 {

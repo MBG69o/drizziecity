@@ -1,15 +1,15 @@
-# 🛡️ Drizzie City Anti-Cheat (DCAC) v2
+# 🦅 EagleEYE Anti-Cheat
 
 Anti-cheat **server-side** para **SA-MP 0.3.7 / 0.3.DL** e **open.mp** com **34 proteções**, configurado pelo **Discord** com comandos `/ac`.
 
-**Vários servidores, um bot.** Cada servidor que usa o include recebe um **ID fixo** (ex.: `DC-7K2QMX`) e uma **chave de login**. O dono faz `/ac login` no Discord e passa a controlar as proteções daquele servidor. Um mesmo bot pode atender quantos servidores você quiser, cada um com a sua configuração, seus donos e seu canal de logs.
+**Vários servidores, um bot.** Cada servidor que usa o include recebe um **ID fixo** (ex.: `EE-7K2QMX`) e uma **chave de login**. O dono faz `/ac login` no Discord e passa a controlar as proteções daquele servidor. Um mesmo bot pode atender quantos servidores você quiser, cada um com a sua configuração, seus donos e seu canal de logs.
 
 ```
-┌──────────────────────┐  1º boot: GET /ac/register  ┌─────────────────────┐   /ac login id chave   ┌──────────┐
-│ Servidor A (DC-7K2..)│ ──────────────────────────▶ │                     │ ◀───────────────────── │ Discord  │
-│ Servidor B (DC-Q9M..)│ ── GET /ac/config (10s) ──▶ │  Bot DCAC (Node.js) │ ─── logs por servidor ▶│ (donos)  │
-│ Servidor C ...       │ ── POST /ac/report ───────▶ │                     │                        │          │
-└──────────────────────┘                             └─────────────────────┘                        └──────────┘
+┌──────────────────────┐  1º boot: GET /ac/register  ┌──────────────────────┐   /ac login id chave   ┌──────────┐
+│ Servidor A (EE-7K2..)│ ──────────────────────────▶ │                      │ ◀───────────────────── │ Discord  │
+│ Servidor B (EE-Q9M..)│ ── GET /ac/config (10s) ──▶ │ Bot EagleEYE (Node)  │ ─── logs por servidor ▶│ (donos)  │
+│ Servidor C ...       │ ── POST /ac/report ───────▶ │                      │                        │          │
+└──────────────────────┘                             └──────────────────────┘                        └──────────┘
 ```
 
 O servidor do jogo usa só o **native `HTTP()`**, que já vem no SA-MP e no open.mp. Por isso **não precisa de nenhum plugin `.dll`/`.so` extra**.
@@ -18,28 +18,28 @@ O servidor do jogo usa só o **native `HTTP()`**, que já vem no SA-MP e no open
 
 | Arquivo | Para quê |
 |---|---|
-| `pawn/include/drizzie_ac.inc` | Include principal. Vai no **gamemode** e contém todas as proteções. |
-| `pawn/include/drizzie_ac_fs.inc` | Include para **filterscripts**. Evita falsos positivos quando um FS dá dinheiro, armas ou vida, teleporta, cria checkpoints ou pickups. |
+| `pawn/include/eagleeye.inc` | Include principal. Vai no **gamemode** e contém todas as proteções. |
+| `pawn/include/eagleeye_fs.inc` | Include para **filterscripts**. Evita falsos positivos quando um FS dá dinheiro, armas ou vida, teleporta, cria checkpoints ou pickups. |
 | `pawn/examples/` | Exemplos de gamemode e filterscript. |
 | `bot/` | Bot do Discord + API que os servidores consultam. |
 
 ## 🔑 ID fixo e login
 
-1. Na **primeira** inicialização, o gamemode se registra sozinho no bot e salva a identidade em `scriptfiles/dcac_servidor.cfg`.
+1. Na **primeira** inicialização, o gamemode se registra sozinho no bot e salva a identidade em `scriptfiles/eagleeye_servidor.cfg`.
 2. O console mostra:
    ```
-   [DCAC] ID do servidor: DC-7K2QMX | Chave de login: ABCD-EFGH-JKLM
-   [DCAC] No Discord use: /ac login id:DC-7K2QMX chave:ABCD-EFGH-JKLM
+   [EagleEYE] ID do servidor: EE-7K2QMX | Chave de login: ABCD-EFGH-JKLM
+   [EagleEYE] No Discord use: /ac login id:EE-7K2QMX chave:ABCD-EFGH-JKLM
    ```
-   Para ver de novo, digite `dcac` no console ou no RCON.
-3. No **Discord do projeto**, o cliente roda `/ac login id:DC-7K2QMX chave:ABCD-EFGH-JKLM`. Quem faz o login vira **dono** do servidor, e o bot salva o vínculo em `data/donos.json`:
+   Para ver de novo, digite `eagleeye` no console ou no RCON.
+3. No **Discord do projeto**, o cliente roda `/ac login id:EE-7K2QMX chave:ABCD-EFGH-JKLM`. Quem faz o login vira **dono** do servidor, e o bot salva o vínculo em `data/donos.json`:
    ```json
    {
-     "294929472947294828472": { "servidor": "Drizzie RP", "IDF": "DC-7K2QMX" }
+     "294929472947294828472": { "servidor": "Drizzie RP", "IDF": "EE-7K2QMX" }
    }
    ```
 4. **Confirmação:** o servidor nasce com o anti-cheat **desligado**. Depois do login, o bot mostra o servidor encontrado com o botão **✅ Confirmar e ativar**. Só esse dono pode clicar. A qualquer momento, `/ac meuservidor` busca o servidor pelo ID do Discord do cliente e mostra o mesmo botão.
-5. O ID **nunca muda**, mesmo reiniciando o servidor ou o bot. **Faça backup do `dcac_servidor.cfg`**: ele guarda o token secreto que identifica o servidor.
+5. O ID **nunca muda**, mesmo reiniciando o servidor ou o bot. **Faça backup do `eagleeye_servidor.cfg`**: ele guarda o token secreto que identifica o servidor.
 
 Segurança:
 - O bot guarda só o **hash** do token.
@@ -47,7 +47,7 @@ Segurança:
 - Login errado 5 vezes bloqueia a pessoa por 10 minutos.
 - O registro de servidores é limitado a 5 por IP por hora.
 
-Perdeu o `dcac_servidor.cfg` mas quer manter o ID? Um dono usa `/ac token`: o bot gera um token novo e mostra como recriar o arquivo. Outra opção é fixar no gamemode com `#define DCAC_SERVER_ID` e `#define DCAC_SERVER_TOKEN`.
+Perdeu o `eagleeye_servidor.cfg` mas quer manter o ID? Um dono usa `/ac token`: o bot gera um token novo e mostra como recriar o arquivo. Outra opção é fixar no gamemode com `#define EE_SERVER_ID` e `#define EE_SERVER_TOKEN`.
 
 ## 🔒 Proteções (34)
 
@@ -121,28 +121,28 @@ Todas podem ser ligadas e desligadas pelo Discord. No painel elas aparecem divid
 3. Configure e inicie (Node.js 18 ou superior):
 
 ```bash
-cd anticheat/bot
+cd eagleeye/bot
 cp .env.example .env      # preencha DISCORD_TOKEN e DISCORD_GUILD_ID (Discord do projeto)
 npm install
-npm start                 # ou: pm2 start src/index.js --name dcac
+npm start                 # ou: pm2 start src/index.js --name eagleeye
 ```
 
 - **Bot público** (outros donos de servidor podem usar): deixe `AC_REGISTER_KEY` vazio.
-- **Bot privado**: defina `AC_REGISTER_KEY`. Só gamemodes com `#define DCAC_REGISTER_KEY "mesma_chave"` conseguem se registrar.
+- **Bot privado**: defina `AC_REGISTER_KEY`. Só gamemodes com `#define EE_REGISTER_KEY "mesma_chave"` conseguem se registrar.
 - Libere a porta `AC_API_PORT` (padrão 8090) no firewall para os servidores do jogo.
 
 ### 2. Gamemode
 
-1. Copie `pawn/include/drizzie_ac.inc` (e `drizzie_ac_fs.inc`) para a pasta `pawno/include` ou `qawno/include`.
+1. Copie `pawn/include/eagleeye.inc` (e `eagleeye_fs.inc`) para a pasta `pawno/include` ou `qawno/include`.
 2. Confira se a pasta `scriptfiles/` existe no servidor.
 3. No topo do gamemode, **logo depois** do `a_samp`/`open.mp` e **antes** dos outros includes:
 
 ```pawn
 #include <open.mp>                     // ou <a_samp>
 
-#define DCAC_API_HOST "ip-do-bot:8090"  // sem http://
-// #define DCAC_REGISTER_KEY "..."      // só se o bot exigir
-#include <drizzie_ac>
+#define EE_API_HOST "ip-do-bot:8090"  // sem http://
+// #define EE_REGISTER_KEY "..."      // só se o bot exigir
+#include <eagleeye>
 
 #include <sscanf2>
 #include <zcmd>
@@ -156,7 +156,7 @@ npm start                 # ou: pm2 start src/index.js --name dcac
 ```pawn
 #define FILTERSCRIPT
 #include <open.mp>          // ou <a_samp>
-#include <drizzie_ac_fs>
+#include <eagleeye_fs>
 ```
 
 ## 💬 Comandos do Discord
@@ -224,34 +224,34 @@ As alterações chegam ao servidor em até `intervalo` segundos (padrão 10), **
 
 ```pawn
 // Callbacks opcionais
-public OnAntiCheatDetect(playerid, code, const detail[])            { return 1; } // retorne 0 para ignorar
-public OnAntiCheatPunish(playerid, code, action, const detail[])    { return 0; } // retorne 1 se você mesmo punir (ex.: ban no MySQL)
-public OnAntiCheatAdminCheck(playerid)                              { return IsPlayerAdmin(playerid); } // quem vê os avisos no jogo
+public OnEagleEyeDetect(playerid, code, const detail[])            { return 1; } // retorne 0 para ignorar
+public OnEagleEyePunish(playerid, code, action, const detail[])    { return 0; } // retorne 1 se você mesmo punir (ex.: ban no MySQL)
+public OnEagleEyeAdminCheck(playerid)                              { return IsPlayerAdmin(playerid); } // quem vê os avisos no jogo
 
 // Funções
-AC_GetServerId(id);                        // ID fixo do servidor
-AC_SetPlayerImmune(playerid, true);        // imunidade total (ex.: admin em serviço)
-AC_PositionImmunity(playerid, 3000);       // imunidade de posição por X ms (elevadores, objetos móveis…)
-AC_AllowWeapon(playerid, weaponid, ammo);  // libera uma arma recebida por um meio que o AC não vê
-AC_IsEnabled(DCAC_GODMODE);                // a proteção está ativa?
-AC_GetServerMoney(playerid);               // dinheiro real (servidor)
-AC_ReloadConfig();                         // força buscar a configuração agora
-AC_CommandFloodCheck(playerid, cmdtext);   // para Pawn.CMD: chame em OnPlayerCommandReceived (true = bloquear)
+EE_GetServerId(id);                        // ID fixo do servidor
+EE_SetPlayerImmune(playerid, true);        // imunidade total (ex.: admin em serviço)
+EE_PositionImmunity(playerid, 3000);       // imunidade de posição por X ms (elevadores, objetos móveis…)
+EE_AllowWeapon(playerid, weaponid, ammo);  // libera uma arma recebida por um meio que o AC não vê
+EE_IsEnabled(EE_GODMODE);                // a proteção está ativa?
+EE_GetServerMoney(playerid);               // dinheiro real (servidor)
+EE_ReloadConfig();                         // força buscar a configuração agora
+EE_CommandFloodCheck(playerid, cmdtext);   // para Pawn.CMD: chame em OnPlayerCommandReceived (true = bloquear)
 ```
 
-Defines opcionais (antes do `#include <drizzie_ac>`):
-- `DCAC_REGISTER_KEY`, `DCAC_SERVER_ID` + `DCAC_SERVER_TOKEN`, `DCAC_ID_FILE`;
-- `DCAC_TICK_MS`, `DCAC_HIT_WINDOW_MS`, `DCAC_REPORT_COOLDOWN`, `DCAC_COLOR`;
-- `DCAC_KEEP_STUNT_BONUS` (por padrão o AC desliga o stunt bonus, que dá dinheiro no cliente).
+Defines opcionais (antes do `#include <eagleeye>`):
+- `EE_REGISTER_KEY`, `EE_SERVER_ID` + `EE_SERVER_TOKEN`, `EE_ID_FILE`;
+- `EE_TICK_MS`, `EE_HIT_WINDOW_MS`, `EE_REPORT_COOLDOWN`, `EE_COLOR`;
+- `EE_KEEP_STUNT_BONUS` (por padrão o AC desliga o stunt bonus, que dá dinheiro no cliente).
 
 ## ⚠️ Possíveis falsos positivos
 
 - **Máquinas de refrigerante e lanchonetes do singleplayer** curam no cliente. Remova-as com `RemoveBuildingForPlayer` ou desligue a proteção **Vida**.
 - **Ammu-Nation e interiores do singleplayer** dão armas no cliente. Desative as entradas com `DisableInteriorEnterExits()`.
 - **Pickups e checkpoints do streamer** (`CreateDynamicPickup`/`CP`) não passam pelas proteções 27 e 28. Os natives normais passam. `AddStaticPickup` é convertido em `CreatePickup` para poder ser validado.
-- **Objetos móveis** (elevadores do streamer): use `AC_PositionImmunity`.
+- **Objetos móveis** (elevadores do streamer): use `EE_PositionImmunity`.
 - **Sistemas de dano customizado** que alteram o dano das armas: desligue **Dano hack**.
-- **Pawn.CMD**: os comandos não passam por `OnPlayerCommandText`. Use `AC_CommandFloodCheck` no `OnPlayerCommandReceived`.
+- **Pawn.CMD**: os comandos não passam por `OnPlayerCommandText`. Use `EE_CommandFloodCheck` no `OnPlayerCommandReceived`.
 - **Godmode, munição e aimbot** são heurísticas e dependem de lag e sincronização. Comece em `aviso`.
 - Com lag forte, velocidade, teleporte e airbreak podem disparar. Ajuste com `/ac protecao tolerancia` e `/ac protecao limite`, ou use o preset **Leve** no começo.
 
@@ -260,5 +260,5 @@ Recomendação: deixe as proteções em **aviso** por alguns dias, acompanhe o c
 ## 🧪 Testes do bot
 
 ```bash
-cd anticheat/bot && npm test
+cd eagleeye/bot && npm test
 ```
