@@ -27,7 +27,9 @@ function headerLines(store, server, guildId) {
   const log = server.logChannels[guildId];
   return [
     `**Servidor:** ${escapeMarkdown(server.name)} (\`${server.id}\`)`,
-    `**Anti-cheat:** ${server.global ? '🟢 LIGADO' : '🔴 DESLIGADO'} · ${enabled}/${PROTECTIONS.length} proteções ativas`,
+    server.activated === false
+      ? '**Anti-cheat:** ⏳ aguardando o dono confirmar (`/ac meuservidor`)'
+      : `**Anti-cheat:** ${server.global ? '🟢 LIGADO' : '🔴 DESLIGADO'} · ${enabled}/${PROTECTIONS.length} proteções ativas`,
     serverLine(store, server),
     `**Logs:** ${log ? `<#${log}>` : 'não definido (use `/ac logs`)'}`,
   ];

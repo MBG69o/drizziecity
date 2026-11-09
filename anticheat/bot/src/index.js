@@ -13,6 +13,8 @@ function fail(msg) {
 }
 
 if (!process.env.DISCORD_TOKEN) fail('Defina DISCORD_TOKEN no .env.');
+const projectGuildId = (process.env.DISCORD_GUILD_ID || '').trim();
+if (!/^\d{5,25}$/.test(projectGuildId)) fail('Defina DISCORD_GUILD_ID no .env com o ID do Discord do projeto (o bot só funciona nele).');
 
 const registerKey = process.env.AC_REGISTER_KEY || '';
 if (registerKey && !/^[A-Za-z0-9_-]{8,128}$/.test(registerKey)) {
@@ -28,7 +30,7 @@ const bot = createDiscordBot({
   store,
   permissions,
   token: process.env.DISCORD_TOKEN,
-  guildId: process.env.DISCORD_GUILD_ID || null,
+  projectGuildId,
 });
 
 startApi({

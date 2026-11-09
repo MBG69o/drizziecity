@@ -17,7 +17,9 @@ const { PROTECTIONS } = require('./protections');
 function buildConfigResponse(state, clientVersion, commands) {
   const lines = [];
   if (clientVersion !== state.version) {
-    lines.push(`DCAC ${state.version} ${state.global ? 1 : 0} ${state.pollSeconds}`);
+    // só liga se o dono já confirmou a ativação no Discord
+    const on = state.global && state.activated !== false;
+    lines.push(`DCAC ${state.version} ${on ? 1 : 0} ${state.pollSeconds}`);
     if (state.loginKey) lines.push(`K ${state.loginKey}`);
     for (const p of PROTECTIONS) {
       const s = state.protections[p.key];

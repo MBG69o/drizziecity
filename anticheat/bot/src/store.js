@@ -47,6 +47,8 @@ function defaultServer(id) {
     createdIp: null,
     version: 1,
     global: true,
+    // novo servidor fica desligado até o dono confirmar no Discord
+    activated: false,
     pollSeconds: 10,
     protections: defaultProtectionState(),
     whitelist: [],
@@ -65,16 +67,19 @@ function defaultServer(id) {
  *
  *   data/servers/<ID>.json   configuração de cada servidor
  *   data/history/<ID>.jsonl  detecções
- *   data/guilds.json         servidores do Discord -> servidores do jogo vinculados
+ *   data/donos.json          dono (ID do Discord) -> { servidor, IDF }
+ *   data/selecao.json        servidor escolhido com /ac usar (por usuário)
  */
 class Store {
   constructor(dir) {
     this.dir = dir;
     this.serversDir = path.join(dir, 'servers');
     this.historyDir = path.join(dir, 'history');
-    this.guildsFile = path.join(dir, 'guilds.json');
+    this.donosFile = path.join(dir, 'donos.json');
+    this.selectionFile = path.join(dir, 'selecao.json');
     this.servers = new Map();
-    this.guilds = {};
+    this.donos = {};
+    this.selection = {};
     this.history = new Map();
     this.status = new Map();
   }
@@ -87,6 +92,7 @@ class Store {
       const raw = JSON.parse(fs.readFileSync(path.join(this.serversDir, file), 'utf8'));
       const base = defaultServer(raw.id);
       const server = { ...base, ...raw, protections: { ...base.protections } };
+      if (raw.activated === undefined) server.activated = true; // dados antigos: já estavam ativos
       // novas proteções recebem o valor padrão
       for (const prot of PROTECTIONS) {
         const saved = raw.protections && raw.protections[prot.key];
@@ -94,7 +100,8 @@ class Store {
       }
       this.servers.set(server.id, server);
     }
-    if (fs.existsSync(this.guildsFile)) this.guilds = JSON.parse(fs.readFileSync(this.guildsFile, 'utf8'));
+    if (fs.existsSync(this.donosFile)) this.donos = JSON.parse(fs.readFileSync(this.donosFile, 'utf8'));
+    if (fs.existsSync(this.selectionFile)) this.selection = JSON.parse(fs.readFileSync(this.selectionFile, 'utf8'));
     return this;
   }
 
@@ -108,8 +115,12 @@ class Store {
     this.writeJson(path.join(this.serversDir, `${server.id}.json`), server);
   }
 
-  saveGuilds() {
-    this.writeJson(this.guildsFile, this.guilds);
+  saveDonos() {
+    this.writeJson(this.donosFile, this.donos);
+  }
+
+  saveSelection() {
+    this.writeJson(this.selectionFile, this.selection);
   }
 
   // ------------------------------------------------------------- servidores
@@ -148,6 +159,7 @@ class Store {
     mutator(server);
     if (bump) server.version += 1;
     this.saveServer(server);
+    this.syncDonoNames(server);
     return server;
   }
 
@@ -213,44 +225,65 @@ class Store {
     fs.appendFile(path.join(this.historyDir, `${server.id}.jsonl`), `${JSON.stringify(det)}\n`, () => {});
   }
 
-  // ---------------------------------------------- vínculo com o Discord
-  getGuild(guildId) {
-    return this.guilds[guildId] || { active: null, servers: [] };
+  // ------------------------------------------ donos (arquivo donos.json)
+  /**
+   * donos.json:
+   *   { "<ID do Discord>": { "servidor": "Nome do servidor", "IDF": "DC-XXXXXX" } }
+   */
+  getDono(userId) {
+    return this.donos[userId] || null;
   }
 
-  linkGuild(guildId, server) {
-    const g = this.getGuild(guildId);
-    if (!g.servers.includes(server.id)) g.servers.push(server.id);
-    g.active = server.id;
-    this.guilds[guildId] = g;
-    this.saveGuilds();
+  setDono(userId, server) {
+    this.donos[userId] = { servidor: server.name, IDF: server.id };
+    this.saveDonos();
   }
 
-  unlinkGuild(guildId, server) {
-    const g = this.getGuild(guildId);
-    g.servers = g.servers.filter((id) => id !== server.id);
-    if (g.active === server.id) g.active = g.servers[0] || null;
-    this.guilds[guildId] = g;
-    this.saveGuilds();
-    this.updateServer(server, (s) => { delete s.logChannels[guildId]; }, { bump: false });
+  removeDono(userId) {
+    if (!this.donos[userId]) return;
+    delete this.donos[userId];
+    this.saveDonos();
   }
 
-  setActive(guildId, server) {
-    const g = this.getGuild(guildId);
-    if (!g.servers.includes(server.id)) return false;
-    g.active = server.id;
-    this.guilds[guildId] = g;
-    this.saveGuilds();
-    return true;
+  /** Servidor do dono, buscado pelo ID do Discord dele. */
+  serverOfDono(userId) {
+    const d = this.getDono(userId);
+    return d ? this.getServer(d.IDF) : null;
   }
 
-  activeServer(guildId) {
-    const g = this.getGuild(guildId);
-    return g.active ? this.getServer(g.active) : null;
+  syncDonoNames(server) {
+    let changed = false;
+    for (const d of Object.values(this.donos)) {
+      if (d.IDF === server.id && d.servidor !== server.name) { d.servidor = server.name; changed = true; }
+    }
+    if (changed) this.saveDonos();
   }
 
-  isLinked(guildId, server) {
-    return this.getGuild(guildId).servers.includes(server.id);
+  activate(server) {
+    return this.updateServer(server, (s) => { s.activated = true; s.global = true; });
+  }
+
+  // ------------------------------------------- servidor ativo por usuário
+  /** Servidores que o usuário pode configurar (todos, para administradores do bot). */
+  serversOfUser(userId, isBotAdmin = false) {
+    return [...this.servers.values()].filter((s) => isBotAdmin || s.owners.includes(userId) || s.admins.includes(userId));
+  }
+
+  setSelection(userId, server) {
+    this.selection[userId] = server.id;
+    this.saveSelection();
+  }
+
+  /** Servidor escolhido com /ac usar; se não houver, o servidor do dono (donos.json). */
+  activeServerFor(userId) {
+    const chosen = this.selection[userId] && this.getServer(this.selection[userId]);
+    return chosen || this.serverOfDono(userId);
+  }
+
+  clearSelection(userId) {
+    if (!this.selection[userId]) return;
+    delete this.selection[userId];
+    this.saveSelection();
   }
 }
 

@@ -49,7 +49,7 @@ test('config completa inclui chave de login e todas as proteções', async () =>
   const r = await register();
   const text = await (await fetch(`${base}/ac/config?id=${r.id}&token=${r.token}&v=0&players=5&max=100&ack=0`)).text();
   const lines = text.trim().split('\n');
-  assert.strictEqual(lines[0], 'DCAC 1 1 10');
+  assert.strictEqual(lines[0], 'DCAC 1 0 10'); // desligado até o dono confirmar
   assert.strictEqual(lines[1], `K ${r.key}`);
   assert.strictEqual(lines.filter((l) => l.startsWith('P ')).length, PROTECTIONS.length);
   assert.strictEqual(lines.at(-1), 'END');
@@ -111,32 +111,60 @@ test('novo token invalida o antigo', async () => {
   assert.strictEqual((await fetch(`${base}/ac/config?id=${r.id}&token=${tok}&v=0`)).status, 200);
 });
 
-test('vínculo com o Discord e permissões', async () => {
+test('donos.json salva o IDF de cada servidor pelo ID do Discord do dono', async () => {
+  const r = await register('Drizzie%20RP');
+  const srv = store.getServer(r.id);
+  srv.owners.push('294929472947294828472');
+  store.setDono('294929472947294828472', srv);
+  const file = JSON.parse(fs.readFileSync(path.join(dir, 'donos.json'), 'utf8'));
+  assert.deepStrictEqual(file['294929472947294828472'], { servidor: 'Drizzie RP', IDF: r.id });
+  assert.strictEqual(store.serverOfDono('294929472947294828472').id, r.id);
+  assert.strictEqual(store.activeServerFor('294929472947294828472').id, r.id);
+  // renomear atualiza o donos.json
+  store.updateServer(srv, (s) => { s.name = 'Drizzie City'; }, { bump: false });
+  assert.strictEqual(store.getDono('294929472947294828472').servidor, 'Drizzie City');
+});
+
+test('anti-cheat só liga depois que o dono confirma', async () => {
   const r = await register();
   const srv = store.getServer(r.id);
-  store.linkGuild('g1', srv);
-  assert.strictEqual(store.activeServer('g1').id, r.id);
-  srv.owners.push('u1');
-  srv.admins.push('u2');
-  srv.roles.push('r1');
+  assert.strictEqual(srv.activated, false);
+  let text = await (await fetch(`${base}/ac/config?id=${r.id}&token=${r.token}&v=0`)).text();
+  assert.match(text, /^DCAC \d+ 0 /, 'antes da confirmação o global vai desligado');
+  store.activate(srv);
+  text = await (await fetch(`${base}/ac/config?id=${r.id}&token=${r.token}&v=0`)).text();
+  assert.match(text, /^DCAC \d+ 1 /);
+});
+
+test('permissões e servidor ativo por usuário', async () => {
+  const a = store.getServer((await register()).id);
+  const b = store.getServer((await register()).id);
+  a.owners.push('u1'); a.admins.push('u2'); a.roles.push('r1');
+  b.owners.push('u2');
   const perms = new Permissions({ botAdminIds: ['u9'] });
   const it = (id, roles = []) => ({ user: { id }, member: { roles } });
-  assert.ok(perms.isOwner(srv, it('u1')));
-  assert.ok(!perms.isOwner(srv, it('u2')));
-  assert.ok(perms.isAllowed(srv, it('u2')));
-  assert.ok(perms.isAllowed(srv, it('u3', ['r1'])));
-  assert.ok(!perms.isAllowed(srv, it('u3')));
-  assert.ok(perms.isOwner(srv, it('u9')));
-  store.unlinkGuild('g1', srv);
-  assert.strictEqual(store.activeServer('g1'), null);
+  assert.ok(perms.isOwner(a, it('u1')));
+  assert.ok(!perms.isOwner(a, it('u2')));
+  assert.ok(perms.isAllowed(a, it('u2')));
+  assert.ok(perms.isAllowed(a, it('u3', ['r1'])));
+  assert.ok(!perms.isAllowed(a, it('u3')));
+  assert.ok(perms.isOwner(a, it('u9')));
+  const ofU2 = store.serversOfUser('u2').map((s) => s.id).sort();
+  assert.deepStrictEqual(ofU2, [a.id, b.id].sort());
+  store.setDono('u2', b);
+  assert.strictEqual(store.activeServerFor('u2').id, b.id);
+  store.setSelection('u2', a);
+  assert.strictEqual(store.activeServerFor('u2').id, a.id);
+  store.clearSelection('u2');
+  assert.strictEqual(store.activeServerFor('u2').id, b.id);
 });
 
 test('dados persistem após reiniciar o bot', async () => {
   const r = await register();
-  store.linkGuild('g2', store.getServer(r.id));
+  store.setDono('u7', store.getServer(r.id));
   const again = new Store(dir).load();
   assert.ok(again.authServer(r.id, r.token).server);
-  assert.strictEqual(again.activeServer('g2').id, r.id);
+  assert.strictEqual(again.serverOfDono('u7').id, r.id);
 });
 
 test('registro com chave obrigatória e limite por IP', async () => {

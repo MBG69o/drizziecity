@@ -2,6 +2,7 @@
 
 const {
   Client, GatewayIntentBits, Events, MessageFlags, EmbedBuilder, escapeMarkdown,
+  ActionRowBuilder, ButtonBuilder, ButtonStyle,
 } = require('discord.js');
 const { commands } = require('./commands');
 const {
@@ -15,11 +16,12 @@ const MAX_WHITELIST = 64;
 const LOGIN_MAX_FAILS = 5;
 const LOGIN_WINDOW_MS = 10 * 60 * 1000;
 // subcomandos que funcionam sem servidor ativo
-const NO_SERVER_SUBS = new Set(['login', 'servidores', 'usar']);
+const NO_SERVER_SUBS = new Set(['login', 'servidores', 'usar', 'meuservidor']);
 // subcomandos/grupos que exigem ser dono do servidor
 const OWNER_SUBS = new Set(['logout', 'novachave', 'token']);
 
-function createDiscordBot({ store, permissions, token, guildId, logger = console }) {
+function createDiscordBot({ store, permissions, token, projectGuildId, logger = console }) {
+  if (!projectGuildId) throw new Error('projectGuildId é obrigatório (o bot só funciona no Discord do projeto).');
   const client = new Client({ intents: [GatewayIntentBits.Guilds] });
   const logQueues = new Map(); // channelId -> [embeds]
   const loginFails = new Map(); // userId -> [timestamps]
@@ -103,57 +105,88 @@ function createDiscordBot({ store, permissions, token, guildId, logger = console
         ];
       }
       choices = choices.filter((c) => c.name.toLowerCase().includes(q) || c.value.includes(q));
-    } else if (focused.name === 'id' && interaction.guildId) {
-      choices = store.getGuild(interaction.guildId).servers
-        .map((id) => store.getServer(id)).filter(Boolean)
+    } else if (focused.name === 'id') {
+      choices = store.serversOfUser(interaction.user.id, permissions.isBotAdmin(interaction))
         .map((s) => ({ name: `${s.name} (${s.id})`.slice(0, 100), value: s.id }))
         .filter((c) => c.name.toLowerCase().includes(q));
     }
     return interaction.respond(choices.slice(0, 25));
   }
 
+  // ----------------------------------------- confirmação de ativação
+  function activationMessage(server, userId) {
+    const st = store.getStatus(server);
+    const embed = new EmbedBuilder()
+      .setTitle('🛡️ Confirmar ativação do anti-cheat')
+      .setColor(server.activated ? COLORS.ok : COLORS.warn)
+      .setDescription([
+        `Encontrei este servidor vinculado ao seu Discord (<@${userId}>):`,
+        '',
+        `**Servidor:** ${escapeMarkdown(server.name)}`,
+        `**IDF:** \`${server.id}\``,
+        `**Situação:** ${store.isServerOnline(server) ? `🟢 online (${st.players}/${st.maxPlayers} jogadores)` : '🔴 offline'}`,
+        `**Anti-cheat:** ${server.activated ? '🟢 ativado' : '⏳ aguardando sua confirmação'}`,
+        '',
+        server.activated
+          ? 'O anti-cheat já está ativo. Use `/ac painel` para configurar as proteções.'
+          : 'Clique em **Confirmar** para ligar o anti-cheat nesse servidor. Ele começa a valer em até alguns segundos.',
+      ].join('\n'));
+    const components = server.activated ? [] : [new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId(`dcac:confirm:${server.id}:${userId}`).setLabel('Confirmar e ativar').setEmoji('✅').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId(`dcac:cancel:${server.id}:${userId}`).setLabel('Agora não').setStyle(ButtonStyle.Secondary),
+    )];
+    return { embeds: [embed], components, flags: MessageFlags.Ephemeral, allowedMentions: { parse: [] } };
+  }
+
   // ---------------------------------------------------- servidores (login)
   async function handleServerCommands(interaction, sub) {
-    const gid = interaction.guildId;
+    const userId = interaction.user.id;
 
     if (sub === 'login') {
-      if (loginBlocked(interaction.user.id)) return reply(interaction, '⛔ Muitas tentativas erradas. Aguarde 10 minutos.');
+      if (loginBlocked(userId)) return reply(interaction, '⛔ Muitas tentativas erradas. Aguarde 10 minutos.');
       const server = store.getServer(interaction.options.getString('id', true));
       const key = interaction.options.getString('chave', true);
       if (!server || !store.checkLoginKey(server, key)) {
-        loginFails.get(interaction.user.id).push(Date.now());
+        loginFails.get(userId).push(Date.now());
         audit(interaction, server, 'login FALHOU');
         return reply(interaction, '❌ ID ou chave inválidos. Confira no console do servidor (digite `dcac` no console).');
       }
-      store.linkGuild(gid, server);
       store.updateServer(server, (s) => {
-        if (!s.owners.includes(interaction.user.id)) s.owners.push(interaction.user.id);
+        if (!s.owners.includes(userId)) s.owners.push(userId);
       }, { bump: false });
+      // salva no donos.json: { "<ID do Discord>": { servidor, IDF } }
+      store.setDono(userId, server);
+      store.clearSelection(userId);
       audit(interaction, server, 'login');
-      return reply(interaction, [
-        `✅ Login feito! ${serverLabel(server)} agora está vinculado a este Discord e é o servidor ativo.`,
-        'Você virou **dono** desse servidor no anti-cheat.',
-        '',
-        'Próximos passos: `/ac logs canal:#canal` para receber as detecções e `/ac painel` para configurar as proteções.',
-      ].join('\n'));
+      return interaction.reply(activationMessage(server, userId));
+    }
+
+    if (sub === 'meuservidor') {
+      // busca o servidor do cliente pelo ID do Discord dele
+      const server = store.serverOfDono(userId);
+      if (!server) return reply(interaction, '❌ Não encontrei nenhum servidor registrado no seu nome. Use `/ac login id:<IDF> chave:<CHAVE>` com os dados do console do servidor.');
+      return interaction.reply(activationMessage(server, userId));
     }
 
     if (sub === 'servidores') {
-      const g = store.getGuild(gid);
-      if (!g.servers.length) return reply(interaction, 'Nenhum servidor vinculado. Use `/ac login id:<ID> chave:<CHAVE>` com os dados do console do servidor.');
-      const lines = g.servers.map((id) => store.getServer(id)).filter(Boolean).map((s) => {
+      const list = store.serversOfUser(userId, permissions.isBotAdmin(interaction));
+      if (!list.length) return reply(interaction, 'Você não tem acesso a nenhum servidor. Use `/ac login id:<IDF> chave:<CHAVE>`.');
+      const active = store.activeServerFor(userId);
+      const lines = list.slice(0, 50).map((s) => {
         const online = store.isServerOnline(s) ? '🟢' : '🔴';
-        const active = g.active === s.id ? ' ⬅️ **ativo**' : '';
-        return `${online} ${serverLabel(s)}${active}`;
+        const on = s.activated ? '' : ' · ⏳ não confirmado';
+        const mark = active && active.id === s.id ? ' ⬅️ **ativo**' : '';
+        return `${online} ${serverLabel(s)}${on}${mark}`;
       });
-      const embed = new EmbedBuilder().setTitle('🖥️ Servidores vinculados').setColor(COLORS.info).setDescription(lines.join('\n'))
-        .setFooter({ text: 'Use /ac usar id:<ID> para trocar o servidor ativo' });
+      const embed = new EmbedBuilder().setTitle('🖥️ Seus servidores').setColor(COLORS.info).setDescription(lines.join('\n').slice(0, 4000))
+        .setFooter({ text: 'Use /ac usar id:<IDF> para trocar o servidor que os comandos configuram' });
       return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
     }
 
     if (sub === 'usar') {
       const server = store.getServer(interaction.options.getString('id', true));
-      if (!server || !store.setActive(gid, server)) return reply(interaction, '❌ Esse servidor não está vinculado a este Discord. Use `/ac login`.');
+      if (!server || !permissions.isAllowed(server, interaction)) return reply(interaction, '❌ Você não tem acesso a esse servidor.');
+      store.setSelection(userId, server);
       return reply(interaction, `✅ Servidor ativo: ${serverLabel(server)}.`);
     }
     return undefined;
@@ -161,14 +194,13 @@ function createDiscordBot({ store, permissions, token, guildId, logger = console
 
   // ---------------------------------------------------------- handlers
   async function handleCommand(interaction) {
-    if (!interaction.guildId) return reply(interaction, 'Use este comando dentro de um servidor do Discord.');
     const group = interaction.options.getSubcommandGroup(false);
     const sub = interaction.options.getSubcommand();
 
     if (!group && NO_SERVER_SUBS.has(sub)) return handleServerCommands(interaction, sub);
 
-    const server = store.activeServer(interaction.guildId);
-    if (!server) return reply(interaction, '❌ Nenhum servidor vinculado a este Discord. Use `/ac login id:<ID> chave:<CHAVE>` (o ID e a chave aparecem no console do servidor).');
+    const server = store.activeServerFor(interaction.user.id);
+    if (!server) return reply(interaction, '❌ Você não tem nenhum servidor. Use `/ac login id:<IDF> chave:<CHAVE>` (o IDF e a chave aparecem no console do servidor).');
     if (!permissions.isAllowed(server, interaction)) {
       return reply(interaction, `⛔ Você não tem permissão para configurar ${serverLabel(server)}. Peça a um dono para usar \`/ac donos adicionar\`.`);
     }
@@ -183,9 +215,17 @@ function createDiscordBot({ store, permissions, token, guildId, logger = console
 
     switch (sub) {
       case 'logout': {
-        store.unlinkGuild(interaction.guildId, server);
+        const uid = interaction.user.id;
+        if (server.owners.length === 1 && server.owners[0] === uid) {
+          // último dono saindo: o anti-cheat volta a aguardar confirmação de um novo dono
+          store.updateServer(server, (s) => { s.owners = []; s.activated = false; });
+        } else {
+          store.updateServer(server, (s) => { s.owners = s.owners.filter((id) => id !== uid); }, { bump: false });
+        }
+        if (store.getDono(uid)?.IDF === server.id) store.removeDono(uid);
+        store.clearSelection(uid);
         audit(interaction, server, 'logout');
-        return reply(interaction, `✅ ${serverLabel(server)} foi desvinculado deste Discord. As configurações continuam salvas.`);
+        return reply(interaction, `✅ Você saiu de ${serverLabel(server)}. As configurações continuam salvas.`);
       }
 
       case 'novachave': {
@@ -263,6 +303,7 @@ function createDiscordBot({ store, permissions, token, guildId, logger = console
 
       case 'global': {
         const ativo = interaction.options.getBoolean('ativo', true);
+        if (ativo && !server.activated) return interaction.reply(activationMessage(server, interaction.user.id));
         store.updateServer(server, (s) => { s.global = ativo; });
         audit(interaction, server, `global = ${ativo}`);
         return reply(interaction, ativo ? `🟢 Anti-cheat **LIGADO** em ${serverLabel(server)}.` : `🔴 Anti-cheat **DESLIGADO** em ${serverLabel(server)}.`);
@@ -383,9 +424,23 @@ function createDiscordBot({ store, permissions, token, guildId, logger = console
     // dcac:<acao>:<serverId>:<categoria>
     const [, action, serverId, catKey] = interaction.customId.split(':');
     const server = store.getServer(normalizeId(serverId));
-    if (!server || !interaction.guildId || !store.isLinked(interaction.guildId, server)) {
-      return reply(interaction, '❌ Esse servidor não está mais vinculado a este Discord.');
+    if (!server) return reply(interaction, '❌ Esse servidor não existe mais.');
+
+    // confirmação de ativação: só o próprio dono (ou administrador do bot)
+    if (action === 'confirm' || action === 'cancel') {
+      const ownerId = catKey;
+      if (interaction.user.id !== ownerId && !permissions.isBotAdmin(interaction)) {
+        return reply(interaction, '⛔ Só o dono que fez o login pode confirmar.');
+      }
+      if (action === 'cancel') return interaction.update({ content: 'Tudo bem. Quando quiser, use `/ac meuservidor` para ativar.', embeds: [], components: [] });
+      if (!server.owners.includes(ownerId) && !permissions.isBotAdmin(interaction)) {
+        return reply(interaction, '⛔ Você não é mais dono desse servidor.');
+      }
+      if (!server.activated) store.activate(server);
+      audit(interaction, server, 'ativação confirmada');
+      return interaction.update(activationMessage(server, ownerId));
     }
+
     if (!permissions.isAllowed(server, interaction)) {
       return reply(interaction, '⛔ Você não tem permissão para configurar esse servidor.');
     }
@@ -408,6 +463,14 @@ function createDiscordBot({ store, permissions, token, guildId, logger = console
 
   client.on(Events.InteractionCreate, async (interaction) => {
     try {
+      // o bot só funciona dentro do Discord do projeto
+      if (interaction.guildId !== projectGuildId) {
+        if (interaction.isAutocomplete()) return await interaction.respond([]);
+        if (interaction.isRepliable()) {
+          return await interaction.reply({ content: '⛔ Este bot só pode ser usado no Discord oficial do projeto.', flags: MessageFlags.Ephemeral });
+        }
+        return undefined;
+      }
       if (interaction.isAutocomplete() && interaction.commandName === 'ac') return await handleAutocomplete(interaction);
       if (interaction.isChatInputCommand() && interaction.commandName === 'ac') return await handleCommand(interaction);
       if ((interaction.isStringSelectMenu() || interaction.isButton()) && interaction.customId.startsWith('dcac:')) {
@@ -423,19 +486,25 @@ function createDiscordBot({ store, permissions, token, guildId, logger = console
     return undefined;
   });
 
+  // se alguém adicionar o bot em outro Discord, ele sai na hora
+  async function leaveForeignGuild(guild) {
+    if (guild.id === projectGuildId) return;
+    logger.log(`[discord] saindo do Discord não autorizado: ${guild.name} (${guild.id})`);
+    await guild.leave().catch((err) => logger.error('[discord] falha ao sair do Discord', err.message));
+  }
+  client.on(Events.GuildCreate, leaveForeignGuild);
+
   client.once(Events.ClientReady, async (c) => {
     logger.log(`[discord] conectado como ${c.user.tag}`);
+    for (const guild of c.guilds.cache.values()) await leaveForeignGuild(guild);
     try {
-      if (guildId) {
-        const guild = await c.guilds.fetch(guildId);
-        await guild.commands.set(commands);
-        logger.log(`[discord] comandos registrados no servidor ${guild.name}`);
-      } else {
-        await c.application.commands.set(commands);
-        logger.log('[discord] comandos globais registrados (podem levar até 1h para aparecer)');
-      }
+      // remove comandos globais antigos e registra só no Discord do projeto
+      await c.application.commands.set([]);
+      const guild = await c.guilds.fetch(projectGuildId);
+      await guild.commands.set(commands);
+      logger.log(`[discord] comandos registrados no Discord do projeto: ${guild.name}`);
     } catch (err) {
-      logger.error('[discord] falha ao registrar comandos', err);
+      logger.error('[discord] falha ao registrar comandos (o bot está no Discord do projeto?)', err);
     }
   });
 

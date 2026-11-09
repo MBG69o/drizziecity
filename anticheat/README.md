@@ -32,8 +32,14 @@ O servidor do jogo usa só o **native `HTTP()`**, que já vem no SA-MP e no open
    [DCAC] No Discord use: /ac login id:DC-7K2QMX chave:ABCD-EFGH-JKLM
    ```
    Para ver de novo, digite `dcac` no console ou no RCON.
-3. No Discord, rode `/ac login id:DC-7K2QMX chave:ABCD-EFGH-JKLM`. Quem faz o login vira **dono** do servidor no anti-cheat.
-4. O ID **nunca muda**, mesmo reiniciando o servidor ou o bot. **Faça backup do `dcac_servidor.cfg`**: ele guarda o token secreto que identifica o servidor.
+3. No **Discord do projeto**, o cliente roda `/ac login id:DC-7K2QMX chave:ABCD-EFGH-JKLM`. Quem faz o login vira **dono** do servidor, e o bot salva o vínculo em `data/donos.json`:
+   ```json
+   {
+     "294929472947294828472": { "servidor": "Drizzie RP", "IDF": "DC-7K2QMX" }
+   }
+   ```
+4. **Confirmação:** o servidor nasce com o anti-cheat **desligado**. Depois do login, o bot mostra o servidor encontrado com o botão **✅ Confirmar e ativar**. Só esse dono pode clicar. A qualquer momento, `/ac meuservidor` busca o servidor pelo ID do Discord do cliente e mostra o mesmo botão.
+5. O ID **nunca muda**, mesmo reiniciando o servidor ou o bot. **Faça backup do `dcac_servidor.cfg`**: ele guarda o token secreto que identifica o servidor.
 
 Segurança:
 - O bot guarda só o **hash** do token.
@@ -108,13 +114,15 @@ Todas podem ser ligadas e desligadas pelo Discord. No painel elas aparecem divid
 
 ### 1. Bot do Discord (uma vez, serve para todos os servidores)
 
+> O bot **só funciona no Discord do projeto** (`DISCORD_GUILD_ID`, obrigatório). Se alguém adicioná-lo em outro Discord, ele sai sozinho na hora. Os comandos são registrados apenas no Discord do projeto, e interações vindas de qualquer outro lugar são recusadas.
+
 1. Crie uma aplicação em <https://discord.com/developers/applications>. Na aba **Bot**, gere o token.
 2. Convide o bot com os escopos `bot` e `applications.commands`. Ele precisa da permissão **Enviar mensagens / Inserir links** nos canais de log.
 3. Configure e inicie (Node.js 18 ou superior):
 
 ```bash
 cd anticheat/bot
-cp .env.example .env      # preencha pelo menos DISCORD_TOKEN
+cp .env.example .env      # preencha DISCORD_TOKEN e DISCORD_GUILD_ID (Discord do projeto)
 npm install
 npm start                 # ou: pm2 start src/index.js --name dcac
 ```
@@ -156,10 +164,11 @@ npm start                 # ou: pm2 start src/index.js --name dcac
 **Servidores**
 | Comando | Descrição |
 |---|---|
-| `/ac login id:<ID> chave:<CHAVE>` | Vincula um servidor a este Discord. Quem faz o login vira dono. |
-| `/ac servidores` | Lista os servidores vinculados (online/offline) e mostra qual está ativo. |
-| `/ac usar id:<ID>` | Escolhe qual servidor os comandos configuram. O campo tem autocomplete. |
-| `/ac logout` | Desvincula o servidor ativo deste Discord. *(dono)* |
+| `/ac login id:<IDF> chave:<CHAVE>` | Registra o servidor no nome de quem rodou o comando (vira dono e entra no `donos.json`) e pede a confirmação. |
+| `/ac meuservidor` | Busca o servidor do cliente pelo ID do Discord e mostra o botão de confirmar a ativação. |
+| `/ac servidores` | Lista os servidores a que você tem acesso e mostra qual está ativo. |
+| `/ac usar id:<IDF>` | Para quem tem acesso a mais de um servidor: escolhe qual os comandos configuram. Sem isso, vale o servidor do `donos.json`. |
+| `/ac logout` | Sai do servidor e remove a entrada do `donos.json`. Se for o último dono, o anti-cheat volta a aguardar confirmação. *(dono)* |
 | `/ac novachave` | Gera uma nova chave de login. *(dono)* |
 | `/ac token` | Gera um novo token da API, para recuperação. *(dono)* |
 | `/ac nome [nome]` | Dá um apelido ao servidor. Sem nome, volta a usar o hostname. |
@@ -184,7 +193,7 @@ npm start                 # ou: pm2 start src/index.js --name dcac
 | `/ac restaurar` | Volta tudo para o padrão. |
 | `/ac donos adicionar/remover/listar usuario:<@> cargo:<@>` | Quem pode configurar o servidor. Só **donos** alteram. |
 
-**Permissões:**
+**Permissões** (cada cliente só enxerga e configura o próprio servidor):
 - **Donos** são quem fez login com a chave. Eles podem tudo.
 - **Admins e cargos** adicionados pelos donos podem configurar proteções.
 - `AC_BOT_ADMIN_IDS` no `.env` dá acesso total a todos os servidores (suporte de quem hospeda o bot).
