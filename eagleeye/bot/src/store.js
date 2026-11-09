@@ -162,6 +162,20 @@ class Store {
     return { server };
   }
 
+  /** Token de acesso mostrado no console: "<ID>-<chave>", ex.: EE-7K2QMX-ABCD-EFGH-JKLM */
+  accessToken(server) {
+    return server.loginKey ? `${server.id}-${server.loginKey}` : null;
+  }
+
+  /** Separa o token de acesso em servidor + chave. Aceita minúsculas, espaços e sem traços. */
+  parseAccessToken(text) {
+    const t = String(text || '').toUpperCase().replace(/\s+/g, '');
+    const m = /^(EE-?[A-Z0-9]{6})-?([A-Z0-9]{4}-?[A-Z0-9]{4}-?[A-Z0-9]{4})$/.exec(t);
+    if (!m) return null;
+    const id = m[1].startsWith('EE-') ? m[1] : `EE-${m[1].slice(2)}`;
+    return { server: this.getServer(id), key: m[2] };
+  }
+
   checkLoginKey(server, key) {
     return safeEqualStr(normalizeLoginKey(key), normalizeLoginKey(server.loginKey));
   }

@@ -10,14 +10,14 @@
  *
  *   ID FIXO DO SERVIDOR
  *   -------------------
- *   Na primeira vez que o gamemode inicia, o servidor se registra no bot e
- *   recebe um ID fixo (ex.: EE-7K2QMX) + uma chave de login. Eles ficam salvos
- *   em scriptfiles/eagleeye_servidor.cfg e aparecem no console:
+ *   Na primeira vez que o gamemode inicia, o servidor se registra no bot,
+ *   recebe um ID fixo (salvo em scriptfiles/eagleeye_servidor.cfg) e mostra
+ *   no console o TOKEN DE ACESSO que o dono usa para fazer login no Discord:
  *
- *       [EagleEYE] ID do servidor: EE-7K2QMX | Chave de login: ABCD-EFGH-JKLM
- *       [EagleEYE] No Discord use: /ac login id:EE-7K2QMX chave:ABCD-EFGH-JKLM
+ *       [EagleEYE] Token de acesso: EE-7K2QMX-ABCD-EFGH-JKLM
+ *       [EagleEYE] No Discord use: /ac login token:EE-7K2QMX-ABCD-EFGH-JKLM
  *
- *   Digite "eagleeye" no console/RCON para ver novamente.
+ *   Digite "eagleeye" no console/RCON para ver o token de acesso novamente.
  *   FAÇA BACKUP do arquivo eagleeye_servidor.cfg (ele é a identidade do servidor).
  *
  *   USO (no topo do gamemode):
@@ -741,11 +741,12 @@ static stock EE_PrintLogin()
 	print("[EagleEYE] ---------------------------------------------------------------");
 	if (gEE_LoginKey[0])
 	{
-		printf("[EagleEYE] ID do servidor: %s | Chave de login: %s", gEE_ServerId, gEE_LoginKey);
-		printf("[EagleEYE] No Discord use: /ac login id:%s chave:%s", gEE_ServerId, gEE_LoginKey);
+		// token de acesso = ID fixo + chave de login
+		printf("[EagleEYE] Token de acesso: %s-%s", gEE_ServerId, gEE_LoginKey);
+		printf("[EagleEYE] No Discord use: /ac login token:%s-%s", gEE_ServerId, gEE_LoginKey);
 	}
-	else printf("[EagleEYE] ID do servidor: %s | Chave de login: (aguardando o bot)", gEE_ServerId);
-	print("[EagleEYE] Guarde essa chave! Quem tiver ela pode configurar o anti-cheat.");
+	else printf("[EagleEYE] Servidor %s registrado. Token de acesso: (aguardando o bot)", gEE_ServerId);
+	print("[EagleEYE] Guarde esse token! Quem tiver ele pode configurar o anti-cheat.");
 	print("[EagleEYE] ---------------------------------------------------------------");
 }
 
@@ -1571,7 +1572,7 @@ public OnGameModeInit()
 	#endif
 	if (EE_LoadIdentity())
 	{
-		printf("[EagleEYE] ID do servidor: %s (digite 'eagleeye' no console para ver a chave de login)", gEE_ServerId);
+		printf("[EagleEYE] ID do servidor: %s (digite 'eagleeye' no console para ver o token de acesso)", gEE_ServerId);
 		EE_Poll();
 	}
 	else EE_Register();

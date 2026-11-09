@@ -2,10 +2,10 @@
 
 Anti-cheat **server-side** para **SA-MP 0.3.7 / 0.3.DL** e **open.mp** com **34 proteções**, configurado pelo **Discord** com comandos `/ac`.
 
-**Vários servidores, um bot.** Cada servidor que usa o include recebe um **ID fixo** (ex.: `EE-7K2QMX`) e uma **chave de login**. O dono faz `/ac login` no Discord e passa a controlar as proteções daquele servidor. Um mesmo bot pode atender quantos servidores você quiser, cada um com a sua configuração, seus donos e seu canal de logs.
+**Vários servidores, um bot.** Cada servidor que usa o include recebe um **ID fixo** e mostra no console um **token de acesso** (ex.: `EE-7K2QMX-ABCD-EFGH-JKLM`). O dono faz `/ac login token:...` no Discord e passa a controlar as proteções daquele servidor. Um mesmo bot pode atender quantos servidores você quiser, cada um com a sua configuração, seus donos e seu canal de logs.
 
 ```
-┌──────────────────────┐  1º boot: GET /ac/register  ┌──────────────────────┐   /ac login id chave   ┌──────────┐
+┌──────────────────────┐  1º boot: GET /ac/register  ┌──────────────────────┐   /ac login token      ┌──────────┐
 │ Servidor A (EE-7K2..)│ ──────────────────────────▶ │                      │ ◀───────────────────── │ Discord  │
 │ Servidor B (EE-Q9M..)│ ── GET /ac/config (10s) ──▶ │ Bot EagleEYE (Node)  │ ─── logs por servidor ▶│ (donos)  │
 │ Servidor C ...       │ ── POST /ac/report ───────▶ │                      │                        │          │
@@ -23,27 +23,27 @@ O servidor do jogo usa só o **native `HTTP()`**, que já vem no SA-MP e no open
 | `pawn/examples/` | Exemplos de gamemode e filterscript. |
 | `bot/` | Bot do Discord + API que os servidores consultam. |
 
-## 🔑 ID fixo e login
+## 🔑 Token de acesso e login
 
 1. Na **primeira** inicialização, o gamemode se registra sozinho no bot e salva a identidade em `scriptfiles/eagleeye_servidor.cfg`.
 2. O console mostra:
    ```
-   [EagleEYE] ID do servidor: EE-7K2QMX | Chave de login: ABCD-EFGH-JKLM
-   [EagleEYE] No Discord use: /ac login id:EE-7K2QMX chave:ABCD-EFGH-JKLM
+   [EagleEYE] Token de acesso: EE-7K2QMX-ABCD-EFGH-JKLM
+   [EagleEYE] No Discord use: /ac login token:EE-7K2QMX-ABCD-EFGH-JKLM
    ```
    Para ver de novo, digite `eagleeye` no console ou no RCON.
-3. No **Discord do projeto**, o cliente roda `/ac login id:EE-7K2QMX chave:ABCD-EFGH-JKLM`. Quem faz o login vira **dono** do servidor, e o bot salva o vínculo em `data/donos.json`:
+3. No **Discord do projeto**, o cliente roda `/ac login token:EE-7K2QMX-ABCD-EFGH-JKLM`. Quem faz o login vira **dono** do servidor, e o bot salva o vínculo em `data/donos.json`:
    ```json
    {
      "294929472947294828472": { "servidor": "Drizzie RP", "IDF": "EE-7K2QMX" }
    }
    ```
 4. **Confirmação:** o servidor nasce com o anti-cheat **desligado**. Depois do login, o bot mostra o servidor encontrado com o botão **✅ Confirmar e ativar**. Só esse dono pode clicar. A qualquer momento, `/ac meuservidor` busca o servidor pelo ID do Discord do cliente e mostra o mesmo botão.
-5. O ID **nunca muda**, mesmo reiniciando o servidor ou o bot. **Faça backup do `eagleeye_servidor.cfg`**: ele guarda o token secreto que identifica o servidor.
+5. O ID **nunca muda**, mesmo reiniciando o servidor ou o bot. **Faça backup do `eagleeye_servidor.cfg`**: ele guarda o **token da API** (secreto, usado só entre o servidor e o bot; é diferente do token de acesso).
 
 Segurança:
-- O bot guarda só o **hash** do token.
-- A chave de login pode ser trocada com `/ac novachave`.
+- O bot guarda só o **hash** do token da API.
+- O token de acesso pode ser trocado com `/ac servidor novachave`.
 - Login errado 5 vezes bloqueia a pessoa por 10 minutos.
 - O registro de servidores é limitado a 5 por IP por hora.
 
@@ -166,7 +166,7 @@ Os comandos valem para o **seu** servidor, aquele registrado no seu nome no `don
 **Principais**
 | Comando | Descrição |
 |---|---|
-| `/ac login id:<IDF> chave:<CHAVE>` | Registra o servidor no seu nome (dono + `donos.json`) e pede a confirmação. |
+| `/ac login token:<TOKEN>` | Registra o servidor no seu nome (dono + `donos.json`) e pede a confirmação. |
 | `/ac meuservidor` | Busca o seu servidor pelo seu ID do Discord e mostra o botão **Confirmar e ativar**. |
 | `/ac painel` | Painel com categorias, menu para ligar e desligar, e botão global. |
 | `/ac status` | Todas as proteções, servidor online/offline, jogadores e sincronização. |
@@ -209,7 +209,7 @@ Os comandos valem para o **seu** servidor, aquele registrado no seu nome no `don
 | `resumo ativo:<…>` | Resumo diário das últimas 24h, à meia-noite (`AC_TIMEZONE`, padrão America/Sao_Paulo). |
 | `banduracao horas:<n>` | Duração dos novos bans do AC. Quando vencem, o bot desbane sozinho. `0` = permanente. |
 | `auditoria` | As últimas 15 alterações: quem mudou o quê e quando. |
-| `novachave` / `token` / `logout` | Nova chave de login, novo token da API, sair do servidor. *(só dono)* |
+| `novachave` / `token` / `logout` | Novo token de acesso, novo token da API (recuperação), sair do servidor. *(só dono)* |
 
 **`/ac imune adicionar/remover/listar`** e **`/ac donos adicionar/remover/listar`**: nicks ignorados pelo AC e quem pode configurar o servidor.
 

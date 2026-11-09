@@ -284,3 +284,19 @@ test('estatísticas e auditoria', async () => {
   store.addAudit(srv, 'u1', 'ativar jetpack');
   assert.strictEqual(store.getAudit(srv).at(-1).text, 'ativar jetpack');
 });
+
+test('token de acesso: ID + chave em um só token, aceito com ou sem formatação', async () => {
+  const r = await register();
+  const srv = store.getServer(r.id);
+  const tok = store.accessToken(srv);
+  assert.strictEqual(tok, `${r.id}-${r.key}`);
+  assert.match(tok, /^EE-[2-9A-Z]{6}-[2-9A-Z]{4}-[2-9A-Z]{4}-[2-9A-Z]{4}$/);
+  for (const variant of [tok, tok.toLowerCase(), ` ${tok} `, tok.replace(/-/g, '')]) {
+    const p = store.parseAccessToken(variant);
+    assert.ok(p && p.server && p.server.id === r.id && store.checkLoginKey(p.server, p.key), variant);
+  }
+  const wrong = store.parseAccessToken(`${r.id}-AAAA-BBBB-CCCC`);
+  assert.ok(wrong.server && !store.checkLoginKey(wrong.server, wrong.key));
+  assert.strictEqual(store.parseAccessToken('lixo'), null);
+  assert.strictEqual(store.parseAccessToken('EE-ZZZZZZ-AAAA-BBBB-CCCC').server, null);
+});

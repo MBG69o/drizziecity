@@ -204,12 +204,12 @@ function createDiscordBot({ store, permissions, token, projectGuildId, logger = 
 
     if (sub === 'login') {
       if (loginBlocked(userId)) return reply(interaction, '⛔ Muitas tentativas erradas. Aguarde 10 minutos.');
-      const server = store.getServer(interaction.options.getString('id', true));
-      const key = interaction.options.getString('chave', true);
-      if (!server || !store.checkLoginKey(server, key)) {
+      const parsed = store.parseAccessToken(interaction.options.getString('token', true));
+      const server = parsed && parsed.server;
+      if (!server || !store.checkLoginKey(server, parsed.key)) {
         loginFails.get(userId).push(Date.now());
         audit(interaction, server, 'login FALHOU');
-        return reply(interaction, '❌ ID ou chave inválidos. Confira no console do servidor (digite `eagleeye` no console).');
+        return reply(interaction, '❌ Token de acesso inválido. Confira no console do servidor (digite `eagleeye` no console para ver o token).');
       }
       store.updateServer(server, (s) => {
         if (!s.owners.includes(userId)) s.owners.push(userId);
@@ -224,13 +224,13 @@ function createDiscordBot({ store, permissions, token, projectGuildId, logger = 
     if (sub === 'meuservidor') {
       // busca o servidor do cliente pelo ID do Discord dele
       const server = store.serverOfDono(userId);
-      if (!server) return reply(interaction, '❌ Não encontrei nenhum servidor registrado no seu nome. Use `/ac login id:<IDF> chave:<CHAVE>` com os dados do console do servidor.');
+      if (!server) return reply(interaction, '❌ Não encontrei nenhum servidor registrado no seu nome. Use `/ac login token:<TOKEN>` com o token de acesso do console do servidor.');
       return interaction.reply(activationMessage(server, userId));
     }
 
     if (sub === 'servidor/lista') {
       const list = store.serversOfUser(userId, permissions.isBotAdmin(interaction));
-      if (!list.length) return reply(interaction, 'Você não tem acesso a nenhum servidor. Use `/ac login id:<IDF> chave:<CHAVE>`.');
+      if (!list.length) return reply(interaction, 'Você não tem acesso a nenhum servidor. Use `/ac login token:<TOKEN>`.');
       const active = store.activeServerFor(userId);
       const lines = list.slice(0, 50).map((s) => {
         const online = store.isServerOnline(s) ? '🟢' : '🔴';
@@ -261,7 +261,7 @@ function createDiscordBot({ store, permissions, token, projectGuildId, logger = 
     if (NO_SERVER_SUBS.has(full)) return handleServerCommands(interaction, full);
 
     const server = store.activeServerFor(interaction.user.id);
-    if (!server) return reply(interaction, '❌ Você não tem nenhum servidor. Use `/ac login id:<IDF> chave:<CHAVE>` (o IDF e a chave aparecem no console do servidor).');
+    if (!server) return reply(interaction, '❌ Você não tem nenhum servidor. Use `/ac login token:<TOKEN>` (o token de acesso aparece no console do servidor).');
     if (!permissions.isAllowed(server, interaction)) {
       return reply(interaction, `⛔ Você não tem permissão para configurar ${serverLabel(server)}. Peça a um dono para usar \`/ac donos adicionar\`.`);
     }
@@ -290,9 +290,9 @@ function createDiscordBot({ store, permissions, token, projectGuildId, logger = 
       }
 
       case 'novachave': {
-        const key = store.rotateLoginKey(server);
-        audit(interaction, server, 'nova chave de login');
-        return reply(interaction, `🔑 Nova chave de login de ${serverLabel(server)}: \`${key}\`\nA chave antiga parou de funcionar. Quem já fez login continua com acesso; use \`/ac donos remover\` para tirar alguém.`);
+        store.rotateLoginKey(server);
+        audit(interaction, server, 'novo token de acesso');
+        return reply(interaction, `🔑 Novo token de acesso de ${serverLabel(server)}: \`${store.accessToken(server)}\`\nO token antigo parou de funcionar (o console do servidor também mostra o novo). Quem já fez login continua com acesso; use \`/ac donos remover\` para tirar alguém.`);
       }
 
       case 'token': {
