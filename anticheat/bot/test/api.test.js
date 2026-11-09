@@ -213,3 +213,74 @@ test('comando /ac é válido para o Discord', () => {
   assert.strictEqual(ac.name, 'ac');
   assert.ok(ac.options.length <= 25, `${ac.options.length} subcomandos`);
 });
+
+test('presets geram configurações válidas para todas as proteções', () => {
+  const { PRESETS } = require('../src/presets');
+  for (const [key, preset] of Object.entries(PRESETS)) {
+    const st = preset.build();
+    for (const p of PROTECTIONS) {
+      const x = st[p.key];
+      assert.ok(x, `${key}/${p.key}`);
+      assert.ok([0, 1, 2].includes(x.action) && x.tolerance >= 1, `${key}/${p.key}`);
+    }
+  }
+  assert.ok(Object.values(PRESETS.leve.build()).every((x) => x.action === 0));
+  assert.strictEqual(PRESETS.rigoroso.build().jetpack.action, 2);
+});
+
+test('exportar e importar configuração (com validação)', async () => {
+  const a = store.getServer((await register()).id);
+  const b = store.getServer((await register()).id);
+  store.updateServer(a, (s) => { s.protections.godmode.value = 9; s.whitelist = ['Staff_Um']; s.banHours = 24; });
+  const data = JSON.parse(JSON.stringify(store.exportConfig(a)));
+  data.protections.vida.action = 99;      // inválido -> padrão
+  data.whitelist.push('nick invalido');   // inválido -> removido
+  const v = b.version;
+  store.importConfig(b, data);
+  assert.strictEqual(b.protections.godmode.value, 9);
+  assert.strictEqual(b.protections.vida.action, 1);
+  assert.deepStrictEqual(b.whitelist, ['Staff_Um']);
+  assert.strictEqual(b.banHours, 24);
+  assert.ok(b.version > v);
+  assert.throws(() => store.importConfig(b, { foo: 1 }), /não é uma configuração/);
+});
+
+test('bans: registrados no ban, desban manual e expiração automática', async () => {
+  const r = await register();
+  const srv = store.getServer(r.id);
+  store.updateServer(srv, (s) => { s.banHours = 1; }, { bump: false });
+  const body = new URLSearchParams({ id: '1', nome: 'Cheater_X', ip: '10.0.0.9', cod: '8', acao: '2', hits: '1', tol: '1', det: 'jetpack' });
+  await fetch(`${base}/ac/report?id=${r.id}&token=${r.token}`, { method: 'POST', body });
+  assert.strictEqual(store.activeBans(srv).length, 1);
+  const ban = store.activeBans(srv)[0];
+  assert.ok(ban.expiresAt > Date.now());
+  assert.strictEqual(store.expireBans(srv).length, 0);
+  const expired = store.expireBans(srv, Date.now() + 2 * 3600e3);
+  assert.strictEqual(expired.length, 1);
+  assert.strictEqual(store.activeBans(srv).length, 0);
+  assert.ok(srv.commands.some((c) => c.type === 'unbanip' && c.arg === '10.0.0.9'));
+  assert.strictEqual(store.playerInfo(srv, 'cheater_x').bans.length, 1);
+});
+
+test('lista de jogadores online via /ac/players', async () => {
+  const r = await register();
+  const body = 'p=0%2CFulano%2C45%2C10%3B3%2CJoao_%5BRP%5D%2C120%2C0%3B';
+  const res = await fetch(`${base}/ac/players?id=${r.id}&token=${r.token}`, { method: 'POST', body });
+  assert.strictEqual(res.status, 200);
+  const snap = store.getPlayers(store.getServer(r.id));
+  assert.deepStrictEqual(snap.list, [{ id: 0, name: 'Fulano', ping: 45, score: 10 }, { id: 3, name: 'Joao_[RP]', ping: 120, score: 0 }]);
+});
+
+test('estatísticas e auditoria', async () => {
+  const srv = store.getServer((await register()).id);
+  const now = Date.now();
+  for (const [code, name] of [[5, 'A'], [5, 'A'], [19, 'B']]) store.addDetection(srv, { time: now, code, name, action: 0, ip: '', detail: '-' });
+  store.addDetection(srv, { time: now - 10 * 24 * 3600e3, code: 3, name: 'Velho', action: 1, ip: '', detail: '-' });
+  const st = store.stats(srv, 24 * 3600e3);
+  assert.strictEqual(st.total, 3);
+  assert.deepStrictEqual(st.topProtections[0], [5, 2]);
+  assert.deepStrictEqual(st.topPlayers[0], ['A', 2]);
+  assert.strictEqual(store.stats(srv, 30 * 24 * 3600e3).total, 4);
+  store.addAudit(srv, 'u1', 'ativar jetpack');
+  assert.strictEqual(store.getAudit(srv).at(-1).text, 'ativar jetpack');
+});

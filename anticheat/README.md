@@ -161,42 +161,62 @@ npm start                 # ou: pm2 start src/index.js --name dcac
 
 ## 💬 Comandos do Discord
 
-**Servidores**
-| Comando | Descrição |
-|---|---|
-| `/ac login id:<IDF> chave:<CHAVE>` | Registra o servidor no nome de quem rodou o comando (vira dono e entra no `donos.json`) e pede a confirmação. |
-| `/ac meuservidor` | Busca o servidor do cliente pelo ID do Discord e mostra o botão de confirmar a ativação. |
-| `/ac servidores` | Lista os servidores a que você tem acesso e mostra qual está ativo. |
-| `/ac usar id:<IDF>` | Para quem tem acesso a mais de um servidor: escolhe qual os comandos configuram. Sem isso, vale o servidor do `donos.json`. |
-| `/ac logout` | Sai do servidor e remove a entrada do `donos.json`. Se for o último dono, o anti-cheat volta a aguardar confirmação. *(dono)* |
-| `/ac novachave` | Gera uma nova chave de login. *(dono)* |
-| `/ac token` | Gera um novo token da API, para recuperação. *(dono)* |
-| `/ac nome [nome]` | Dá um apelido ao servidor. Sem nome, volta a usar o hostname. |
+Os comandos valem para o **seu** servidor, aquele registrado no seu nome no `donos.json`. Quem tem acesso a mais de um servidor troca com `/ac servidor usar`.
 
-**Proteções** (valem para o servidor ativo)
+**Principais**
 | Comando | Descrição |
 |---|---|
-| `/ac painel` | Painel com botões de categoria, menu para ligar e desligar, e botão global. |
+| `/ac login id:<IDF> chave:<CHAVE>` | Registra o servidor no seu nome (dono + `donos.json`) e pede a confirmação. |
+| `/ac meuservidor` | Busca o seu servidor pelo seu ID do Discord e mostra o botão **Confirmar e ativar**. |
+| `/ac painel` | Painel com categorias, menu para ligar e desligar, e botão global. |
 | `/ac status` | Todas as proteções, servidor online/offline, jogadores e sincronização. |
-| `/ac ativar` / `/ac desativar protecao:<…>` | Liga ou desliga uma proteção, uma **categoria** ou **todas**. O campo tem autocomplete. |
-| `/ac acao protecao:<…> tipo:<aviso\|kick\|ban>` | Escolhe a punição. |
-| `/ac tolerancia protecao:<…> quantidade:<n>` | Quantas detecções antes de punir. |
-| `/ac limite protecao:<…> valor:<n>` | Altera os limites (velocidade, ping, % de acerto…). |
 | `/ac global ativo:<true/false>` | Liga ou desliga o anti-cheat inteiro. |
-| `/ac intervalo segundos:<n>` | Frequência com que o servidor busca a configuração (3–300s). |
-| `/ac logs canal:<#canal>` | Canal deste Discord que recebe as detecções do servidor ativo. |
 | `/ac historico [nick]` | Últimas detecções. |
-| `/ac imune adicionar/remover/listar nick:<…>` | Nicks ignorados pelo AC. |
-| `/ac desbanir ip:<ip>` | `unbanip` + `reloadbans`, e desbloqueia o IP. |
-| `/ac kick id:<id>` | Kicka um jogador. |
-| `/ac anunciar mensagem:<…>` | Mensagem do AC para todos no jogo. |
-| `/ac restaurar` | Volta tudo para o padrão. |
-| `/ac donos adicionar/remover/listar usuario:<@> cargo:<@>` | Quem pode configurar o servidor. Só **donos** alteram. |
+| `/ac jogador nick:<…>` | Ficha do jogador: detecções por proteção, IPs usados, bans e eventos recentes. |
+| `/ac estatisticas [periodo]` | Total de avisos, kicks e bans, e o top 10 de proteções e de jogadores (24h, 7 ou 30 dias). |
+
+**`/ac protecao`**
+| Subcomando | Descrição |
+|---|---|
+| `ativar` / `desativar protecao:<…>` | Uma proteção, uma **categoria** ou **todas** (o campo tem autocomplete). |
+| `acao protecao:<…> tipo:<aviso\|kick\|ban>` | Escolhe a punição. |
+| `tolerancia protecao:<…> quantidade:<n>` | Quantas detecções em 60s antes de punir. |
+| `limite protecao:<…> valor:<n>` | Altera os limites (velocidade, ping, % de acerto…). |
+| `preset tipo:<…>` | Configuração pronta: **Padrão**, **Leve** (só avisos), **Roleplay**, **DM/TDM** ou **Rigoroso** (ban na primeira detecção de cheat óbvio). |
+| `restaurar` | Volta tudo para o padrão. |
+| `exportar` | Baixa a configuração num `.json` (backup ou para copiar para outro servidor). |
+| `importar arquivo:<.json>` | Aplica um arquivo exportado. Os valores são validados antes de aplicar. |
+
+**`/ac moderacao`**
+| Subcomando | Descrição |
+|---|---|
+| `online` | Lista os jogadores online, com ID, nick, ping e score, consultando o servidor na hora. |
+| `kick id:<id>` | Kicka um jogador. |
+| `pm id:<id> mensagem:<…>` | Mensagem privada no jogo. |
+| `congelar` / `descongelar id:<id>` | Trava ou destrava o jogador. |
+| `anunciar mensagem:<…>` | Mensagem do AC para todos no jogo. |
+| `bans` | Bans aplicados pelo AC (nick, IP, motivo, quando expira), com botões **Desbanir** e paginação. |
+| `desbanir ip:<ip>` | `unbanip` + `reloadbans`. O ban correspondente também é marcado como desfeito. |
+
+**`/ac servidor`**
+| Subcomando | Descrição |
+|---|---|
+| `lista` / `usar id:<IDF>` | Seus servidores; escolher qual os comandos configuram. |
+| `nome [nome]` | Dá um apelido ao servidor (atualiza o `donos.json`). |
+| `logs canal:<#canal>` | Canal das detecções, alertas e resumos. |
+| `intervalo segundos:<n>` | Frequência com que o servidor busca a configuração (3–300s). |
+| `alertas ativo:<…>` | Avisa no canal quando o servidor **cai** ou **volta**. Vem ligado. |
+| `resumo ativo:<…>` | Resumo diário das últimas 24h, à meia-noite (`AC_TIMEZONE`, padrão America/Sao_Paulo). |
+| `banduracao horas:<n>` | Duração dos novos bans do AC. Quando vencem, o bot desbane sozinho. `0` = permanente. |
+| `auditoria` | As últimas 15 alterações: quem mudou o quê e quando. |
+| `novachave` / `token` / `logout` | Nova chave de login, novo token da API, sair do servidor. *(só dono)* |
+
+**`/ac imune adicionar/remover/listar`** e **`/ac donos adicionar/remover/listar`**: nicks ignorados pelo AC e quem pode configurar o servidor.
 
 **Permissões** (cada cliente só enxerga e configura o próprio servidor):
 - **Donos** são quem fez login com a chave. Eles podem tudo.
-- **Admins e cargos** adicionados pelos donos podem configurar proteções.
-- `AC_BOT_ADMIN_IDS` no `.env` dá acesso total a todos os servidores (suporte de quem hospeda o bot).
+- **Admins e cargos** adicionados pelos donos podem configurar proteções e moderar.
+- `AC_BOT_ADMIN_IDS` no `.env` dá acesso total a todos os servidores (suporte do projeto).
 
 As alterações chegam ao servidor em até `intervalo` segundos (padrão 10), **sem reiniciar o gamemode**. Se o bot cair, o servidor continua usando a última configuração recebida.
 
@@ -233,7 +253,7 @@ Defines opcionais (antes do `#include <drizzie_ac>`):
 - **Sistemas de dano customizado** que alteram o dano das armas: desligue **Dano hack**.
 - **Pawn.CMD**: os comandos não passam por `OnPlayerCommandText`. Use `AC_CommandFloodCheck` no `OnPlayerCommandReceived`.
 - **Godmode, munição e aimbot** são heurísticas e dependem de lag e sincronização. Comece em `aviso`.
-- Com lag forte, velocidade, teleporte e airbreak podem disparar. Ajuste com `/ac tolerancia` e `/ac limite`.
+- Com lag forte, velocidade, teleporte e airbreak podem disparar. Ajuste com `/ac protecao tolerancia` e `/ac protecao limite`, ou use o preset **Leve** no começo.
 
 Recomendação: deixe as proteções em **aviso** por alguns dias, acompanhe o canal de logs e ajuste os limites antes de passar para kick ou ban.
 

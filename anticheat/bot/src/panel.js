@@ -31,7 +31,7 @@ function headerLines(store, server, guildId) {
       ? '**Anti-cheat:** ⏳ aguardando o dono confirmar (`/ac meuservidor`)'
       : `**Anti-cheat:** ${server.global ? '🟢 LIGADO' : '🔴 DESLIGADO'} · ${enabled}/${PROTECTIONS.length} proteções ativas`,
     serverLine(store, server),
-    `**Logs:** ${log ? `<#${log}>` : 'não definido (use `/ac logs`)'}`,
+    `**Logs:** ${log ? `<#${log}>` : 'não definido (use `/ac servidor logs`)'}`,
   ];
 }
 
@@ -53,7 +53,7 @@ function buildPanelEmbed(store, server, guildId, catKey = CATEGORIES[0].key) {
       `__**${cat.emoji} ${cat.name}**__`,
       ...byCategory.get(cat.key).map((p) => protectionLine(p, server.protections[p.key])),
     ].join('\n'))
-    .setFooter({ text: 'Escolha a categoria nos botões · use o menu para ligar/desligar · /ac acao, /ac tolerancia, /ac limite' });
+    .setFooter({ text: 'Escolha a categoria nos botões · use o menu para ligar/desligar · /ac protecao acao | tolerancia | limite | preset' });
 }
 
 function buildStatusEmbed(store, server, guildId) {

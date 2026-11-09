@@ -334,7 +334,9 @@ static stock
 	// tentativas de RCON
 	gDCAC_RconIp[32][16],
 	gDCAC_RconCount[32],
-	gDCAC_RconTick[32];
+	gDCAC_RconTick[32],
+	// lista de jogadores enviada ao Discord (/ac moderacao online)
+	gDCAC_PListBody[8192];
 
 forward OnAntiCheatDetect(playerid, code, const detail[]);
 forward OnAntiCheatPunish(playerid, code, action, const detail[]);
@@ -860,6 +862,25 @@ static stock DCAC_Report(playerid, code, action, hits, const detail[])
 	DCAC_ReportRaw(playerid, name, gDCAC_P[playerid][acIp], code, action, hits, detail);
 }
 
+// envia a lista de jogadores online: p=id,nome,ping,score;id,nome,ping,score;...
+static stock DCAC_SendPlayerList()
+{
+	if (gDCAC_ServerId[0] == EOS) return;
+	new name[MAX_PLAYER_NAME + 1], ename[MAX_PLAYER_NAME * 3 + 1], entry[96], url[256], count = 0;
+	gDCAC_PListBody = "p=";
+	for (new i = 0, j = GetPlayerPoolSize(); i <= j && count < 80; i++)
+	{
+		if (!IsPlayerConnected(i) || IsPlayerNPC(i)) continue;
+		GetPlayerName(i, name, sizeof name);
+		DCAC_UrlEncode(name, ename);
+		format(entry, sizeof entry, "%d%%2C%s%%2C%d%%2C%d%%3B", i, ename, GetPlayerPing(i), GetPlayerScore(i));
+		strcat(gDCAC_PListBody, entry);
+		count++;
+	}
+	format(url, sizeof url, "%s/ac/players?id=%s&token=%s", DCAC_API_HOST, gDCAC_ServerId, gDCAC_Token);
+	HTTP(3, HTTP_POST, url, gDCAC_PListBody, "DCAC_OnReport");
+}
+
 public DCAC_OnReport(index, response_code, data[])
 {
 	return 1;
@@ -1015,6 +1036,33 @@ static stock DCAC_RunCommand(id, const type[], const arg[])
 			SendClientMessage(pid, DCAC_COLOR, "Voce foi kickado por um administrador (Discord).");
 			SetTimerEx("DCAC_DoPunish", 400, false, "iiii", pid, gDCAC_P[pid][acSerial], DCAC_ACTION_KICK, 0);
 		}
+	}
+	else if (!strcmp(type, "pm"))
+	{
+		// pm <id>|<texto_com_underscores>
+		new sep = strfind(arg, "|");
+		if (sep < 1) return;
+		new idstr[8], msg[144], out[180];
+		strmid(idstr, arg, 0, sep, sizeof idstr);
+		strmid(msg, arg, sep + 1, strlen(arg), sizeof msg);
+		new pid = strval(idstr);
+		if (!DCAC_ValidPlayer(pid) || msg[0] == EOS) return;
+		for (new i = 0; msg[i] != EOS; i++) if (msg[i] == '_') msg[i] = ' ';
+		format(out, sizeof out, "[Staff via Discord] %s", msg);
+		SendClientMessage(pid, 0xFFCC00FF, out);
+	}
+	else if (!strcmp(type, "freeze") || !strcmp(type, "unfreeze"))
+	{
+		new pid = strval(arg), bool:freeze = !strcmp(type, "freeze");
+		if (!DCAC_ValidPlayer(pid)) return;
+		TogglePlayerControllable(pid, !freeze);
+		AC_PositionImmunity(pid, 3000);
+		if (freeze) SendClientMessage(pid, 0xFFCC00FF, "[Staff via Discord] Voce foi congelado.");
+		else SendClientMessage(pid, 0xFFCC00FF, "[Staff via Discord] Voce foi descongelado.");
+	}
+	else if (!strcmp(type, "plist"))
+	{
+		DCAC_SendPlayerList();
 	}
 	else if (!strcmp(type, "aviso"))
 	{

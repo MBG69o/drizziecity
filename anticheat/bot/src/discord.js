@@ -2,7 +2,7 @@
 
 const {
   Client, GatewayIntentBits, Events, MessageFlags, EmbedBuilder, escapeMarkdown,
-  ActionRowBuilder, ButtonBuilder, ButtonStyle,
+  ActionRowBuilder, ButtonBuilder, ButtonStyle, AttachmentBuilder,
 } = require('discord.js');
 const { commands } = require('./commands');
 const {
@@ -11,14 +11,19 @@ const {
 const { buildPanel, buildStatusEmbed, buildDetectionEmbed, COLORS } = require('./panel');
 const { isValidNick, isValidIPv4Pattern, sanitizeGameText } = require('./config-format');
 const { normalizeId } = require('./store');
+const { PRESETS } = require('./presets');
 
 const MAX_WHITELIST = 64;
 const LOGIN_MAX_FAILS = 5;
 const LOGIN_WINDOW_MS = 10 * 60 * 1000;
-// subcomandos que funcionam sem servidor ativo
-const NO_SERVER_SUBS = new Set(['login', 'servidores', 'usar', 'meuservidor']);
-// subcomandos/grupos que exigem ser dono do servidor
-const OWNER_SUBS = new Set(['logout', 'novachave', 'token']);
+const MAX_IMPORT_BYTES = 64 * 1024;
+const PERIODS = { '24h': 24 * 3600e3, '7d': 7 * 24 * 3600e3, '30d': 30 * 24 * 3600e3 };
+const PERIOD_LABEL = { '24h': 'últimas 24 horas', '7d': 'últimos 7 dias', '30d': 'últimos 30 dias' };
+// comandos que funcionam sem servidor ativo
+const NO_SERVER_SUBS = new Set(['login', 'meuservidor', 'servidor/lista', 'servidor/usar']);
+// comandos que exigem ser dono do servidor
+const OWNER_SUBS = new Set(['servidor/logout', 'servidor/novachave', 'servidor/token']);
+const TIMEZONE = process.env.AC_TIMEZONE || 'America/Sao_Paulo';
 
 function createDiscordBot({ store, permissions, token, projectGuildId, logger = console }) {
   if (!projectGuildId) throw new Error('projectGuildId é obrigatório (o bot só funciona no Discord do projeto).');
@@ -35,6 +40,14 @@ function createDiscordBot({ store, permissions, token, projectGuildId, logger = 
       const q = logQueues.get(channelId) || [];
       q.push(embed);
       if (q.length > 200) q.splice(0, q.length - 200);
+      logQueues.set(channelId, q);
+    }
+  }
+
+  function sendToServer(server, embeds) {
+    for (const channelId of Object.values(server.logChannels)) {
+      const q = logQueues.get(channelId) || [];
+      q.push(...embeds);
       logQueues.set(channelId, q);
     }
   }
@@ -75,6 +88,53 @@ function createDiscordBot({ store, permissions, token, projectGuildId, logger = 
 
   function audit(interaction, server, text) {
     logger.log(`[audit] ${server ? server.id : '-'} ${interaction.user.tag} (${interaction.user.id}): ${text}`);
+    if (server) store.addAudit(server, interaction.user.id, text);
+  }
+
+  const ts = (ms, style = 'R') => `<t:${Math.floor(ms / 1000)}:${style}>`;
+  const protName = (code) => byId.get(code)?.name ?? `#${code}`;
+  const sleep = (ms) => new Promise((r) => { setTimeout(r, ms); });
+
+  function statsEmbed(server, periodKey) {
+    const st = store.stats(server, PERIODS[periodKey]);
+    const embed = new EmbedBuilder()
+      .setTitle(`📊 Estatísticas — ${server.name}`.slice(0, 256))
+      .setColor(COLORS.info)
+      .setDescription(`Período: **${PERIOD_LABEL[periodKey]}** · **${st.total}** detecções\n⚠️ ${st.actions[0]} avisos · 👢 ${st.actions[1]} kicks · 🔨 ${st.actions[2]} bans`);
+    if (st.total) {
+      embed.addFields(
+        { name: 'Proteções que mais detectaram', value: st.topProtections.map(([c, n], i) => `${i + 1}. ${protName(c)} — **${n}**`).join('\n'), inline: true },
+        { name: 'Jogadores mais detectados', value: st.topPlayers.map(([nick, n], i) => `${i + 1}. ${escapeMarkdown(nick)} — **${n}**`).join('\n').slice(0, 1024), inline: true },
+      );
+    }
+    return embed;
+  }
+
+  function bansMessage(server, page = 0) {
+    const bans = store.activeBans(server).slice().reverse();
+    const perPage = 5;
+    const pages = Math.max(1, Math.ceil(bans.length / perPage));
+    const p = Math.min(Math.max(page, 0), pages - 1);
+    const slice = bans.slice(p * perPage, p * perPage + perPage);
+    const embed = new EmbedBuilder()
+      .setTitle(`🔨 Bans do anti-cheat — ${server.name}`.slice(0, 256))
+      .setColor(COLORS.ban)
+      .setDescription(slice.length
+        ? slice.map((b) => `**#${b.id}** ${escapeMarkdown(b.name)} · ||${b.ip}|| · ${protName(b.code)} · ${ts(b.time)}${b.expiresAt ? ` · expira ${ts(b.expiresAt)}` : ' · permanente'}`).join('\n')
+        : 'Nenhum ban ativo aplicado pelo anti-cheat.')
+      .setFooter({ text: `Página ${p + 1}/${pages} · duração dos novos bans: ${server.banHours ? `${server.banHours}h` : 'permanente'} (/ac servidor banduracao)` });
+    const rows = [];
+    if (slice.length) {
+      rows.push(new ActionRowBuilder().addComponents(slice.map((b) => new ButtonBuilder()
+        .setCustomId(`dcac:unban:${server.id}:${b.id}`).setLabel(`Desbanir #${b.id}`).setStyle(ButtonStyle.Danger))));
+    }
+    if (pages > 1) {
+      rows.push(new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(`dcac:banpage:${server.id}:${p - 1}`).setLabel('◀').setStyle(ButtonStyle.Secondary).setDisabled(p === 0),
+        new ButtonBuilder().setCustomId(`dcac:banpage:${server.id}:${p + 1}`).setLabel('▶').setStyle(ButtonStyle.Secondary).setDisabled(p >= pages - 1),
+      ));
+    }
+    return { embeds: [embed], components: rows, flags: MessageFlags.Ephemeral };
   }
 
   function loginBlocked(userId) {
@@ -128,7 +188,7 @@ function createDiscordBot({ store, permissions, token, projectGuildId, logger = 
         `**Anti-cheat:** ${server.activated ? '🟢 ativado' : '⏳ aguardando sua confirmação'}`,
         '',
         server.activated
-          ? 'O anti-cheat já está ativo. Use `/ac painel` para configurar as proteções.'
+          ? 'O anti-cheat já está ativo. Use `/ac painel` para configurar as proteções e `/ac servidor logs` para receber as detecções.'
           : 'Clique em **Confirmar** para ligar o anti-cheat nesse servidor. Ele começa a valer em até alguns segundos.',
       ].join('\n'));
     const components = server.activated ? [] : [new ActionRowBuilder().addComponents(
@@ -168,7 +228,7 @@ function createDiscordBot({ store, permissions, token, projectGuildId, logger = 
       return interaction.reply(activationMessage(server, userId));
     }
 
-    if (sub === 'servidores') {
+    if (sub === 'servidor/lista') {
       const list = store.serversOfUser(userId, permissions.isBotAdmin(interaction));
       if (!list.length) return reply(interaction, 'Você não tem acesso a nenhum servidor. Use `/ac login id:<IDF> chave:<CHAVE>`.');
       const active = store.activeServerFor(userId);
@@ -179,11 +239,11 @@ function createDiscordBot({ store, permissions, token, projectGuildId, logger = 
         return `${online} ${serverLabel(s)}${on}${mark}`;
       });
       const embed = new EmbedBuilder().setTitle('🖥️ Seus servidores').setColor(COLORS.info).setDescription(lines.join('\n').slice(0, 4000))
-        .setFooter({ text: 'Use /ac usar id:<IDF> para trocar o servidor que os comandos configuram' });
+        .setFooter({ text: 'Use /ac servidor usar id:<IDF> para trocar o servidor que os comandos configuram' });
       return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
     }
 
-    if (sub === 'usar') {
+    if (sub === 'servidor/usar') {
       const server = store.getServer(interaction.options.getString('id', true));
       if (!server || !permissions.isAllowed(server, interaction)) return reply(interaction, '❌ Você não tem acesso a esse servidor.');
       store.setSelection(userId, server);
@@ -196,15 +256,16 @@ function createDiscordBot({ store, permissions, token, projectGuildId, logger = 
   async function handleCommand(interaction) {
     const group = interaction.options.getSubcommandGroup(false);
     const sub = interaction.options.getSubcommand();
+    const full = group ? `${group}/${sub}` : sub;
 
-    if (!group && NO_SERVER_SUBS.has(sub)) return handleServerCommands(interaction, sub);
+    if (NO_SERVER_SUBS.has(full)) return handleServerCommands(interaction, full);
 
     const server = store.activeServerFor(interaction.user.id);
     if (!server) return reply(interaction, '❌ Você não tem nenhum servidor. Use `/ac login id:<IDF> chave:<CHAVE>` (o IDF e a chave aparecem no console do servidor).');
     if (!permissions.isAllowed(server, interaction)) {
       return reply(interaction, `⛔ Você não tem permissão para configurar ${serverLabel(server)}. Peça a um dono para usar \`/ac donos adicionar\`.`);
     }
-    if (!group && OWNER_SUBS.has(sub) && !permissions.isOwner(server, interaction)) {
+    if (OWNER_SUBS.has(full) && !permissions.isOwner(server, interaction)) {
       return reply(interaction, '⛔ Apenas donos do servidor (quem fez `/ac login` com a chave) podem usar esse comando.');
     }
 
@@ -343,7 +404,9 @@ function createDiscordBot({ store, permissions, token, projectGuildId, logger = 
       case 'desbanir': {
         const ip = interaction.options.getString('ip', true).trim();
         if (!isValidIPv4Pattern(ip)) return reply(interaction, '❌ IP inválido. Use o formato 177.10.20.30 ou 177.10.*.*');
-        store.queueCommand(server, 'unbanip', ip);
+        const match = store.activeBans(server).filter((b) => b.ip === ip);
+        if (match.length) for (const b of match) store.unban(server, b, interaction.user.id);
+        else store.queueCommand(server, 'unbanip', ip);
         audit(interaction, server, `desbanir ${ip}`);
         return reply(interaction, `✅ Pedido de desban de **${ip}** enviado. ${store.isServerOnline(server) ? '' : '⚠️ O servidor está offline; será executado quando ele voltar (até 10 min).'}`);
       }
@@ -364,6 +427,131 @@ function createDiscordBot({ store, permissions, token, projectGuildId, logger = 
         audit(interaction, server, `anunciar ${msg}`);
         return reply(interaction, `📢 Mensagem enviada: \`${msg.replace(/_/g, ' ')}\``);
       }
+
+      case 'preset': {
+        const key = interaction.options.getString('tipo', true);
+        const preset = PRESETS[key];
+        if (!preset) return reply(interaction, '❌ Preset inválido.');
+        store.updateServer(server, (s) => { s.protections = preset.build(); });
+        audit(interaction, server, `preset ${key}`);
+        return reply(interaction, `✅ Preset **${preset.name}** aplicado: ${preset.desc} ${pollMsg}`);
+      }
+
+      case 'exportar': {
+        const data = JSON.stringify(store.exportConfig(server), null, 2);
+        const file = new AttachmentBuilder(Buffer.from(data, 'utf8'), { name: `dcac-${server.id}.json` });
+        audit(interaction, server, 'exportar configuração');
+        return interaction.reply({ content: `📦 Configuração de ${serverLabel(server)}. Use \`/ac protecao importar\` para aplicar em outro servidor.`, files: [file], flags: MessageFlags.Ephemeral });
+      }
+
+      case 'importar': {
+        const att = interaction.options.getAttachment('arquivo', true);
+        if (att.size > MAX_IMPORT_BYTES) return reply(interaction, '❌ Arquivo grande demais (máx. 64 KB).');
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+        try {
+          const res = await fetch(att.url);
+          if (!res.ok) throw new Error('Não foi possível baixar o arquivo.');
+          const text = await res.text();
+          if (text.length > MAX_IMPORT_BYTES) throw new Error('Arquivo grande demais (máx. 64 KB).');
+          let data;
+          try { data = JSON.parse(text); } catch { throw new Error('O arquivo não é um JSON válido.'); }
+          store.importConfig(server, data);
+        } catch (err) {
+          return interaction.editReply(`❌ ${err.message}`);
+        }
+        audit(interaction, server, `importar configuração (${att.name})`);
+        return interaction.editReply(`✅ Configuração importada em ${serverLabel(server)}. ${pollMsg}`);
+      }
+
+      case 'alertas': {
+        const ativo = interaction.options.getBoolean('ativo', true);
+        store.updateServer(server, (s) => { s.alerts = ativo; }, { bump: false });
+        audit(interaction, server, `alertas = ${ativo}`);
+        return reply(interaction, ativo ? '🔔 Vou avisar no canal de logs quando o servidor cair ou voltar.' : '🔕 Alertas de queda desligados.');
+      }
+
+      case 'resumo': {
+        const ativo = interaction.options.getBoolean('ativo', true);
+        store.updateServer(server, (s) => { s.dailySummary = ativo; s.lastSummaryDay = todayKey(); }, { bump: false });
+        audit(interaction, server, `resumo diário = ${ativo}`);
+        return reply(interaction, ativo ? `🗓️ Resumo diário ligado: todo dia à meia-noite (${TIMEZONE}) no canal de logs.` : '🗓️ Resumo diário desligado.');
+      }
+
+      case 'banduracao': {
+        const horas = interaction.options.getInteger('horas', true);
+        store.updateServer(server, (s) => { s.banHours = horas; }, { bump: false });
+        audit(interaction, server, `duração dos bans = ${horas}h`);
+        return reply(interaction, horas ? `⏱️ Novos bans do anti-cheat duram **${horas}h** e são desfeitos automaticamente.` : '⏱️ Novos bans do anti-cheat são **permanentes**.');
+      }
+
+      case 'auditoria': {
+        const list = store.getAudit(server).slice(-15).reverse();
+        if (!list.length) return reply(interaction, 'Nenhuma alteração registrada ainda.');
+        const embed = new EmbedBuilder().setTitle(`🧾 Auditoria — ${server.name}`.slice(0, 256)).setColor(COLORS.info)
+          .setDescription(list.map((a) => `${ts(a.time)} <@${a.userId}> — ${escapeMarkdown(a.text)}`).join('\n').slice(0, 4000));
+        return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral, allowedMentions: { parse: [] } });
+      }
+
+      case 'jogador': {
+        const nick = interaction.options.getString('nick', true).trim();
+        const info = store.playerInfo(server, nick);
+        if (!info.total && !info.bans.length) return reply(interaction, `Nenhum registro para **${escapeMarkdown(nick)}**.`);
+        const embed = new EmbedBuilder().setTitle(`🧍 ${nick}`.slice(0, 256)).setColor(info.bans.some((b) => !b.unbannedAt) ? COLORS.ban : COLORS.warn)
+          .addFields(
+            { name: 'Detecções', value: `**${info.total}** · primeira ${info.first ? ts(info.first) : '-'} · última ${info.last ? ts(info.last) : '-'}` },
+            { name: 'Por proteção', value: info.byProtection.map(([c, n]) => `${protName(c)}: **${n}**`).join('\n').slice(0, 1024) || '-', inline: true },
+            { name: 'IPs usados', value: info.ips.map((ip) => `||${ip}||`).join('\n').slice(0, 1024) || '-', inline: true },
+            { name: 'Bans', value: info.bans.map((b) => `#${b.id} ${protName(b.code)} ${ts(b.time)}${b.unbannedAt ? ' (desfeito)' : ''}`).join('\n').slice(0, 1024) || 'nenhum' },
+            { name: 'Recentes', value: info.recent.map((d) => `${ts(d.time)} ${protName(d.code)} · ${ACTION_LABELS[d.action]} · ${escapeMarkdown(d.detail)}`).join('\n').slice(0, 1024) || '-' },
+          );
+        return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
+      }
+
+      case 'estatisticas': {
+        const periodKey = interaction.options.getString('periodo') || '24h';
+        return interaction.reply({ embeds: [statsEmbed(server, periodKey)], flags: MessageFlags.Ephemeral });
+      }
+
+      case 'online': {
+        if (!store.isServerOnline(server)) return reply(interaction, '❌ O servidor está offline.');
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+        const requested = Date.now();
+        store.queueCommand(server, 'plist', '1');
+        const deadline = requested + Math.min(server.pollSeconds * 2 + 5, 60) * 1000;
+        let snap = store.getPlayers(server);
+        while ((!snap || snap.time < requested) && Date.now() < deadline) {
+          await sleep(1000);
+          snap = store.getPlayers(server);
+        }
+        if (!snap || snap.time < requested) return interaction.editReply('⌛ O servidor não respondeu a tempo. Tente de novo em alguns segundos.');
+        const lines = snap.list.map((pl) => `\`${String(pl.id).padStart(3, ' ')}\` ${escapeMarkdown(pl.name)} · ${pl.ping} ms · score ${pl.score}`);
+        const embed = new EmbedBuilder().setTitle(`👥 Online em ${server.name} (${snap.list.length})`.slice(0, 256)).setColor(COLORS.info)
+          .setDescription(lines.join('\n').slice(0, 4000) || 'Ninguém online.')
+          .setFooter({ text: 'Use o ID com /ac moderacao kick, pm, congelar...' });
+        return interaction.editReply({ embeds: [embed] });
+      }
+
+      case 'pm': {
+        const id = interaction.options.getInteger('id', true);
+        const msg = sanitizeGameText(interaction.options.getString('mensagem', true));
+        if (!msg) return reply(interaction, '❌ Mensagem vazia após remover caracteres inválidos.');
+        if (!store.isServerOnline(server)) return reply(interaction, '❌ O servidor está offline.');
+        store.queueCommand(server, 'pm', `${id}|${msg}`);
+        audit(interaction, server, `pm ${id}: ${msg}`);
+        return reply(interaction, `✉️ Mensagem enviada ao ID **${id}**: \`${msg.replace(/_/g, ' ')}\``);
+      }
+
+      case 'congelar':
+      case 'descongelar': {
+        const id = interaction.options.getInteger('id', true);
+        if (!store.isServerOnline(server)) return reply(interaction, '❌ O servidor está offline.');
+        store.queueCommand(server, sub === 'congelar' ? 'freeze' : 'unfreeze', id);
+        audit(interaction, server, `${sub} ${id}`);
+        return reply(interaction, `${sub === 'congelar' ? '🧊 Congelando' : '🔥 Descongelando'} o ID **${id}**.`);
+      }
+
+      case 'bans':
+        return interaction.reply(bansMessage(server));
 
       default:
         return reply(interaction, 'Comando desconhecido.');
@@ -444,6 +632,15 @@ function createDiscordBot({ store, permissions, token, projectGuildId, logger = 
     if (!permissions.isAllowed(server, interaction)) {
       return reply(interaction, '⛔ Você não tem permissão para configurar esse servidor.');
     }
+    if (action === 'unban') {
+      const ban = store.activeBans(server).find((b) => b.id === Number(catKey));
+      if (ban) {
+        store.unban(server, ban, interaction.user.id);
+        audit(interaction, server, `desbanir #${ban.id} ${ban.name} (${ban.ip})`);
+      }
+      return interaction.update(bansMessage(server));
+    }
+    if (action === 'banpage') return interaction.update(bansMessage(server, Number(catKey) || 0));
     const catList = byCategory.get(catKey) || [];
     if (action === 'toggle' && interaction.isStringSelectMenu()) {
       const keys = interaction.values.filter((k) => byKey.has(k));
@@ -508,9 +705,48 @@ function createDiscordBot({ store, permissions, token, projectGuildId, logger = 
     }
   });
 
+  // ------------------------------------------------- tarefas automáticas
+  function todayKey(date = new Date()) {
+    return new Intl.DateTimeFormat('en-CA', { timeZone: TIMEZONE, year: 'numeric', month: '2-digit', day: '2-digit' }).format(date);
+  }
+
+  const lastOnline = new Map(); // serverId -> boolean (só depois do 1º contato)
+  function checkServers() {
+    for (const server of store.servers.values()) {
+      // queda / retorno do servidor
+      if (store.getStatus(server).lastSeen) {
+        const online = store.isServerOnline(server);
+        const prev = lastOnline.get(server.id);
+        if (prev !== undefined && prev !== online && server.alerts) {
+          sendToServer(server, [new EmbedBuilder()
+            .setTitle((online ? `🟢 ${server.name} voltou` : `🔴 ${server.name} caiu`).slice(0, 256))
+            .setColor(online ? COLORS.ok : COLORS.ban)
+            .setDescription(online ? 'O servidor voltou a se comunicar com o anti-cheat.' : `Sem contato com o servidor há mais de ${server.pollSeconds * 3 + 10}s.`)
+            .setFooter({ text: server.id })
+            .setTimestamp()]);
+        }
+        lastOnline.set(server.id, online);
+      }
+      // bans temporários vencidos
+      for (const b of store.expireBans(server)) {
+        logger.log(`[bans] ${server.id} ban #${b.id} (${b.name}) expirou`);
+        sendToServer(server, [new EmbedBuilder().setTitle('⏱️ Ban expirado').setColor(COLORS.info)
+          .setDescription(`**${escapeMarkdown(b.name)}** (||${b.ip}||) foi desbanido automaticamente.`).setFooter({ text: server.id }).setTimestamp()]);
+      }
+      // resumo diário
+      const today = todayKey();
+      if (server.dailySummary && server.lastSummaryDay !== today) {
+        store.updateServer(server, (s) => { s.lastSummaryDay = today; }, { bump: false });
+        sendToServer(server, [statsEmbed(server, '24h').setTitle(`🗓️ Resumo diário — ${server.name}`.slice(0, 256))]);
+      }
+    }
+  }
+  setInterval(() => { try { checkServers(); } catch (err) { logger.error('[tarefas]', err); } }, 30 * 1000).unref();
+
   return {
     client,
     enqueueDetection,
+    checkServers,
     start: () => client.login(token),
   };
 }
