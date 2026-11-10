@@ -2,7 +2,7 @@
 
 const {
   Client, GatewayIntentBits, Events, MessageFlags, EmbedBuilder, escapeMarkdown,
-  ActionRowBuilder, ButtonBuilder, ButtonStyle, AttachmentBuilder,
+  ActionRowBuilder, ButtonBuilder, ButtonStyle, AttachmentBuilder, ActivityType,
 } = require('discord.js');
 const { commands } = require('./commands');
 const {
@@ -12,6 +12,7 @@ const { buildPanel, buildStatusEmbed, buildDetectionEmbed, COLORS } = require('.
 const { isValidNick, isValidIPv4Pattern, sanitizeGameText } = require('./config-format');
 const { normalizeId } = require('./store');
 const { PRESETS } = require('./presets');
+const { collectStats, buildPresenceTexts } = require('./presence');
 
 const MAX_WHITELIST = 64;
 const LOGIN_MAX_FAILS = 5;
@@ -685,8 +686,22 @@ function createDiscordBot({ store, permissions, token, projectGuildId, logger = 
   }
   client.on(Events.GuildCreate, leaveForeignGuild);
 
+  // ---------------------------------------------- status (atividade) do bot
+  let presenceIndex = 0;
+  const presenceMs = Math.max(15, Number.parseInt(process.env.AC_STATUS_INTERVAL || '30', 10)) * 1000;
+  function updatePresence() {
+    if (!client.isReady()) return;
+    const texts = buildPresenceTexts(collectStats(store));
+    const text = texts[presenceIndex % texts.length];
+    presenceIndex += 1;
+    // status personalizado: o texto aparece exatamente como escrito
+    client.user.setPresence({ activities: [{ type: ActivityType.Custom, name: 'custom', state: text.slice(0, 128) }], status: 'online' });
+  }
+  setInterval(() => { try { updatePresence(); } catch (err) { logger.error('[status]', err.message); } }, presenceMs).unref();
+
   client.once(Events.ClientReady, async (c) => {
     logger.log(`[discord] conectado como ${c.user.tag}`);
+    updatePresence();
     for (const guild of c.guilds.cache.values()) await leaveForeignGuild(guild);
     try {
       // remove comandos globais antigos e registra só no Discord do projeto

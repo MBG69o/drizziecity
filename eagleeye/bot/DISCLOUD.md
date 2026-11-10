@@ -37,6 +37,7 @@ VERSION=latest
 | `AC_API_HOST` | `0.0.0.0` |
 | `AC_API_PORT` | `8080` (porta que a Discloud usa para sites; com outra porta o site dá erro 502) |
 | `AC_TRUST_PROXY` | `true` (a Discloud fica na frente do app; assim o bot vê o IP real dos servidores) |
+| `AC_STATUS_INTERVAL` | `30` (opcional: segundos entre as trocas de status do bot) |
 
 ## 4. Testar a API
 No navegador, abra `https://eagleeye.discloud.dev`. Deve aparecer a página **"EagleEYE API"**.

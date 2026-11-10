@@ -317,3 +317,38 @@ test('modo site: página inicial, /health e IP real atrás de proxy', async () =
   assert.strictEqual(store.getPending(id).address, '177.10.20.30');
   s2.close();
 });
+
+test('status do bot usa dados reais de todos os servidores', () => {
+  const { collectStats, buildPresenceTexts } = require('../src/presence');
+  const st = new Store(fs.mkdtempSync(path.join(os.tmpdir(), 'eagleeye-p-'))).load();
+  // sem servidores
+  assert.match(buildPresenceTexts(collectStats(st))[0], /Aguardando servidores/);
+
+  const mk = (id, players, online, activated = true) => {
+    const pend = genToken();
+    const sid = pend.slice(0, 9);
+    st.notePending(sid, require('../src/store').hashToken(pend), { name: id, players, maxPlayers: 100, port: 7777, address: '1.1.1.1' });
+    const srv = st.loginWithToken(pend).server;
+    if (activated) st.activate(srv);
+    st.status.set(srv.id, { players, maxPlayers: 100, lastSeen: online ? Date.now() : Date.now() - 3600e3 });
+    return srv;
+  };
+  const a = mk('A', 120, true);
+  mk('B', 380, true);
+  mk('C', 999, false);            // offline: não conta
+  mk('D', 50, true, false);       // ainda não confirmado: não conta
+  st.addDetection(a, { time: Date.now(), code: 8, name: 'X', action: 2, ip: '1.2.3.4', detail: '-' });
+  st.addDetection(a, { time: Date.now() - 3 * 24 * 3600e3, code: 8, name: 'Y', action: 0, ip: '', detail: '-' });
+
+  const stats = collectStats(st);
+  assert.deepStrictEqual(
+    { servers: stats.servers, players: stats.players, detections: stats.detections, bans: stats.bans, linked: stats.linked },
+    { servers: 2, players: 500, detections: 1, bans: 1, linked: 4 },
+  );
+  const texts = buildPresenceTexts(stats);
+  assert.ok(texts.includes('🦅 Vigiando 2 servidores'));
+  assert.ok(texts.includes('👥 Analisando 500 jogadores simultaneamente'));
+  assert.ok(texts.includes('🚨 1 ameaça detectada nas últimas 24h'));
+  assert.ok(texts.includes('🔨 1 cheater banido nos últimos 30 dias'));
+  assert.ok(texts.every((t) => t.length <= 128));
+});
