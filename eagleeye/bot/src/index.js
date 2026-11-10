@@ -28,6 +28,8 @@ const bot = createDiscordBot({
   permissions,
   token: process.env.DISCORD_TOKEN,
   projectGuildId,
+  // canal da equipe que recebe os alertas de todos os servidores
+  alertChannelId: (process.env.AC_ALERT_CHANNEL_ID ?? '1569638075166892072').trim() || null,
 });
 
 // AC_API_PORT tem prioridade; PORT é a variável usada por várias hospedagens de sites

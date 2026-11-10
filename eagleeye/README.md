@@ -166,7 +166,9 @@ npm start                 # ou: pm2 start src/index.js --name eagleeye
 
 ## 💬 Comandos do Discord
 
-Os comandos valem para o **seu** servidor, aquele registrado no seu nome no `donos.json`. Quem tem acesso a mais de um servidor troca com `/ac servidor usar`.
+Os comandos valem para o **seu** servidor. Vários clientes podem usar o bot ao mesmo tempo, no mesmo Discord, sem conflito: cada um só vê e configura os próprios servidores.
+
+**Mais de um servidor?** Ao usar qualquer comando, aparece um **menu só para você** para escolher em qual servidor ele vai agir. O último escolhido já vem marcado.
 
 **Principais**
 | Comando | Descrição |
@@ -274,6 +276,14 @@ No jogo, o include avisa no console e para os admins online:
 - ataques contidos (bots, RCON, crasher);
 - quando o anti-cheat é desligado ou religado pelo Discord;
 - um lembrete a cada 10 minutos enquanto o servidor estiver desprotegido.
+
+### Central de alertas da equipe
+O canal `AC_ALERT_CHANNEL_ID` (padrão `1569638075166892072`) recebe os alertas de **todos** os servidores:
+- todas as notificações de segurança (menos o relatório semanal), com o servidor e os donos;
+- servidor caiu ou voltou;
+- servidor novo cadastrado.
+
+Ninguém é marcado nesse canal. Ele recebe os alertas mesmo que o dono tenha desligado as notificações dele. Para desligar a central, deixe a variável vazia.
 
 ## 🛡️ Proteção da API (anti-DDoS)
 

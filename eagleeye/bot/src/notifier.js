@@ -56,7 +56,9 @@ const MODES = ['ambos', 'dm', 'canal', 'desligado'];
  * Notificações de segurança para os donos de cada servidor.
  * Entrega por DM e/ou no canal de logs (com menção), conforme /ac servidor notificacoes.
  */
-function createNotifier({ store, client, logger = console, now = () => Date.now() }) {
+function createNotifier({
+  store, client, logger = console, now = () => Date.now(), alertChannelId = null,
+}) {
   const recent = new Map(); // serverId -> [{ time, code, action }]
   const authFails = new Map(); // serverId -> [time]
   const sent = []; // histórico (para testes/depuração)
@@ -88,7 +90,9 @@ function createNotifier({ store, client, logger = console, now = () => Date.now(
     type, title, text, color = COLORS.warn, components = [], force = false, recipients = null,
   }) {
     const m = mode(server);
-    if (m === 'desligado' && !force) return false;
+    const ownersOn = m !== 'desligado' || force;
+    const toCentral = Boolean(alertChannelId) && type !== 'weekly';
+    if (!ownersOn && !toCentral) return false;
     if (!force && !canSend(server, type)) return false;
     markSent(server, type);
     sent.push({ serverId: server.id, type, time: now() });
@@ -102,6 +106,24 @@ function createNotifier({ store, client, logger = console, now = () => Date.now(
       .setTimestamp(now());
 
     if (!client || !client.isReady || !client.isReady()) return true;
+
+    // cópia para a central de alertas da equipe (sem marcar ninguém)
+    if (toCentral) {
+      try {
+        const channel = await client.channels.fetch(alertChannelId);
+        if (channel && channel.isTextBased()) {
+          const ownersText = owners.map((id) => `<@${id}>`).join(', ') || 'sem dono';
+          await channel.send({
+            embeds: [embedFor(owners[0] ? `<@${owners[0]}>` : 'dono')
+              .addFields({ name: 'Servidor', value: `${escapeMarkdown(server.name)} (\`${server.id}\`)`, inline: true }, { name: 'Donos', value: ownersText.slice(0, 1024), inline: true })],
+            allowedMentions: { parse: [] },
+          });
+        }
+      } catch (err) {
+        logger.error(`[notificacoes] central de alertas ${alertChannelId}:`, err.message);
+      }
+    }
+    if (!ownersOn) return true;
 
     // DM para cada dono; quem estiver com a DM fechada recebe no canal
     const failedDm = [];

@@ -34,6 +34,7 @@ VERSION=latest
 | `DISCORD_TOKEN` | token do bot |
 | `DISCORD_GUILD_ID` | ID do Discord do projeto |
 | `AC_BOT_ADMIN_IDS` | seu ID do Discord (opcional) |
+| `AC_ALERT_CHANNEL_ID` | `1569638075166892072` (canal da equipe com os alertas de todos os servidores; já é o padrão) |
 | `AC_API_HOST` | `0.0.0.0` |
 | `AC_API_PORT` | `8080` (porta que a Discloud usa para sites; com outra porta o site dá erro 502) |
 | `AC_TRUST_PROXY` | `true` (a Discloud fica na frente do app; assim o bot vê o IP real dos servidores) |

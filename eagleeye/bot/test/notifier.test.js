@@ -14,7 +14,7 @@ const rnd = (n) => Array.from({ length: n }, () => ALPHA[Math.floor(Math.random(
 const genToken = () => `EE-${rnd(6)}-${rnd(4)}-${rnd(4)}-${rnd(4)}-${rnd(4)}`;
 const flush = async () => { for (let i = 0; i < 20; i++) await new Promise((r) => setImmediate(r)); };
 
-function setup({ owners = ['u1'], noDm = [] } = {}) {
+function setup({ owners = ['u1'], noDm = [], alertChannelId = null } = {}) {
   let t = Date.now();
   const store = new Store(fs.mkdtempSync(path.join(os.tmpdir(), 'eagleeye-n-'))).load();
   const tok = genToken();
@@ -27,7 +27,7 @@ function setup({ owners = ['u1'], noDm = [] } = {}) {
     users: { fetch: async (id) => ({ send: async (p) => { if (noDm.includes(id)) throw new Error('DM fechada'); dms.push({ id, p }); } }) },
     channels: { fetch: async (id) => ({ isTextBased: () => true, send: async (p) => { chan.push({ id, p }); } }) },
   };
-  const notifier = createNotifier({ store, client, logger: { log() {}, error() {} }, now: () => t });
+  const notifier = createNotifier({ store, client, logger: { log() {}, error() {} }, now: () => t, alertChannelId });
   const online = () => store.status.set(server.id, { players: 10, maxPlayers: 100, lastSeen: Date.now(), configVersion: server.version });
   return { store, server, notifier, dms, chan, advance: (ms) => { t += ms; }, online };
 }
@@ -216,4 +216,23 @@ test('verificação de segurança: nota e itens', () => {
 test('versão mais recente do bot é a mesma do include', () => {
   const inc = fs.readFileSync(path.join(__dirname, '../../pawn/include/eagleeye.inc'), 'utf8');
   assert.strictEqual(/#define EE_VERSION "([^"]+)"/.exec(inc)[1], require('../src/security').LATEST_INCLUDE);
+});
+
+test('central de alertas recebe cópia de tudo (sem marcar ninguém), mesmo com o dono desligado', async () => {
+  const { server, store, notifier, chan } = setup({ alertChannelId: 'ALERTAS' });
+  for (let i = 0; i < 15; i++) notifier.onDetection(server, { code: 4, action: 1, name: 'P' });
+  await flush();
+  const central = chan.filter((m) => m.id === 'ALERTAS');
+  assert.strictEqual(central.filter((m) => title(m) === '🚨 Suposto ataque detectado').length, 1);
+  const c = central.find((m) => title(m) === '🚨 Suposto ataque detectado');
+  assert.deepStrictEqual(c.p.allowedMentions, { parse: [] });
+  assert.ok(c.p.embeds[0].toJSON().fields.some((f) => f.name === 'Servidor' && f.value.includes(server.id)));
+
+  store.updateServer(server, (s) => { s.notifyMode = 'desligado'; }, { bump: false });
+  const before = chan.length;
+  notifier.onAuthFail(server, '6.6.6.6');
+  for (let i = 0; i < 9; i++) notifier.onAuthFail(server, '6.6.6.6');
+  await flush();
+  const novos = chan.slice(before);
+  assert.deepStrictEqual(novos.map((m) => m.id), ['ALERTAS'], 'dono desligado: só a central recebe');
 });

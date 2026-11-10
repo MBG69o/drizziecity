@@ -2,8 +2,9 @@
 
 const {
   Client, GatewayIntentBits, Events, MessageFlags, EmbedBuilder, escapeMarkdown,
-  ActionRowBuilder, ButtonBuilder, ButtonStyle, AttachmentBuilder, ActivityType,
+  ActionRowBuilder, ButtonBuilder, ButtonStyle, AttachmentBuilder, ActivityType, StringSelectMenuBuilder,
 } = require('discord.js');
+const crypto = require('crypto');
 const { commands } = require('./commands');
 const {
   PROTECTIONS, CATEGORIES, ACTIONS, ACTION_LABELS, byKey, byId, byCategory, defaultProtectionState,
@@ -28,11 +29,22 @@ const NO_SERVER_SUBS = new Set(['login', 'meuservidor', 'servidor/lista', 'servi
 const OWNER_SUBS = new Set(['servidor/logout', 'servidor/novachave']);
 const TIMEZONE = process.env.AC_TIMEZONE || 'America/Sao_Paulo';
 
-function createDiscordBot({ store, permissions, token, projectGuildId, logger = console }) {
+function createDiscordBot({
+  store, permissions, token, projectGuildId, alertChannelId = null, logger = console,
+}) {
   if (!projectGuildId) throw new Error('projectGuildId é obrigatório (o bot só funciona no Discord do projeto).');
   const client = new Client({ intents: [GatewayIntentBits.Guilds] });
   const logQueues = new Map(); // channelId -> [embeds]
-  const notifier = createNotifier({ store, client, logger });
+  const notifier = createNotifier({ store, client, logger, alertChannelId });
+
+  // ------------------------------------------- central de alertas (staff)
+  function sendAlert(embed) {
+    if (!alertChannelId) return;
+    const q = logQueues.get(alertChannelId) || [];
+    q.push(embed);
+    if (q.length > 200) q.splice(0, q.length - 200);
+    logQueues.set(alertChannelId, q);
+  }
   const loginFails = new Map(); // userId -> [timestamps]
 
   // ------------------------------------------------------------------ logs
@@ -222,6 +234,11 @@ function createDiscordBot({ store, permissions, token, projectGuildId, logger = 
       }
       const { server } = result;
       notifier.onLogin(server, userId, result.created);
+      if (result.created) {
+        sendAlert(new EmbedBuilder().setTitle('🆕 Novo servidor cadastrado').setColor(COLORS.info)
+          .setDescription(`**${escapeMarkdown(server.name)}** (\`${server.id}\`) foi cadastrado por <@${userId}>.`)
+          .setTimestamp());
+      }
       store.updateServer(server, (s) => {
         if (!s.owners.includes(userId)) s.owners.push(userId);
       }, { bump: false });
@@ -263,15 +280,87 @@ function createDiscordBot({ store, permissions, token, projectGuildId, logger = 
     return undefined;
   }
 
+  // ------------------------------- seleção de servidor (mais de 1 servidor)
+  const PICK_TTL_MS = 5 * 60 * 1000;
+  const pendingPicks = new Map(); // id -> { interaction, userId, createdAt }
+
+  /** Pergunta (só para quem usou o comando) qual servidor configurar. */
+  function askServer(interaction, full, list) {
+    for (const [k, v] of pendingPicks) if (Date.now() - v.createdAt > PICK_TTL_MS) pendingPicks.delete(k);
+    const id = crypto.randomBytes(6).toString('hex');
+    pendingPicks.set(id, { interaction, userId: interaction.user.id, createdAt: Date.now() });
+    const last = store.activeServerFor(interaction.user.id);
+    const sorted = list.slice().sort((a, b) => Number(store.isServerOnline(b)) - Number(store.isServerOnline(a)) || a.name.localeCompare(b.name));
+    const shown = sorted.slice(0, 25);
+    const menu = new StringSelectMenuBuilder()
+      .setCustomId(`ee:pick:${id}:0`)
+      .setPlaceholder('Escolha o servidor…')
+      .addOptions(shown.map((s) => ({
+        label: s.name.slice(0, 100),
+        value: s.id,
+        description: `${s.id} · ${store.isServerOnline(s) ? 'online' : 'offline'}${s.activated ? '' : ' · não confirmado'}`.slice(0, 100),
+        emoji: store.isServerOnline(s) ? '🟢' : '🔴',
+        default: Boolean(last && last.id === s.id),
+      })));
+    return interaction.reply({
+      content: `🖥️ Você tem **${list.length} servidores**. Qual deseja usar no \`/ac ${full.replace('/', ' ')}\`?${list.length > 25 ? '\n(mostrando os 25 primeiros)' : ''}`,
+      components: [new ActionRowBuilder().addComponents(menu)],
+      flags: MessageFlags.Ephemeral,
+    });
+  }
+
+  /** Depois da escolha, executa o comando original no servidor escolhido. */
+  async function handlePick(interaction, pickId) {
+    const pick = pendingPicks.get(pickId);
+    if (!pick || Date.now() - pick.createdAt > PICK_TTL_MS) {
+      pendingPicks.delete(pickId);
+      return interaction.update({ content: '⌛ Essa seleção expirou. Use o comando de novo.', components: [] });
+    }
+    if (pick.userId !== interaction.user.id) return reply(interaction, '⛔ Essa seleção não é sua.');
+    const server = store.getServer(interaction.values[0]);
+    if (!server || !permissions.isAllowed(server, interaction)) return reply(interaction, '❌ Você não tem acesso a esse servidor.');
+    pendingPicks.delete(pickId);
+    store.setSelection(interaction.user.id, server);
+
+    // o comando original responde na própria mensagem do menu
+    const clean = (p) => {
+      const payload = typeof p === 'string' ? { content: p } : { ...p };
+      delete payload.flags;
+      return {
+        ...payload, content: payload.content ?? null, embeds: payload.embeds ?? [], components: payload.components ?? [],
+      };
+    };
+    const wrapped = Object.create(pick.interaction);
+    Object.assign(wrapped, {
+      pickedServer: server,
+      reply: (p) => interaction.update(clean(p)),
+      deferReply: () => interaction.deferUpdate(),
+      editReply: (p) => interaction.editReply(clean(p)),
+      followUp: (p) => interaction.followUp(p),
+    });
+    Object.defineProperty(wrapped, 'replied', { get: () => interaction.replied });
+    Object.defineProperty(wrapped, 'deferred', { get: () => interaction.deferred });
+    return handleCommand(wrapped);
+  }
+
   // ---------------------------------------------------------- handlers
   async function handleCommand(interaction) {
     const group = interaction.options.getSubcommandGroup(false);
     const sub = interaction.options.getSubcommand();
     const full = group ? `${group}/${sub}` : sub;
 
+    // quem tem mais de 1 servidor escolhe em qual o comando vai agir
+    const picked = interaction.pickedServer || null;
+    const pickable = !NO_SERVER_SUBS.has(full) || full === 'meuservidor';
+    if (pickable && !picked) {
+      const mine = store.serversOfUser(interaction.user.id, permissions.isBotAdmin(interaction));
+      if (mine.length > 1) return askServer(interaction, full, mine);
+    }
+    if (full === 'meuservidor' && picked) return interaction.reply(activationMessage(picked, interaction.user.id));
+
     if (NO_SERVER_SUBS.has(full)) return handleServerCommands(interaction, full);
 
-    const server = store.activeServerFor(interaction.user.id);
+    const server = picked || store.activeServerFor(interaction.user.id);
     if (!server) return reply(interaction, '❌ Você não tem nenhum servidor. Use `/ac login token:<TOKEN>` (o token de acesso aparece no console do servidor).');
     if (!permissions.isAllowed(server, interaction)) {
       return reply(interaction, `⛔ Você não tem permissão para configurar ${serverLabel(server)}. Peça a um dono para usar \`/ac donos adicionar\`.`);
@@ -650,6 +739,7 @@ function createDiscordBot({ store, permissions, token, projectGuildId, logger = 
   async function handleComponent(interaction) {
     // ee:<acao>:<serverId>:<categoria>
     const [, action, serverId, catKey] = interaction.customId.split(':');
+    if (action === 'pick' && interaction.isStringSelectMenu()) return handlePick(interaction, serverId);
     const server = store.getServer(normalizeId(serverId));
     if (!server) return reply(interaction, '❌ Esse servidor não existe mais.');
 
@@ -814,13 +904,15 @@ function createDiscordBot({ store, permissions, token, projectGuildId, logger = 
       if (store.getStatus(server).lastSeen) {
         const online = store.isServerOnline(server);
         const prev = lastOnline.get(server.id);
-        if (prev !== undefined && prev !== online && server.alerts) {
-          sendToServer(server, [new EmbedBuilder()
+        if (prev !== undefined && prev !== online) {
+          const embed = new EmbedBuilder()
             .setTitle((online ? `🟢 ${server.name} voltou` : `🔴 ${server.name} caiu`).slice(0, 256))
             .setColor(online ? COLORS.ok : COLORS.ban)
             .setDescription(online ? 'O servidor voltou a se comunicar com o anti-cheat.' : `Sem contato com o servidor há mais de ${server.pollSeconds * 3 + 10}s.`)
             .setFooter({ text: server.id })
-            .setTimestamp()]);
+            .setTimestamp();
+          if (server.alerts) sendToServer(server, [embed]);
+          sendAlert(embed);
         }
         lastOnline.set(server.id, online);
       }
