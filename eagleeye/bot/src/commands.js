@@ -124,6 +124,18 @@ const acCommand = new SlashCommandBuilder()
     .addSubcommand((s) => s.setName('remover').setDescription('Remove a permissão de um usuário (inclusive donos) ou cargo')
       .addUserOption((o) => o.setName('usuario').setDescription('Usuário'))
       .addRoleOption((o) => o.setName('cargo').setDescription('Cargo')))
-    .addSubcommand((s) => s.setName('listar').setDescription('Lista quem tem permissão')));
+    .addSubcommand((s) => s.setName('listar').setDescription('Lista quem tem permissão')))
+  .addSubcommandGroup((g) => g.setName('licenca').setDescription('Licenças do plugin (só administradores do bot)')
+    .addSubcommand((s) => s.setName('criar').setDescription('Emite uma licença nova')
+      .addStringOption((o) => o.setName('cliente').setDescription('Nome do cliente').setRequired(false).setMaxLength(100))
+      .addStringOption((o) => o.setName('nota').setDescription('Observação').setRequired(false).setMaxLength(200))
+      .addIntegerOption((o) => o.setName('dias').setDescription('Validade em dias (vazio = sem validade)').setRequired(false).setMinValue(1).setMaxValue(3650)))
+    .addSubcommand((s) => s.setName('revogar').setDescription('Revoga uma licença (o plugin para na hora)')
+      .addStringOption((o) => o.setName('chave').setDescription('Chave da licença').setRequired(true).setMaxLength(40)))
+    .addSubcommand((s) => s.setName('reativar').setDescription('Reativa uma licença revogada')
+      .addStringOption((o) => o.setName('chave').setDescription('Chave da licença').setRequired(true).setMaxLength(40)))
+    .addSubcommand((s) => s.setName('info').setDescription('Detalhes de uma licença')
+      .addStringOption((o) => o.setName('chave').setDescription('Chave da licença').setRequired(true).setMaxLength(40)))
+    .addSubcommand((s) => s.setName('listar').setDescription('Lista as licenças emitidas')));
 
 module.exports = { commands: [acCommand.toJSON()] };

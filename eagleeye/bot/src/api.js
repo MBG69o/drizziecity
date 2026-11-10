@@ -55,6 +55,7 @@ function cleanName(name) {
 function startApi({
   store, host, port, allowedIps = [], trustProxy = false, onDetection, logger = console,
   guard = new Guard(), maxConnections = 1000, onAuthFail = () => {}, onStatus = () => {},
+  licenses = null, requireLicense = false,
 }) {
   /** Token errado: conta para o bloqueio do IP e avisa o dono se o ID existir. */
   function authFailed(url, ip) {
@@ -137,6 +138,15 @@ function startApi({
 
     if (allowedIps.length && !allowedIps.includes(ip)) return send(res, 403, 'forbidden');
 
+    // o plugin confirma a licença aqui (resposta assinada; revogação em tempo real)
+    if (req.method === 'GET' && url.pathname === '/plugin/license') {
+      if (!licenses) return send(res, 404, 'licensing off');
+      const key = (url.searchParams.get('key') || '').slice(0, 40);
+      const id = (url.searchParams.get('id') || '').slice(0, 16);
+      const nonce = (url.searchParams.get('nonce') || '').slice(0, 32).replace(/[^A-Za-z0-9]/g, '');
+      return send(res, 200, licenses.sign(key, id, nonce, ip).body);
+    }
+
     if (req.method === 'GET' && url.pathname === '/ac/config') {
       const auth = store.authServer(url.searchParams.get('id'), url.searchParams.get('token'));
       if (auth.error === 'pending') {
@@ -159,6 +169,7 @@ function startApi({
       }
       const srv = auth.server;
       if (!guard.allowServer(srv.id)) return send(res, 429, 'too many requests', { 'Retry-After': '5' });
+      if (requireLicense && licenses && !licenses.activeForServer(srv.id)) return send(res, 200, 'NOLICENSE\nEND\n');
       const clientVersion = toInt(url.searchParams.get('v'), -1);
       const ack = toInt(url.searchParams.get('ack'), 0);
       store.setStatus(srv, {

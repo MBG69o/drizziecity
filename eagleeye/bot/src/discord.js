@@ -30,7 +30,7 @@ const OWNER_SUBS = new Set(['servidor/logout', 'servidor/novachave']);
 const TIMEZONE = process.env.AC_TIMEZONE || 'America/Sao_Paulo';
 
 function createDiscordBot({
-  store, permissions, token, projectGuildId, alertChannelId = null, logger = console,
+  store, permissions, token, projectGuildId, alertChannelId = null, licenses = null, logger = console,
 }) {
   if (!projectGuildId) throw new Error('projectGuildId é obrigatório (o bot só funciona no Discord do projeto).');
   const client = new Client({ intents: [GatewayIntentBits.Guilds] });
@@ -359,6 +359,7 @@ function createDiscordBot({
     if (full === 'meuservidor' && picked) return interaction.reply(activationMessage(picked, interaction.user.id));
 
     if (NO_SERVER_SUBS.has(full)) return handleServerCommands(interaction, full);
+    if (group === 'licenca') return handleLicense(interaction, sub);
 
     const server = picked || store.activeServerFor(interaction.user.id);
     if (!server) return reply(interaction, '❌ Você não tem nenhum servidor. Use `/ac login token:<TOKEN>` (o token de acesso aparece no console do servidor).');
@@ -704,6 +705,61 @@ function createDiscordBot({
     store.updateServer(server, (s) => { s.whitelist = s.whitelist.filter((n) => n.toLowerCase() !== nick.toLowerCase()); });
     audit(interaction, server, `imune - ${nick}`);
     return reply(interaction, `✅ **${escapeMarkdown(nick)}** removido dos imunes.`);
+  }
+
+  async function handleLicense(interaction, sub) {
+    if (!permissions.isBotAdmin(interaction)) return reply(interaction, '⛔ Só administradores do bot gerenciam licenças.');
+    if (!licenses) return reply(interaction, '❌ Licenciamento desligado. Defina AC_LICENSE_PEPPER e AC_LICENSE_SIGN no .env.');
+    const estado = { active: '🟢 ativa', revoked: '🔴 revogada' };
+    const linha = (r) => {
+      const val = r.expiresAt ? ` · expira <t:${Math.floor(r.expiresAt / 1000)}:d>` : '';
+      const srv = r.boundServerId ? ` · ${r.boundServerId}` : ' · sem uso';
+      return `${estado[r.state] || r.state} \`${r.hash.slice(0, 10)}…\`${r.client ? ` · ${escapeMarkdown(r.client)}` : ''}${srv}${val}`;
+    };
+    if (sub === 'criar') {
+      const dias = interaction.options.getInteger('dias');
+      const { key, record } = licenses.create({
+        client: interaction.options.getString('cliente') || '',
+        note: interaction.options.getString('nota') || '',
+        expiresAt: dias ? Date.now() + dias * 86400000 : 0,
+      });
+      logger.log(`[licencas] criada por ${interaction.user.tag}: ${record.hash}`);
+      return reply(interaction, [
+        `✅ Licença emitida${record.client ? ` para **${escapeMarkdown(record.client)}**` : ''}:`,
+        `\`\`\`\n${key}\n\`\`\``,
+        'Entregue essa chave ao cliente. Ela aparece **só agora** (o bot guarda só o hash).',
+        dias ? `Validade: ${dias} dias.` : 'Sem validade.',
+      ].join('\n'));
+    }
+    if (sub === 'listar') {
+      const list = licenses.list();
+      if (!list.length) return reply(interaction, 'Nenhuma licença emitida.');
+      const embed = new EmbedBuilder().setTitle('🔑 Licenças').setColor(COLORS.info)
+        .setDescription(list.slice(0, 40).map(linha).join('\n').slice(0, 4000))
+        .setFooter({ text: `${list.length} licença(s)` });
+      return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
+    }
+    const chave = interaction.options.getString('chave', true);
+    const rec = licenses.get(chave);
+    if (!rec) return reply(interaction, licenses.formatOk(chave) ? '❌ Licença não encontrada no catálogo.' : '❌ Chave em formato inválido.');
+    if (sub === 'revogar') {
+      licenses.revoke(chave);
+      logger.log(`[licencas] revogada por ${interaction.user.tag}: ${rec.hash}`);
+      return reply(interaction, `🔴 Licença revogada. O plugin para de funcionar na próxima verificação${rec.boundServerId ? ` (servidor ${rec.boundServerId})` : ''}.`);
+    }
+    if (sub === 'reativar') {
+      licenses.reactivate(chave);
+      return reply(interaction, '🟢 Licença reativada.');
+    }
+    // info
+    const embed = new EmbedBuilder().setTitle('🔑 Licença').setColor(COLORS.info).setDescription(linha(rec))
+      .addFields(
+        { name: 'Criada', value: `<t:${Math.floor(rec.createdAt / 1000)}:f>`, inline: true },
+        { name: 'Última verificação', value: rec.lastCheck ? `<t:${Math.floor(rec.lastCheck / 1000)}:R>` : 'nunca', inline: true },
+        { name: 'Servidor', value: rec.boundServerId || 'nenhum', inline: true },
+        { name: 'Nota', value: rec.note || '-' },
+      );
+    return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
   }
 
   async function handleOwners(interaction, server, sub) {

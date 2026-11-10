@@ -7,6 +7,7 @@ const { startApi } = require('./api');
 const { Permissions, parseIds } = require('./permissions');
 const { createDiscordBot } = require('./discord');
 const { Guard } = require('./guard');
+const { Licenses } = require('./licenses');
 
 function fail(msg) {
   console.error(`[config] ${msg}`);
@@ -18,8 +19,22 @@ const projectGuildId = (process.env.DISCORD_GUILD_ID || '').trim();
 if (!/^\d{5,25}$/.test(projectGuildId)) fail('Defina DISCORD_GUILD_ID no .env com o ID do Discord do projeto (o bot só funciona nele).');
 
 
-const store = new Store(process.env.AC_DATA_DIR || path.join(__dirname, '..', 'data')).load();
+const dataDir = process.env.AC_DATA_DIR || path.join(__dirname, '..', 'data');
+const store = new Store(dataDir).load();
 console.log(`[store] ${store.servers.size} servidor(es) carregado(s).`);
+
+// Sistema de licenças (para a versão em plugin). pepper e signSecret são
+// embutidos ofuscados no plugin; precisam ser iguais nos dois lados.
+const licensePepper = (process.env.AC_LICENSE_PEPPER || '').trim();
+const licenseSign = (process.env.AC_LICENSE_SIGN || '').trim();
+let licenses = null;
+if (licensePepper && licenseSign) {
+  licenses = new Licenses(dataDir, { pepper: licensePepper, signSecret: licenseSign }).load();
+  console.log(`[licencas] ${licenses.list().length} licenca(s) carregada(s).`);
+} else {
+  console.log('[licencas] AC_LICENSE_PEPPER/AC_LICENSE_SIGN não definidos: licenciamento desligado.');
+}
+const requireLicense = /^(1|true|sim)$/i.test(process.env.AC_REQUIRE_LICENSE || '');
 
 const permissions = new Permissions({ botAdminIds: parseIds(process.env.AC_BOT_ADMIN_IDS) });
 
@@ -30,6 +45,7 @@ const bot = createDiscordBot({
   projectGuildId,
   // canal da equipe que recebe os alertas de todos os servidores
   alertChannelId: (process.env.AC_ALERT_CHANNEL_ID ?? '1569638075166892072').trim() || null,
+  licenses,
 });
 
 // AC_API_PORT tem prioridade; PORT é a variável usada por várias hospedagens de sites
@@ -49,6 +65,8 @@ startApi({
   onDetection: (server, det) => bot.enqueueDetection(server, det),
   onAuthFail: (server, ip) => bot.notifier.onAuthFail(server, ip),
   onStatus: (server, status) => bot.notifier.onStatus(server, status),
+  licenses,
+  requireLicense,
 });
 
 bot.start().catch((err) => fail(`Não foi possível conectar ao Discord: ${err.message}`));
