@@ -92,6 +92,15 @@
 	#define EE_T_BOOL       _
 #endif
 
+// nomes das variáveis de console (o open.mp renomeou hostname/port)
+#if EE_OMP
+	#define EE_CVAR_NAME "name"
+	#define EE_CVAR_PORT "network.port"
+#else
+	#define EE_CVAR_NAME "hostname"
+	#define EE_CVAR_PORT "port"
+#endif
+
 #if !defined MAX_PICKUPS
 	#define MAX_PICKUPS (4096)
 #endif
@@ -759,7 +768,7 @@ static stock EE_GenerateToken(dest[], size = sizeof dest)
 	// sem 0/O/1/I/L para não confundir na hora de digitar
 	static const alpha[] = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
 	new host[64], seed = GetTickCount() ^ (gettime() * 7919) ^ random(cellmax);
-	GetConsoleVarAsString("hostname", host, sizeof host);
+	GetConsoleVarAsString(EE_CVAR_NAME, host, sizeof host);
 	for (new i = 0; host[i] != EOS; i++) seed = seed * 31 + host[i];
 	new out[EE_TOKEN_LEN + 1], o = 0, r;
 	out[o++] = 'E'; out[o++] = 'E'; out[o++] = '-';
@@ -990,10 +999,10 @@ static stock EE_Poll()
 		if (IsPlayerConnected(i) && !IsPlayerNPC(i)) players++;
 	}
 	new host[64], ehost[192], url[512];
-	GetConsoleVarAsString("hostname", host, sizeof host);
+	GetConsoleVarAsString(EE_CVAR_NAME, host, sizeof host);
 	EE_UrlEncode(host, ehost);
 	format(url, sizeof url, "%s/ac/config?id=%s&token=%s&v=%d&players=%d&ack=%d&max=%d&port=%d&host=%s",
-		EE_API_HOST, gEE_ServerId, gEE_Token, gEE_Version, players, gEE_LastCmd, GetMaxPlayers(), GetConsoleVarAsInt("port"), ehost);
+		EE_API_HOST, gEE_ServerId, gEE_Token, gEE_Version, players, gEE_LastCmd, GetMaxPlayers(), GetConsoleVarAsInt(EE_CVAR_PORT), ehost);
 	gEE_PollPending = true;
 	gEE_PollSentTick = tick;
 	HTTP(0, HTTP_GET, url, "", "EE_OnConfig");
