@@ -6,6 +6,7 @@ const { Store } = require('./store');
 const { startApi } = require('./api');
 const { Permissions, parseIds } = require('./permissions');
 const { createDiscordBot } = require('./discord');
+const { Guard } = require('./guard');
 
 function fail(msg) {
   console.error(`[config] ${msg}`);
@@ -38,6 +39,11 @@ startApi({
   port: apiPort,
   allowedIps: String(process.env.AC_ALLOWED_IPS || '').split(',').map((s) => s.trim()).filter(Boolean),
   trustProxy: /^(1|true|sim)$/i.test(process.env.AC_TRUST_PROXY || ''),
+  maxConnections: Number.parseInt(process.env.AC_MAX_CONNECTIONS || '1000', 10),
+  guard: new Guard({
+    ratePerMin: Number.parseInt(process.env.AC_RATE_LIMIT || '120', 10),
+    burst: Number.parseInt(process.env.AC_RATE_BURST || '60', 10),
+  }),
   onDetection: (server, det) => bot.enqueueDetection(server, det),
 });
 

@@ -11,6 +11,10 @@ const { buildConfigResponse, isValidIPv4Pattern, sanitizeGameText, isValidNick }
 const { PROTECTIONS, CATEGORIES, byCategory } = require('../src/protections');
 const { commands } = require('../src/commands');
 const { Permissions } = require('../src/permissions');
+const { Guard } = require('../src/guard');
+
+// os testes saem todos de 127.0.0.1: limites altos para não bloquear a si mesmos
+const permissive = () => new Guard({ ratePerMin: 1e6, burst: 1e6, newTokensPerHour: 1e6, authFailsToBlock: 1e6, serverRatePerMin: 1e6 });
 
 let server; let store; let base; let dir; const detections = [];
 const quiet = { log() {}, error() {} };
@@ -32,11 +36,11 @@ async function register(host = 'Meu%20Servidor') {
 before(async () => {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), 'eagleeye-'));
   store = new Store(dir).load();
-  server = startApi({ store, host: '127.0.0.1', port: 0, onDetection: (s, d) => detections.push([s.id, d]), logger: quiet });
+  server = startApi({ store, host: '127.0.0.1', port: 0, guard: permissive(), onDetection: (s, d) => detections.push([s.id, d]), logger: quiet });
   await new Promise((r) => server.once('listening', r));
   base = `http://127.0.0.1:${server.address().port}`;
 });
-after(() => server.close());
+after(() => { server.closeAllConnections(); server.close(); });
 
 test('servidor novo: token do include fica aguardando e o /ac login o reconhece', async () => {
   const token = genToken();
@@ -308,13 +312,14 @@ test('modo site: página inicial, /health e IP real atrás de proxy', async () =
   assert.match(await home.text(), /EagleEYE API/);
   assert.strictEqual(await (await fetch(`${base}/health`)).text(), 'OK');
 
-  const s2 = startApi({ store, host: '127.0.0.1', port: 0, trustProxy: true, onDetection() {}, logger: quiet });
+  const s2 = startApi({ store, host: '127.0.0.1', port: 0, trustProxy: true, guard: permissive(), onDetection() {}, logger: quiet });
   await new Promise((r) => s2.once('listening', r));
   const b2 = `http://127.0.0.1:${s2.address().port}`;
   const token = genToken();
   const id = token.slice(0, 9);
   await fetch(`${b2}/ac/config?id=${id}&token=${token}&v=0`, { headers: { 'X-Forwarded-For': '177.10.20.30, 10.0.0.1' } });
   assert.strictEqual(store.getPending(id).address, '177.10.20.30');
+  s2.closeAllConnections();
   s2.close();
 });
 

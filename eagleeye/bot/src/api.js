@@ -4,13 +4,17 @@ const http = require('http');
 const { URL, URLSearchParams } = require('url');
 const { buildConfigResponse } = require('./config-format');
 const { byId } = require('./protections');
+const { Guard } = require('./guard');
 
 const MAX_BODY = 4096;
 const MAX_PLAYERS_BODY = 16384;
+const MAX_URL = 2048;
 
 function clientIp(req, trustProxy) {
-  // atrás de proxy (ex.: site na Discloud) o IP real vem no X-Forwarded-For
+  // atrás de proxy (Cloudflare/Discloud) o IP real vem nos cabeçalhos do proxy
   if (trustProxy) {
+    const cf = String(req.headers['cf-connecting-ip'] || '').trim();
+    if (cf) return cf.replace(/^::ffff:/, '');
     const fwd = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
     if (fwd) return fwd.replace(/^::ffff:/, '');
   }
@@ -23,8 +27,9 @@ main{max-width:520px;padding:24px;text-align:center}h1{margin:0 0 8px}p{color:#a
 <body><main><h1>🦅 EagleEYE API</h1><p>API online. Os servidores SA-MP/open.mp se conectam aqui com o token gerado pelo include,
 e os donos fazem <code>/ac login</code> no Discord do projeto.</p></main></body></html>`;
 
-function send(res, status, body) {
-  res.writeHead(status, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
+function send(res, status, body, headers = {}) {
+  if (res.headersSent) return;
+  res.writeHead(status, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store', ...headers });
   res.end(body);
 }
 
@@ -44,44 +49,75 @@ function cleanName(name) {
  *                                                               (WAIT se o dono ainda não fez /ac login)
  *   POST /ac/report?id=&token=  (x-www-form-urlencoded)        -> registra detecção
  *   POST /ac/players?id=&token= (p=id,nome,ping,score;...)    -> jogadores online
+ *
+ * Proteções contra abuso/DDoS de aplicação: ver guard.js e os limites do servidor HTTP abaixo.
  */
 function startApi({
   store, host, port, allowedIps = [], trustProxy = false, onDetection, logger = console,
+  guard = new Guard(), maxConnections = 1000,
 }) {
-  function authenticate(url, res) {
+  /** Autentica e aplica o limite por servidor. Responde sozinho quando não pode seguir. */
+  function authenticate(url, res, ip) {
     const result = store.authServer(url.searchParams.get('id'), url.searchParams.get('token'));
     if (result.error === 'pending') {
       // token válido gerado pelo include, mas o dono ainda não fez /ac login
       send(res, 202, 'WAIT\nEND\n');
       return null;
     }
-    if (result.error) { send(res, 401, 'unauthorized'); return null; }
+    if (result.error) {
+      guard.authFailed(ip);
+      send(res, 401, 'unauthorized');
+      return null;
+    }
+    if (!guard.allowServer(result.server.id)) {
+      send(res, 429, 'too many requests', { 'Retry-After': '5' });
+      return null;
+    }
     return result.server;
   }
 
   function readBody(req, res, limit, cb) {
-    let body = '';
+    // recusa na hora corpos declarados maiores que o limite
+    if (toInt(req.headers['content-length'], 0) > limit) {
+      send(res, 413, 'too large', { Connection: 'close' });
+      req.destroy();
+      return;
+    }
+    const chunks = [];
+    let size = 0;
     let aborted = false;
     req.on('data', (chunk) => {
-      body += chunk;
-      if (body.length > limit && !aborted) {
+      size += chunk.length;
+      if (size > limit && !aborted) {
         aborted = true;
-        send(res, 413, 'too large');
+        send(res, 413, 'too large', { Connection: 'close' });
         req.destroy();
+        return;
       }
+      if (!aborted) chunks.push(chunk);
     });
-    req.on('end', () => { if (!aborted) cb(body); });
+    req.on('end', () => { if (!aborted) cb(Buffer.concat(chunks).toString('utf8')); });
+    req.on('error', () => {});
   }
 
-  const server = http.createServer((req, res) => {
+  const server = http.createServer({ maxHeaderSize: 8192, connectionsCheckingInterval: 1000 }, (req, res) => {
+    const ip = clientIp(req, trustProxy);
+
+    // 1) limite por IP / IP bloqueado: resposta mínima, sem processar nada
+    const check = guard.checkRequest(ip);
+    if (!check.ok) {
+      return send(res, 429, 'too many requests', { 'Retry-After': String(check.retryAfter), Connection: 'close' });
+    }
+
+    // 2) requisições malformadas ou fora do padrão
+    if (req.url.length > MAX_URL) return send(res, 414, 'uri too long', { Connection: 'close' });
+    if (req.method !== 'GET' && req.method !== 'POST') return send(res, 405, 'method not allowed', { Allow: 'GET, POST' });
     let url;
     try {
       url = new URL(req.url, 'http://localhost');
     } catch {
       return send(res, 400, 'bad request');
     }
-
-    const ip = clientIp(req, trustProxy);
 
     // página inicial e verificação de saúde (públicas, sem dados)
     if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/health')) {
@@ -96,17 +132,24 @@ function startApi({
       const auth = store.authServer(url.searchParams.get('id'), url.searchParams.get('token'));
       if (auth.error === 'pending') {
         // o bot ainda não conhece o servidor: guarda os dados para o /ac login reconhecer
-        store.notePending(auth.id, auth.tokenHash, {
-          name: cleanName(url.searchParams.get('host')),
-          players: toInt(url.searchParams.get('players')),
-          maxPlayers: toInt(url.searchParams.get('max')),
-          port: toInt(url.searchParams.get('port')),
-          address: ip,
-        });
+        // (limitado por IP para ninguém encher a memória com tokens inventados)
+        if (store.getPending(auth.id) || guard.allowNewToken(ip)) {
+          store.notePending(auth.id, auth.tokenHash, {
+            name: cleanName(url.searchParams.get('host')),
+            players: toInt(url.searchParams.get('players')),
+            maxPlayers: toInt(url.searchParams.get('max')),
+            port: toInt(url.searchParams.get('port')),
+            address: ip,
+          });
+        }
         return send(res, 200, 'WAIT\nEND\n');
       }
-      if (auth.error) return send(res, 401, 'unauthorized');
+      if (auth.error) {
+        guard.authFailed(ip);
+        return send(res, 401, 'unauthorized');
+      }
       const srv = auth.server;
+      if (!guard.allowServer(srv.id)) return send(res, 429, 'too many requests', { 'Retry-After': '5' });
       const clientVersion = toInt(url.searchParams.get('v'), -1);
       const ack = toInt(url.searchParams.get('ack'), 0);
       store.setStatus(srv, {
@@ -125,7 +168,7 @@ function startApi({
     }
 
     if (req.method === 'POST' && url.pathname === '/ac/players') {
-      const srv = authenticate(url, res);
+      const srv = authenticate(url, res, ip);
       if (!srv) return undefined;
       readBody(req, res, MAX_PLAYERS_BODY, (body) => {
         const raw = new URLSearchParams(body).get('p') || '';
@@ -140,7 +183,7 @@ function startApi({
     }
 
     if (req.method === 'POST' && url.pathname === '/ac/report') {
-      const srv = authenticate(url, res);
+      const srv = authenticate(url, res, ip);
       if (!srv) return undefined;
       readBody(req, res, MAX_BODY, (body) => {
         const p = new URLSearchParams(body);
@@ -165,7 +208,7 @@ function startApi({
         } catch (err) {
           logger.error('[api] erro ao processar detecção', err);
         }
-        send(res, 200, 'OK');
+        return send(res, 200, 'OK');
       });
       return undefined;
     }
@@ -173,7 +216,23 @@ function startApi({
     return send(res, 404, 'not found');
   });
 
+  // 3) limites do servidor HTTP: conexões lentas (slowloris), conexões demais, keep-alive longo
+  server.headersTimeout = 10000;
+  server.requestTimeout = 15000;
+  server.keepAliveTimeout = 5000;
+  server.maxRequestsPerSocket = 100;
+  server.maxConnections = maxConnections;
+  server.on('clientError', (err, socket) => {
+    if (socket.writable) socket.end('HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n');
+    else socket.destroy();
+  });
+
+  const pruneTimer = setInterval(() => guard.prune(), 60000);
+  pruneTimer.unref();
+  server.on('close', () => clearInterval(pruneTimer));
+
   server.listen(port, host, () => logger.log(`[api] escutando em http://${host}:${port}`));
+  server.guard = guard;
   return server;
 }
 

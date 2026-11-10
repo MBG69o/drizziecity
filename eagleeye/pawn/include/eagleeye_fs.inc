@@ -1,22 +1,3 @@
-/*
- *  ===========================================================================
- *   EagleEYE Anti-Cheat - include para FILTERSCRIPTS
- *  ===========================================================================
- *
- *   Faz com que dinheiro, vida, colete, armas, teleportes, jetpack, reparos
- *   e dialogs feitos pelo filterscript sejam registrados pelo anti-cheat do
- *   gamemode (evita falsos positivos).
- *
- *   USO (no topo do filterscript):
- *
- *       #define FILTERSCRIPT
- *       #include <open.mp>          // ou <a_samp>
- *       #include <eagleeye_fs>
- *
- *   Requer que o gamemode use <eagleeye>. Se o gamemode não tiver o
- *   anti-cheat carregado, as funções caem para os natives normais.
- */
-
 #if defined _eagleeye_fs_included
 	#endinput
 #endif
@@ -44,7 +25,6 @@
 
 #define EEFS_ON() (existproperty(0, "EAGLEEYE_ON"))
 
-// ---------- dinheiro
 stock EEFS_T_BOOL:EEFS_GivePlayerMoney(playerid, money)
 {
 	if (EEFS_ON()) return EEFS_T_BOOL:CallRemoteFunction("EE_R_GiveMoney", "ii", playerid, money);
@@ -81,7 +61,6 @@ stock EEFS_GetPlayerMoney(playerid)
 #endif
 #define GetPlayerMoney EEFS_GetPlayerMoney
 
-// ---------- vida / colete
 stock EEFS_T_BOOL:EEFS_SetPlayerHealth(playerid, Float:health)
 {
 	if (EEFS_ON()) return EEFS_T_BOOL:CallRemoteFunction("EE_R_SetHealth", "if", playerid, health);
@@ -106,7 +85,6 @@ stock EEFS_T_BOOL:EEFS_SetPlayerArmour(playerid, Float:armour)
 #endif
 #define SetPlayerArmour EEFS_SetPlayerArmour
 
-// ---------- armas
 stock EEFS_T_BOOL:EEFS_GivePlayerWeapon(playerid, EEFS_T_WEAPON:weaponid, ammo)
 {
 	if (EEFS_ON()) return EEFS_T_BOOL:CallRemoteFunction("EE_R_GiveWeapon", "iii", playerid, _:weaponid, ammo);
@@ -131,7 +109,6 @@ stock EEFS_T_BOOL:EEFS_ResetPlayerWeapons(playerid)
 #endif
 #define ResetPlayerWeapons EEFS_ResetPlayerWeapons
 
-// ---------- posição
 stock EEFS_T_BOOL:EEFS_SetPlayerPos(playerid, Float:x, Float:y, Float:z)
 {
 	if (EEFS_ON()) CallRemoteFunction("EE_R_PosImmunity", "ii", playerid, 3000);
@@ -204,7 +181,6 @@ stock EEFS_T_BOOL:EEFS_SetVehicleVelocity(vehicleid, Float:x, Float:y, Float:z)
 #endif
 #define SetVehicleVelocity EEFS_SetVehicleVelocity
 
-// ---------- veículos
 stock EEFS_T_BOOL:EEFS_SetVehicleHealth(vehicleid, Float:health)
 {
 	if (EEFS_ON()) CallRemoteFunction("EE_R_VehImmunity", "if", vehicleid, health);
@@ -229,7 +205,6 @@ stock EEFS_T_BOOL:EEFS_RepairVehicle(vehicleid)
 #endif
 #define RepairVehicle EEFS_RepairVehicle
 
-// ---------- jetpack
 stock EEFS_T_BOOL:EEFS_SetPlayerSpecialAction(playerid, EEFS_T_SACTION:actionid)
 {
 	if (_:actionid == 2 && EEFS_ON()) CallRemoteFunction("EE_R_Jetpack", "i", playerid);
@@ -242,7 +217,6 @@ stock EEFS_T_BOOL:EEFS_SetPlayerSpecialAction(playerid, EEFS_T_SACTION:actionid)
 #endif
 #define SetPlayerSpecialAction EEFS_SetPlayerSpecialAction
 
-// ---------- munição
 stock EEFS_T_BOOL:EEFS_SetPlayerAmmo(playerid, EEFS_T_WEAPON:weaponid, ammo)
 {
 	if (EEFS_ON()) return EEFS_T_BOOL:CallRemoteFunction("EE_R_SetAmmo", "iii", playerid, _:weaponid, ammo);
@@ -255,7 +229,6 @@ stock EEFS_T_BOOL:EEFS_SetPlayerAmmo(playerid, EEFS_T_WEAPON:weaponid, ammo)
 #endif
 #define SetPlayerAmmo EEFS_SetPlayerAmmo
 
-// ---------- spawn
 stock EEFS_T_BOOL:EEFS_SpawnPlayer(playerid)
 {
 	if (EEFS_ON()) CallRemoteFunction("EE_R_Spawn", "i", playerid);
@@ -284,7 +257,6 @@ stock EEFS_T_BOOL:EEFS_TogglePlayerSpectating(playerid, EEFS_T_BOOL:toggle)
 #endif
 #define TogglePlayerSpectating EEFS_TogglePlayerSpectating
 
-// ---------- checkpoints
 #if defined _INC_open_mp
 	#define EEFS_T_CPTYPE CP_TYPE
 #else
@@ -339,7 +311,6 @@ stock EEFS_T_BOOL:EEFS_DisablePlayerRaceCP(playerid)
 #endif
 #define DisablePlayerRaceCheckpoint EEFS_DisablePlayerRaceCP
 
-// ---------- pickups (o pool de pickups é compartilhado com o gamemode)
 stock EEFS_CreatePickup(model, type, Float:x, Float:y, Float:z, virtualworld = 0)
 {
 	new id = CreatePickup(model, type, x, y, z, virtualworld);
@@ -365,7 +336,6 @@ stock EEFS_T_BOOL:EEFS_DestroyPickup(pickupid)
 #endif
 #define DestroyPickup EEFS_DestroyPickup
 
-// ---------- dialogs (somente SA-MP)
 #if !EEFS_OMP
 stock EEFS_ShowPlayerDialog(playerid, dialogid, style, const caption[], const info[], const button1[], const button2[])
 {

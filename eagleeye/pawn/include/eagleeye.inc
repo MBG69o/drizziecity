@@ -1,50 +1,3 @@
-/*
- *  ===========================================================================
- *   EagleEYE Anti-Cheat - include para GAMEMODE
- *   Compatível com SA-MP 0.3.7 (R2+) / 0.3.DL e open.mp
- *  ===========================================================================
- *
- *   Todas as proteções podem ser ativadas/desativadas pelo Discord (bot em
- *   eagleeye/bot). O servidor fala com o bot via HTTP nativo (não precisa de
- *   nenhum plugin .dll/.so extra).
- *
- *   TOKEN DE ACESSO
- *   ---------------
- *   Na primeira vez que o gamemode inicia, o PRÓPRIO include gera um token
- *   (salvo em scriptfiles/eagleeye_servidor.cfg) e mostra no console:
- *
- *       [EagleEYE] Token de acesso: EE-7K2QMX-ABCD-EFGH-JKLM-NPQR
- *       [EagleEYE] No Discord use: /ac login token:EE-7K2QMX-ABCD-EFGH-JKLM-NPQR
- *
- *   O começo do token (EE-7K2QMX) é o ID fixo do servidor. O bot só passa a
- *   reconhecer o servidor quando o dono faz /ac login com esse token; até lá
- *   o servidor fica "aguardando login" e usa a configuração padrão.
- *   O servidor do jogo e o bot podem estar em máquinas diferentes: basta o
- *   servidor conseguir acessar o EE_API_HOST.
- *
- *   Digite "eagleeye" no console/RCON para ver o token novamente.
- *   FAÇA BACKUP do arquivo eagleeye_servidor.cfg (ele é a identidade do servidor).
- *
- *   USO (no topo do gamemode):
- *
- *       #include <open.mp>          // ou <a_samp>
- *
- *       #define EE_API_HOST "ip.do.bot:8090"     // endereço público do bot (sem http://)
- *       // bot hospedado como site (ex.: Discloud): "eagleeye.discloud.dev"
- *       // só HTTPS no open.mp: "https://eagleeye.discloud.dev" (depende da versão)
- *       #include <eagleeye>
- *
- *   Opcionais (antes do include):
- *       #define EE_SERVER_TOKEN "EE-XXXXXX-XXXX-XXXX-XXXX-XXXX"  // fixa o token no código
- *                                                                (ignora o .cfg)
- *
- *   Inclua o eagleeye LOGO DEPOIS do a_samp/open.mp e ANTES de qualquer
- *   outro include. Filterscripts usam <eagleeye_fs>.
- *
- *   IMPORTANTE: os IDs das proteções abaixo DEVEM ser os mesmos do arquivo
- *   eagleeye/bot/src/protections.js.
- */
-
 #if defined _eagleeye_included
 	#endinput
 #endif
@@ -66,12 +19,9 @@
 #endif
 
 #if !defined _INC_open_mp
-	#include <a_http>   // no open.mp o HTTP já vem em <open.mp>
+	#include <a_http>
 #endif
 
-/* ---------------------------------------------------------------------------
- *  Compatibilidade de tags (open.mp usa tags fortes em vários natives)
- * ------------------------------------------------------------------------- */
 #if defined _INC_open_mp
 	#define EE_OMP          (1)
 	#define EE_T_WEAPON     WEAPON
@@ -92,7 +42,6 @@
 	#define EE_T_BOOL       _
 #endif
 
-// nomes das variáveis de console (o open.mp renomeou hostname/port)
 #if EE_OMP
 	#define EE_CVAR_NAME "name"
 	#define EE_CVAR_PORT "network.port"
@@ -105,17 +54,14 @@
 	#define MAX_PICKUPS (4096)
 #endif
 
-/* ---------------------------------------------------------------------------
- *  Configurações de compilação (podem ser definidas antes do include)
- * ------------------------------------------------------------------------- */
 #if !defined EE_TICK_MS
-	#define EE_TICK_MS            (1000)   // intervalo das verificações
+	#define EE_TICK_MS            (1000)
 #endif
 #if !defined EE_HIT_WINDOW_MS
-	#define EE_HIT_WINDOW_MS      (60000)  // janela para somar detecções
+	#define EE_HIT_WINDOW_MS      (60000)
 #endif
 #if !defined EE_REPORT_COOLDOWN
-	#define EE_REPORT_COOLDOWN    (5000)   // anti-spam de logs no Discord
+	#define EE_REPORT_COOLDOWN    (5000)
 #endif
 #if !defined EE_MAX_WHITELIST
 	#define EE_MAX_WHITELIST      (64)
@@ -127,46 +73,43 @@
 	#define EE_COLOR              (0xFF4040FF)
 #endif
 
-/* ---------------------------------------------------------------------------
- *  Proteções (IDs sincronizados com o bot)
- * ------------------------------------------------------------------------- */
-#define EE_MONEY          (0)   // dinheiro (money hack)
-#define EE_HEALTH         (1)   // vida (health hack / refil)
-#define EE_ARMOUR         (2)   // colete (armour hack)
-#define EE_WEAPON         (3)   // armas (weapon hack)
-#define EE_SPEED_FOOT     (4)   // velocidade a pé (km/h)
-#define EE_SPEED_VEH      (5)   // velocidade em veículo (km/h)
-#define EE_TELEPORT       (6)   // teleporte (metros/tick)
-#define EE_AIRBREAK       (7)   // airbreak / fly (m/s sem velocidade)
-#define EE_JETPACK        (8)   // jetpack
-#define EE_VEH_HEALTH     (9)   // reparo de veículo (car godmode/repair)
-#define EE_FAKEKILL       (10)  // fake kill / flood de mortes
-#define EE_RAPIDFIRE      (11)  // rapid fire (tiros/segundo)
-#define EE_FLOOD          (12)  // flood de chat/comandos
-#define EE_CARWARP        (13)  // puxar/teleportar para veículo
-#define EE_VEH_TROLL      (14)  // mover veículos desocupados / trailers (troll)
-#define EE_PING           (15)  // ping alto
-#define EE_IPFLOOD        (16)  // muitas conexões simultâneas do mesmo IP
-#define EE_TUNING         (17)  // tuning fora da oficina (crasher)
-#define EE_DIALOG         (18)  // resposta falsa de dialog (spoof)
-#define EE_GODMODE        (19)  // godmode (leva tiro e não perde vida)
-#define EE_RANGE          (20)  // alcance de tiro impossível (silent aim / range hack)
-#define EE_DAMAGE         (21)  // dano acima do permitido pela arma
-#define EE_AMMO           (22)  // munição infinita / munição criada
-#define EE_CRASHER        (23)  // dados inválidos (bullet/seat/posição crasher)
-#define EE_FAKESPAWN      (24)  // spawn sem permissão do servidor
-#define EE_ADVERT         (25)  // divulgação de IPs no chat
-#define EE_VEH_SPAM       (26)  // spam de entrar/sair de veículos
-#define EE_FAKEPICKUP     (27)  // pegar pickup à distância
-#define EE_FAKECP         (28)  // entrar em checkpoint à distância
-#define EE_CBUG           (29)  // c-bug (desligado por padrão)
-#define EE_RCON           (30)  // brute force no RCON
-#define EE_FAKENPC        (31)  // NPC falso (conexão externa como NPC)
-#define EE_RECONNECT      (32)  // flood de reconexões (bots)
-#define EE_AIMBOT         (33)  // precisão suspeita (aimbot)
+#define EE_MONEY          (0)
+#define EE_HEALTH         (1)
+#define EE_ARMOUR         (2)
+#define EE_WEAPON         (3)
+#define EE_SPEED_FOOT     (4)
+#define EE_SPEED_VEH      (5)
+#define EE_TELEPORT       (6)
+#define EE_AIRBREAK       (7)
+#define EE_JETPACK        (8)
+#define EE_VEH_HEALTH     (9)
+#define EE_FAKEKILL       (10)
+#define EE_RAPIDFIRE      (11)
+#define EE_FLOOD          (12)
+#define EE_CARWARP        (13)
+#define EE_VEH_TROLL      (14)
+#define EE_PING           (15)
+#define EE_IPFLOOD        (16)
+#define EE_TUNING         (17)
+#define EE_DIALOG         (18)
+#define EE_GODMODE        (19)
+#define EE_RANGE          (20)
+#define EE_DAMAGE         (21)
+#define EE_AMMO           (22)
+#define EE_CRASHER        (23)
+#define EE_FAKESPAWN      (24)
+#define EE_ADVERT         (25)
+#define EE_VEH_SPAM       (26)
+#define EE_FAKEPICKUP     (27)
+#define EE_FAKECP         (28)
+#define EE_CBUG           (29)
+#define EE_RCON           (30)
+#define EE_FAKENPC        (31)
+#define EE_RECONNECT      (32)
+#define EE_AIMBOT         (33)
 #define EE_MAX            (34)
 
-#define EE_ACTION_WARN    (0)   // apenas avisa (log + admins)
+#define EE_ACTION_WARN    (0)
 #define EE_ACTION_KICK    (1)
 #define EE_ACTION_BAN     (2)
 
@@ -181,23 +124,23 @@ enum E_EE_PROT
 enum E_EE_PLAYER
 {
 	bool:acNPC,
-	bool:acImmune,         // imunidade definida pelo gamemode
-	bool:acWhitelisted,    // imunidade definida pelo Discord
+	bool:acImmune,
+	bool:acWhitelisted,
 	bool:acPunished,
 	acSerial,
 	acConnectTick,
 	acSpawnTick,
 	acLastUpdate,
 	acIp[16],
-	// dinheiro
+
 	acMoney,
 	acMoneyTick,
-	// vida / colete
+
 	Float:acHealth,
 	Float:acArmour,
 	acHealthTick,
 	acArmourTick,
-	// armas / munição
+
 	acWeapons[13],
 	acAmmo[13],
 	acWeaponTick,
@@ -206,7 +149,7 @@ enum E_EE_PLAYER
 	acAmmoStrikes,
 	acLastShotAmmo,
 	acLastShotWeapon,
-	// posição
+
 	Float:acLastX,
 	Float:acLastY,
 	Float:acLastZ,
@@ -214,7 +157,7 @@ enum E_EE_PLAYER
 	acLastState,
 	acPosImmuneUntil,
 	acSpeedImmuneUntil,
-	// especiais
+
 	bool:acJetpack,
 	bool:acSpawnAllowed,
 	acShotTick,
@@ -230,11 +173,11 @@ enum E_EE_PLAYER
 	acCbugTick,
 	acAimShots,
 	acAimHits,
-	// godmode
+
 	acGodTick,
 	acGodHits,
 	Float:acGodHP,
-	// checkpoints
+
 	bool:acCP,
 	Float:acCPX,
 	Float:acCPY,
@@ -266,50 +209,48 @@ static stock const gEE_Names[EE_MAX][] =
 	"Flood de reconexao", "Aimbot"
 };
 
-// textos auxiliares (evita ternários com strings de tamanhos diferentes)
 static stock const gEE_ActPast[2][8]   = {"kickado", "banido"};
 static stock const gEE_ActShort[2][5]  = {"kick", "ban"};
 static stock const gEE_OnOff[2][11]    = {"DESATIVADO", "ATIVO"};
 static stock const gEE_MoveMode[2][8]  = {"a pe", "veiculo"};
 static stock const gEE_BotState[2][8]  = {"online", "OFFLINE"};
 
-// padrões usados até o primeiro contato com o bot (ou se ele estiver offline)
 static stock const gEE_Defaults[EE_MAX][E_EE_PROT] =
 {
-	{true,  EE_ACTION_KICK, 3,  0},    // 0  dinheiro
-	{true,  EE_ACTION_KICK, 3,  0},    // 1  vida
-	{true,  EE_ACTION_KICK, 3,  0},    // 2  colete
-	{true,  EE_ACTION_KICK, 2,  0},    // 3  armas
-	{true,  EE_ACTION_KICK, 3,  70},   // 4  velocidade a pé (km/h)
-	{true,  EE_ACTION_KICK, 3,  360},  // 5  velocidade veículo (km/h)
-	{true,  EE_ACTION_KICK, 3,  80},   // 6  teleporte (m)
-	{true,  EE_ACTION_KICK, 3,  14},   // 7  airbreak (m/s)
-	{true,  EE_ACTION_KICK, 1,  0},    // 8  jetpack
-	{true,  EE_ACTION_KICK, 3,  0},    // 9  reparo veículo
-	{true,  EE_ACTION_KICK, 1,  4},    // 10 fake kill (mortes em 5s)
-	{true,  EE_ACTION_KICK, 3,  25},   // 11 rapid fire (tiros/s)
-	{true,  EE_ACTION_KICK, 3,  5},    // 12 flood (msgs em 3s)
-	{true,  EE_ACTION_KICK, 2,  30},   // 13 puxar veículo (m)
-	{true,  EE_ACTION_KICK, 2,  20},   // 14 veículo troll (m)
-	{false, EE_ACTION_KICK, 1,  800},  // 15 ping (ms)
-	{true,  EE_ACTION_KICK, 1,  3},    // 16 conexões por IP
-	{true,  EE_ACTION_KICK, 1,  0},    // 17 tuning
-	{true,  EE_ACTION_KICK, 1,  0},    // 18 dialog
-	{true,  EE_ACTION_KICK, 2,  6},    // 19 godmode (tiros sem perder vida)
-	{true,  EE_ACTION_KICK, 3,  30},   // 20 alcance (% acima do alcance da arma)
-	{true,  EE_ACTION_KICK, 2,  0},    // 21 dano hack
-	{true,  EE_ACTION_KICK, 2,  12},   // 22 munição (tiros sem gastar munição)
-	{true,  EE_ACTION_KICK, 1,  0},    // 23 crasher
-	{true,  EE_ACTION_KICK, 1,  0},    // 24 spawn falso
-	{true,  EE_ACTION_KICK, 2,  0},    // 25 divulgação
-	{true,  EE_ACTION_KICK, 2,  8},    // 26 spam de veículo (em 5s)
-	{true,  EE_ACTION_KICK, 2,  15},   // 27 pickup falso (m)
-	{true,  EE_ACTION_KICK, 2,  10},   // 28 checkpoint falso (m além do raio)
-	{false, EE_ACTION_WARN, 3,  600},  // 29 c-bug (ms entre tiro e agachar)
-	{true,  EE_ACTION_KICK, 1,  3},    // 30 rcon (tentativas erradas)
-	{true,  EE_ACTION_KICK, 1,  0},    // 31 npc falso
-	{true,  EE_ACTION_KICK, 1,  5},    // 32 reconexão (conexões em 30s)
-	{true,  EE_ACTION_WARN, 2,  92}    // 33 aimbot (% de acerto em 40 tiros)
+	{true,  EE_ACTION_KICK, 3,  0},
+	{true,  EE_ACTION_KICK, 3,  0},
+	{true,  EE_ACTION_KICK, 3,  0},
+	{true,  EE_ACTION_KICK, 2,  0},
+	{true,  EE_ACTION_KICK, 3,  70},
+	{true,  EE_ACTION_KICK, 3,  360},
+	{true,  EE_ACTION_KICK, 3,  80},
+	{true,  EE_ACTION_KICK, 3,  14},
+	{true,  EE_ACTION_KICK, 1,  0},
+	{true,  EE_ACTION_KICK, 3,  0},
+	{true,  EE_ACTION_KICK, 1,  4},
+	{true,  EE_ACTION_KICK, 3,  25},
+	{true,  EE_ACTION_KICK, 3,  5},
+	{true,  EE_ACTION_KICK, 2,  30},
+	{true,  EE_ACTION_KICK, 2,  20},
+	{false, EE_ACTION_KICK, 1,  800},
+	{true,  EE_ACTION_KICK, 1,  3},
+	{true,  EE_ACTION_KICK, 1,  0},
+	{true,  EE_ACTION_KICK, 1,  0},
+	{true,  EE_ACTION_KICK, 2,  6},
+	{true,  EE_ACTION_KICK, 3,  30},
+	{true,  EE_ACTION_KICK, 2,  0},
+	{true,  EE_ACTION_KICK, 2,  12},
+	{true,  EE_ACTION_KICK, 1,  0},
+	{true,  EE_ACTION_KICK, 1,  0},
+	{true,  EE_ACTION_KICK, 2,  0},
+	{true,  EE_ACTION_KICK, 2,  8},
+	{true,  EE_ACTION_KICK, 2,  15},
+	{true,  EE_ACTION_KICK, 2,  10},
+	{false, EE_ACTION_WARN, 3,  600},
+	{true,  EE_ACTION_KICK, 1,  3},
+	{true,  EE_ACTION_KICK, 1,  0},
+	{true,  EE_ACTION_KICK, 1,  5},
+	{true,  EE_ACTION_WARN, 2,  92}
 };
 
 static stock
@@ -324,7 +265,7 @@ static stock
 	gEE_LastCmd = 0,
 	gEE_ServerId[24],
 	gEE_Token[72],
-	bool:gEE_Linked = false,       // o dono já fez /ac login com o token?
+	bool:gEE_Linked = false,
 	bool:gEE_WaitNotified = false,
 	gEE_Whitelist[EE_MAX_WHITELIST][MAX_PLAYER_NAME + 1],
 	gEE_WhitelistCount = 0,
@@ -338,15 +279,15 @@ static stock
 	gEE_VehImmuneUntil[MAX_VEHICLES],
 	gEE_ClassWeapons[EE_MAX_CLASSES][6],
 	gEE_Pickups[MAX_PICKUPS][E_EE_PICKUP],
-	// histórico de conexões (flood de reconexão)
+
 	gEE_ConnIp[64][16],
 	gEE_ConnTick[64],
 	gEE_ConnIdx = 0,
-	// tentativas de RCON
+
 	gEE_RconIp[32][16],
 	gEE_RconCount[32],
 	gEE_RconTick[32],
-	// lista de jogadores enviada ao Discord (/ac moderacao online)
+
 	gEE_PListBody[8192];
 
 forward OnEagleEyeDetect(playerid, code, const detail[]);
@@ -358,9 +299,6 @@ forward EE_OnConfig(index, response_code, data[]);
 forward EE_OnReport(index, response_code, data[]);
 forward EE_DoPunish(playerid, serial, action, code);
 
-/* ===========================================================================
- *  Chamadas "cruas" aos natives (antes dos hooks, sem tags)
- * ========================================================================= */
 static stock EE_RawGiveMoney(playerid, money)        { GivePlayerMoney(playerid, money); }
 static stock EE_RawResetMoney(playerid)              { ResetPlayerMoney(playerid); }
 static stock EE_RawGetMoney(playerid)                { return GetPlayerMoney(playerid); }
@@ -417,9 +355,6 @@ static stock EE_RawStreamed(targetid, forplayerid)
 	return IsPlayerStreamedIn(targetid, forplayerid) ? 1 : 0;
 }
 
-/* ===========================================================================
- *  Utilidades
- * ========================================================================= */
 static stock EE_WeaponSlot(weaponid)
 {
 	switch (weaponid)
@@ -441,7 +376,6 @@ static stock EE_WeaponSlot(weaponid)
 	return -1;
 }
 
-// alcance máximo (metros) das armas de fogo
 static stock Float:EE_WeaponRange(weaponid)
 {
 	switch (weaponid)
@@ -458,7 +392,6 @@ static stock Float:EE_WeaponRange(weaponid)
 	return 0.0;
 }
 
-// dano máximo por acerto (valores padrão do SA-MP)
 static stock Float:EE_WeaponDamage(weaponid)
 {
 	switch (weaponid)
@@ -485,7 +418,7 @@ static stock bool:EE_IsBulletWeapon(weaponid)
 
 static stock bool:EE_BadFloat(Float:v, Float:limit)
 {
-	// NaN é diferente de si mesmo
+
 	return (v != v) || v > limit || v < -limit;
 }
 
@@ -543,10 +476,9 @@ static stock EE_Copy(dest[], const src[], size = sizeof dest)
 	strmid(dest, src, 0, strlen(src), size);
 }
 
-// procura IPs (1.2.3.4) ou portas (:7777) no texto
 static stock bool:EE_HasAdvert(const text[])
 {
-	// grupos: quantos octetos válidos (0-255, sem zero à esquerda) seguidos de separador
+
 	new groups = 0, digits = 0, value = 0, first = 0, c;
 	for (new i = 0; ; i++)
 	{
@@ -671,9 +603,6 @@ static stock EE_LoadDefaults()
 	}
 }
 
-/* ===========================================================================
- *  API pública para o gamemode
- * ========================================================================= */
 stock EE_GetProtectionName(code, dest[], size = sizeof dest)
 {
 	if (0 <= code < EE_MAX) strmid(dest, gEE_Names[code], 0, strlen(gEE_Names[code]), size);
@@ -690,13 +619,11 @@ stock EE_GetValue(code)
 	return (0 <= code < EE_MAX) ? gEE_Prot[code][dpValue] : 0;
 }
 
-// ID fixo deste servidor no bot (vazio enquanto não registrado)
 stock EE_GetServerId(dest[], size = sizeof dest)
 {
 	EE_Copy(dest, gEE_ServerId, size);
 }
 
-// imunidade total (ex.: admins em serviço). Não persiste entre conexões.
 stock EE_SetPlayerImmune(playerid, bool:immune)
 {
 	if (0 <= playerid < MAX_PLAYERS) gEE_P[playerid][acImmune] = immune;
@@ -707,7 +634,6 @@ stock bool:EE_IsPlayerImmune(playerid)
 	return gEE_P[playerid][acImmune] || gEE_P[playerid][acWhitelisted];
 }
 
-// imunidade temporária de posição (ex.: elevadores, objetos que movem o player)
 stock EE_PositionImmunity(playerid, ms = 3000)
 {
 	if (0 <= playerid < MAX_PLAYERS)
@@ -719,7 +645,6 @@ stock EE_PositionImmunity(playerid, ms = 3000)
 	}
 }
 
-// libera uma arma que o jogador ganhou por meios que o AC não enxerga (pickups etc.)
 stock EE_AllowWeapon(playerid, weaponid, ammo = 9999)
 {
 	new slot = EE_WeaponSlot(weaponid);
@@ -736,17 +661,12 @@ stock EE_GetServerMoney(playerid)
 	return gEE_P[playerid][acMoney];
 }
 
-// força uma nova leitura da configuração do Discord
 stock EE_ReloadConfig()
 {
 	gEE_Version = -1;
 	gEE_PollCounter = gEE_PollSeconds * 1000 / EE_TICK_MS;
 }
 
-/* ===========================================================================
- *  Identidade do servidor: token gerado pelo próprio include
- *  Formato: EE-XXXXXX-XXXX-XXXX-XXXX-XXXX (o começo, EE-XXXXXX, é o ID fixo)
- * ========================================================================= */
 #define EE_TOKEN_LEN (29)
 
 static stock bool:EE_ValidToken(const t[])
@@ -765,7 +685,7 @@ static stock bool:EE_ValidToken(const t[])
 
 static stock EE_GenerateToken(dest[], size = sizeof dest)
 {
-	// sem 0/O/1/I/L para não confundir na hora de digitar
+
 	static const alpha[] = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
 	new host[64], seed = GetTickCount() ^ (gettime() * 7919) ^ random(cellmax);
 	GetConsoleVarAsString(EE_CVAR_NAME, host, sizeof host);
@@ -775,7 +695,7 @@ static stock EE_GenerateToken(dest[], size = sizeof dest)
 	for (new i = 0; i < 22; i++)
 	{
 		if (i == 6 || i == 10 || i == 14 || i == 18) out[o++] = '-';
-		// xorshift32 misturado com random() e o relógio
+
 		seed ^= seed << 13;
 		seed ^= seed >>> 17;
 		seed ^= seed << 5;
@@ -789,7 +709,7 @@ static stock EE_GenerateToken(dest[], size = sizeof dest)
 static stock EE_SetToken(const token[])
 {
 	EE_Copy(gEE_Token, token);
-	strmid(gEE_ServerId, token, 0, 9, sizeof gEE_ServerId); // EE-XXXXXX
+	strmid(gEE_ServerId, token, 0, 9, sizeof gEE_ServerId);
 }
 
 static stock EE_PrintLogin()
@@ -843,9 +763,6 @@ static stock EE_SaveIdentity()
 	return 1;
 }
 
-/* ===========================================================================
- *  Núcleo: detecção / punição / log
- * ========================================================================= */
 static stock EE_ReportRaw(playerid, const name[], const ip[], code, action, hits, const detail[])
 {
 	if (gEE_ServerId[0] == EOS) return;
@@ -865,7 +782,6 @@ static stock EE_Report(playerid, code, action, hits, const detail[])
 	EE_ReportRaw(playerid, name, gEE_P[playerid][acIp], code, action, hits, detail);
 }
 
-// envia a lista de jogadores online: p=id,nome,ping,score;id,nome,ping,score;...
 static stock EE_SendPlayerList()
 {
 	if (gEE_ServerId[0] == EOS) return;
@@ -909,7 +825,6 @@ static stock EE_Punish(playerid, code, action, const detail[])
 	printf("[EagleEYE] %s (%d) punido (%s) - %s: %s", name, playerid,
 		gEE_ActShort[(action == EE_ACTION_BAN) ? 1 : 0], gEE_Names[code], detail);
 
-	// o gamemode pode tratar a punição (ex.: ban no próprio MySQL) retornando 1
 	if (funcidx("OnEagleEyePunish") != -1)
 	{
 		if (CallLocalFunction("OnEagleEyePunish", "iiis", playerid, code, action, detail)) return 1;
@@ -925,7 +840,7 @@ static stock EE_Punish(playerid, code, action, const detail[])
 public EE_DoPunish(playerid, serial, action, code)
 {
 	if (!IsPlayerConnected(playerid) || gEE_P[playerid][acSerial] != serial) return 0;
-	// floods de conexão: bloqueia o IP por 2 minutos além do kick
+
 	if ((code == EE_RECONNECT || code == EE_IPFLOOD) && action == EE_ACTION_KICK)
 	{
 		BlockIpAddress(gEE_P[playerid][acIp], 120000);
@@ -940,7 +855,6 @@ public EE_DoPunish(playerid, serial, action, code)
 	return 1;
 }
 
-// retorna 1 se a detecção foi registrada
 stock EE_Detect(playerid, code, const detail[] = "-")
 {
 	if (!gEE_Global || !(0 <= code < EE_MAX) || !gEE_Prot[code][dpEnabled]) return 0;
@@ -951,7 +865,6 @@ stock EE_Detect(playerid, code, const detail[] = "-")
 	if (detail[0] == EOS) det = "-";
 	else EE_Copy(det, detail);
 
-	// o gamemode pode ignorar a detecção retornando 0
 	if (funcidx("OnEagleEyeDetect") != -1)
 	{
 		if (!CallLocalFunction("OnEagleEyeDetect", "iis", playerid, code, det)) return 0;
@@ -984,9 +897,6 @@ stock EE_Detect(playerid, code, const detail[] = "-")
 	return 1;
 }
 
-/* ===========================================================================
- *  Comunicação com o bot (config remota)
- * ========================================================================= */
 static stock EE_Poll()
 {
 	if (gEE_ServerId[0] == EOS) return;
@@ -1012,12 +922,12 @@ static stock EE_RunCommand(id, const type[], const arg[])
 {
 	if (id <= gEE_LastCmd) return;
 	gEE_LastCmd = id;
-	// strcmp() do Pawn retorna 0 para strings vazias: valida antes
+
 	if (type[0] == EOS || arg[0] == EOS) return;
 
 	if (!strcmp(type, "unbanip"))
 	{
-		// aceita apenas IPv4 (dígitos, pontos e *) para evitar injeção no RCON
+
 		new len = strlen(arg);
 		if (len < 7 || len > 15) return;
 		for (new i = 0; i < len; i++)
@@ -1042,7 +952,7 @@ static stock EE_RunCommand(id, const type[], const arg[])
 	}
 	else if (!strcmp(type, "pm"))
 	{
-		// pm <id>|<texto_com_underscores>
+
 		new sep = strfind(arg, "|");
 		if (sep < 1) return;
 		new idstr[8], msg[144], out[180];
@@ -1069,7 +979,7 @@ static stock EE_RunCommand(id, const type[], const arg[])
 	}
 	else if (!strcmp(type, "aviso"))
 	{
-		// aviso global enviado pelo Discord (arg = texto com '_' no lugar de espaços)
+
 		new msg[144];
 		EE_Copy(msg, arg);
 		for (new i = 0; msg[i] != EOS; i++) if (msg[i] == '_') msg[i] = ' ';
@@ -1103,10 +1013,8 @@ public EE_OnConfig(index, response_code, data[])
 		print("[EagleEYE] Conexao com o bot restabelecida.");
 	}
 
-	// resposta truncada/inválida: ignora por segurança
 	if (strfind(data, "END") == -1) return 1;
 
-	// o dono ainda não fez /ac login com o token
 	if (!strcmp(data, "WAIT", false, 4))
 	{
 		gEE_Linked = false;
@@ -1139,7 +1047,7 @@ public EE_OnConfig(index, response_code, data[])
 
 		if (!strcmp(tok, "EAGLE"))
 		{
-			// EAGLE <versao> <global> <poll>
+
 			EE_Token(line, idx, tok); gEE_Version = strval(tok);
 			EE_Token(line, idx, tok); gEE_Global = strval(tok) != 0;
 			EE_Token(line, idx, tok);
@@ -1150,7 +1058,7 @@ public EE_OnConfig(index, response_code, data[])
 		}
 		else if (!strcmp(tok, "T"))
 		{
-			// T <novo token>: o dono gerou um token novo no Discord (/ac servidor novachave)
+
 			new newToken[40];
 			EE_Token(line, idx, newToken);
 			if (EE_ValidToken(newToken) && !strcmp(newToken, gEE_ServerId, false, 9) && strcmp(newToken, gEE_Token))
@@ -1163,7 +1071,7 @@ public EE_OnConfig(index, response_code, data[])
 		}
 		else if (!strcmp(tok, "P") && fullConfig)
 		{
-			// P <id> <ativo> <acao> <tolerancia> <valor>
+
 			EE_Token(line, idx, tok);
 			new c = strval(tok);
 			if (!(0 <= c < EE_MAX)) continue;
@@ -1182,7 +1090,7 @@ public EE_OnConfig(index, response_code, data[])
 		}
 		else if (!strcmp(tok, "C"))
 		{
-			// C <id> <tipo> <argumento>
+
 			new type[16], arg[144];
 			EE_Token(line, idx, tok);
 			new cid = strval(tok);
@@ -1203,9 +1111,6 @@ public EE_OnConfig(index, response_code, data[])
 	return 1;
 }
 
-/* ===========================================================================
- *  Verificações periódicas
- * ========================================================================= */
 static stock EE_CheckMoney(playerid, tick)
 {
 	if (tick - gEE_P[playerid][acMoneyTick] < 3000) return;
@@ -1225,7 +1130,7 @@ static stock EE_CheckMoney(playerid, tick)
 	}
 	else if (client < server)
 	{
-		// gastos legítimos do lado do cliente (cassino, oficinas, pay'n'spray...)
+
 		gEE_P[playerid][acMoney] = client;
 	}
 }
@@ -1268,7 +1173,6 @@ static stock EE_CheckHealth(playerid, tick)
 		else if (a < gEE_P[playerid][acArmour]) gEE_P[playerid][acArmour] = a;
 	}
 
-	// godmode: levou tiros (OnPlayerGiveDamage do atirador) e a vida não caiu
 	if (gEE_P[playerid][acGodTick] && tick - gEE_P[playerid][acGodTick] >= 2000)
 	{
 		if (gEE_P[playerid][acGodHits] >= gEE_Prot[EE_GODMODE][dpValue]
@@ -1295,13 +1199,13 @@ static stock EE_CheckWeapons(playerid, tick)
 	for (new s = 0; s < 13; s++)
 	{
 		EE_RawWeaponData(playerid, s, w, ammo);
-		if (w <= 0 || ammo <= 0 || w == 46) continue; // 46 = paraquedas
+		if (w <= 0 || ammo <= 0 || w == 46) continue;
 		if (w != gEE_P[playerid][acWeapons][s])
 		{
 			if (checkWeapons) { bad = w; break; }
 			continue;
 		}
-		// munição criada no cliente (somente armas de fogo, slots 2..9)
+
 		if (2 <= s <= 9)
 		{
 			if (ammo > gEE_P[playerid][acAmmo][s] + 10)
@@ -1330,7 +1234,6 @@ static stock EE_CheckWeapons(playerid, tick)
 	}
 	if (bad == -1) return;
 
-	// remove as armas não autorizadas e devolve as permitidas
 	new keepW[13], keepA[13];
 	for (new s = 0; s < 13; s++)
 	{
@@ -1356,7 +1259,6 @@ static stock EE_CheckMovement(playerid, pstate, tick)
 
 	GetPlayerPos(playerid, x, y, z);
 
-	// crasher: coordenadas impossíveis / NaN
 	if (EE_BadFloat(x, 20000.0) || EE_BadFloat(y, 20000.0) || EE_BadFloat(z, 50000.0) || z < -1000.0)
 	{
 		format(det, sizeof det, "posicao invalida (%.0f, %.0f, %.0f)", x, y, z);
@@ -1376,7 +1278,6 @@ static stock EE_CheckMovement(playerid, pstate, tick)
 	new bool:immune = EE_IsPlayerImmune(playerid) || tick < gEE_P[playerid][acPosImmuneUntil];
 	new bool:surfing = (GetPlayerSurfingVehicleID(playerid) != INVALID_VEHICLE_ID) || (GetPlayerSurfingObjectID(playerid) != INVALID_OBJECT_ID);
 
-	// ---- velocidade
 	if (!EE_IsPlayerImmune(playerid) && tick >= gEE_P[playerid][acSpeedImmuneUntil] && !surfing)
 	{
 		if (pstate == 1 && vz > -0.3 && EE_IsEnabled(EE_SPEED_FOOT))
@@ -1399,7 +1300,6 @@ static stock EE_CheckMovement(playerid, pstate, tick)
 		}
 	}
 
-	// ---- teleporte / airbreak (compara com a posição do último tick)
 	if (!immune && gEE_P[playerid][acLastPosTick] && gEE_P[playerid][acLastState] == pstate && !surfing)
 	{
 		new dt = tick - gEE_P[playerid][acLastPosTick];
@@ -1407,8 +1307,8 @@ static stock EE_CheckMovement(playerid, pstate, tick)
 		{
 			new Float:dx = x - gEE_P[playerid][acLastX], Float:dy = y - gEE_P[playerid][acLastY];
 			new Float:dist = VectorSize(dx, dy, 0.0);
-			new Float:posSpeed = dist / (float(dt) / 1000.0);      // m/s pela posição
-			new Float:velSpeed = VectorSize(vx, vy, 0.0) * 50.0;    // m/s reportado
+			new Float:posSpeed = dist / (float(dt) / 1000.0);
+			new Float:velSpeed = VectorSize(vx, vy, 0.0) * 50.0;
 
 			if (EE_IsEnabled(EE_TELEPORT))
 			{
@@ -1486,7 +1386,6 @@ public EE_Tick()
 
 		new pstate = EE_RawState(i);
 
-		// ping (após 30s conectado)
 		if (gEE_Global && tick - gEE_P[i][acConnectTick] > 30000 && EE_IsEnabled(EE_PING))
 		{
 			new ping = GetPlayerPing(i);
@@ -1520,7 +1419,6 @@ public EE_Tick()
 		EE_CheckHealth(i, tick);
 		EE_CheckWeapons(i, tick);
 
-		// jetpack
 		new sa = EE_RawSpecialAction(i);
 		if (sa == 2)
 		{
@@ -1543,9 +1441,6 @@ public EE_Tick()
 	return 1;
 }
 
-/* ===========================================================================
- *  Hooks de callbacks (ALS)
- * ========================================================================= */
 public OnGameModeInit()
 {
 	EE_LoadDefaults();
@@ -1576,7 +1471,7 @@ public OnGameModeInit()
 	}
 	else
 	{
-		// primeira inicialização: o próprio include gera o token
+
 		new token[EE_TOKEN_LEN + 1];
 		EE_GenerateToken(token);
 		EE_SetToken(token);
@@ -1712,14 +1607,13 @@ public OnPlayerConnect(playerid)
 	EE_RefreshWhitelist(playerid);
 	new tick = GetTickCount();
 
-	// NPC falso: NPCs só podem vir do próprio servidor
 	if (gEE_P[playerid][acNPC] && EE_IsEnabled(EE_FAKENPC))
 	{
 		new bind[16];
 		GetConsoleVarAsString("bind", bind, sizeof bind);
 		if (strcmp(gEE_P[playerid][acIp], "127.0.0.1") && (bind[0] == EOS || strcmp(gEE_P[playerid][acIp], bind)))
 		{
-			gEE_P[playerid][acNPC] = false; // trata como jogador para poder punir
+			gEE_P[playerid][acNPC] = false;
 			new det[48];
 			format(det, sizeof det, "NPC conectando do IP %s", gEE_P[playerid][acIp]);
 			EE_Detect(playerid, EE_FAKENPC, det);
@@ -1728,7 +1622,7 @@ public OnPlayerConnect(playerid)
 
 	if (!gEE_P[playerid][acNPC])
 	{
-		// conexões simultâneas do mesmo IP
+
 		if (EE_IsEnabled(EE_IPFLOOD))
 		{
 			new count = 0;
@@ -1745,7 +1639,6 @@ public OnPlayerConnect(playerid)
 			}
 		}
 
-		// flood de reconexão (bots que entram e saem)
 		new recent = 0;
 		for (new i = 0; i < sizeof gEE_ConnIp; i++)
 		{
@@ -1786,7 +1679,7 @@ public OnPlayerDisconnect(playerid, reason)
 		new ret = 1;
 	#endif
 	gEE_P[playerid][acSerial] = 0;
-	gEE_P[playerid][acPunished] = true; // ignora qualquer detecção tardia
+	gEE_P[playerid][acPunished] = true;
 	return ret;
 }
 #if defined _ALS_OnPlayerDisconnect
@@ -1868,12 +1761,11 @@ public OnPlayerSpawn(playerid)
 {
 	new tick = GetTickCount();
 
-	// spawn falso: o servidor não autorizou (ex.: spawnar durante o login)
 	if (!gEE_P[playerid][acSpawnAllowed] && EE_ValidPlayer(playerid) && EE_IsEnabled(EE_FAKESPAWN))
 	{
 		if (EE_Detect(playerid, EE_FAKESPAWN, "spawn sem permissao do servidor") && gEE_P[playerid][acPunished])
 		{
-			return 1; // não deixa o gamemode processar o spawn do cheater
+			return 1;
 		}
 	}
 	gEE_P[playerid][acSpawnAllowed] = false;
@@ -1925,13 +1817,13 @@ public OnPlayerDeath(playerid, killerid, EE_T_WEAPON:reason)
 	new tick = GetTickCount();
 	gEE_P[playerid][acLastPosTick] = 0;
 	gEE_P[playerid][acPosImmuneUntil] = tick + 5000;
-	gEE_P[playerid][acSpawnAllowed] = true; // respawn após a morte é legítimo
+	gEE_P[playerid][acSpawnAllowed] = true;
 	gEE_P[playerid][acGodTick] = 0;
 	gEE_P[playerid][acGodHits] = 0;
 
 	if (EE_ValidPlayer(playerid) && EE_IsEnabled(EE_FAKEKILL))
 	{
-		// flood de mortes
+
 		if (tick - gEE_P[playerid][acDeathTick] > 5000)
 		{
 			gEE_P[playerid][acDeathTick] = tick;
@@ -1943,7 +1835,6 @@ public OnPlayerDeath(playerid, killerid, EE_T_WEAPON:reason)
 			gEE_P[playerid][acDeathCount] = 0;
 		}
 
-		// assassino inválido
 		if (killerid != INVALID_PLAYER_ID)
 		{
 			new bool:fake = false, det[64];
@@ -1960,7 +1851,7 @@ public OnPlayerDeath(playerid, killerid, EE_T_WEAPON:reason)
 			if (fake)
 			{
 				EE_Detect(playerid, EE_FAKEKILL, det);
-				killerid = INVALID_PLAYER_ID; // gamemode não conta a kill falsa
+				killerid = INVALID_PLAYER_ID;
 			}
 		}
 	}
@@ -2044,7 +1935,6 @@ public OnPlayerStateChange(playerid, EE_T_PSTATE:newstate, EE_T_PSTATE:oldstate)
 		new vehicleid = GetPlayerVehicleID(playerid);
 		EE_VehicleSpamCheck(playerid);
 
-		// crasher: assento inválido / veículo inexistente
 		if (EE_ValidPlayer(playerid) && EE_IsEnabled(EE_CRASHER))
 		{
 			new seat = GetPlayerVehicleSeat(playerid);
@@ -2056,7 +1946,6 @@ public OnPlayerStateChange(playerid, EE_T_PSTATE:newstate, EE_T_PSTATE:oldstate)
 			}
 		}
 
-		// car warp
 		if (_:oldstate == 1 && EE_ValidPlayer(playerid) && EE_IsEnabled(EE_CARWARP)
 			&& tick >= gEE_P[playerid][acPosImmuneUntil] && gEE_P[playerid][acLastPosTick] && tick - gEE_P[playerid][acLastPosTick] < 2000
 			&& vehicleid)
@@ -2169,7 +2058,6 @@ public OnPlayerCommandText(playerid, cmdtext[])
 	forward EE_OnPlayerCommandText(playerid, cmdtext[]);
 #endif
 
-// Para Pawn.CMD: chame no OnPlayerCommandReceived. Retorna true = bloquear o comando.
 stock bool:EE_CommandFloodCheck(playerid, const cmdtext[] = "")
 {
 	if (EE_FloodCheck(playerid)) return true;
@@ -2184,7 +2072,6 @@ public OnPlayerWeaponShot(playerid, EE_T_WEAPON:weaponid, EE_T_BULLET:hittype, h
 	{
 		new tick = GetTickCount(), det[64];
 
-		// crasher: dados de bala inválidos
 		if (EE_IsEnabled(EE_CRASHER))
 		{
 			new bool:bad = false;
@@ -2200,7 +2087,6 @@ public OnPlayerWeaponShot(playerid, EE_T_WEAPON:weaponid, EE_T_BULLET:hittype, h
 			}
 		}
 
-		// atirou com arma que não possui
 		if (EE_IsEnabled(EE_WEAPON))
 		{
 			new slot = EE_WeaponSlot(w);
@@ -2212,7 +2098,6 @@ public OnPlayerWeaponShot(playerid, EE_T_WEAPON:weaponid, EE_T_BULLET:hittype, h
 			}
 		}
 
-		// rapid fire
 		if (EE_IsEnabled(EE_RAPIDFIRE) && w != 38)
 		{
 			if (tick - gEE_P[playerid][acShotTick] >= 1000)
@@ -2229,7 +2114,6 @@ public OnPlayerWeaponShot(playerid, EE_T_WEAPON:weaponid, EE_T_BULLET:hittype, h
 			}
 		}
 
-		// munição infinita: atira e a munição não diminui
 		if (EE_IsEnabled(EE_AMMO))
 		{
 			new ammo = GetPlayerAmmo(playerid);
@@ -2247,7 +2131,6 @@ public OnPlayerWeaponShot(playerid, EE_T_WEAPON:weaponid, EE_T_BULLET:hittype, h
 			gEE_P[playerid][acLastShotAmmo] = ammo;
 		}
 
-		// alcance impossível (silent aim / range hack)
 		if ((ht == 1 || ht == 2) && EE_IsEnabled(EE_RANGE))
 		{
 			new Float:tx, Float:ty, Float:tz, bool:ok = false;
@@ -2266,7 +2149,6 @@ public OnPlayerWeaponShot(playerid, EE_T_WEAPON:weaponid, EE_T_BULLET:hittype, h
 			}
 		}
 
-		// aimbot: taxa de acerto em jogadores muito alta (janela de 40 tiros)
 		if (EE_IsEnabled(EE_AIMBOT) && w != 38 && w != 25 && w != 26 && w != 27)
 		{
 			gEE_P[playerid][acAimShots]++;
@@ -2284,7 +2166,6 @@ public OnPlayerWeaponShot(playerid, EE_T_WEAPON:weaponid, EE_T_BULLET:hittype, h
 			}
 		}
 
-		// c-bug: registra o tiro para comparar com o agachar
 		if (w == 24 || w == 25 || w == 27 || w == 33 || w == 34) gEE_P[playerid][acCbugTick] = tick;
 	}
 	#if defined EE_OnPlayerWeaponShot
@@ -2309,7 +2190,7 @@ public OnPlayerGiveDamage(playerid, damagedid, Float:amount, EE_T_WEAPON:weaponi
 	new w = _:weaponid;
 	if (EE_ValidPlayer(playerid) && !EE_IsPlayerImmune(playerid) && EE_IsBulletWeapon(w))
 	{
-		// dano maior que o máximo da arma
+
 		if (EE_IsEnabled(EE_DAMAGE))
 		{
 			new Float:maxd = EE_WeaponDamage(w);
@@ -2321,7 +2202,6 @@ public OnPlayerGiveDamage(playerid, damagedid, Float:amount, EE_T_WEAPON:weaponi
 			}
 		}
 
-		// godmode: registra o dano na vítima para conferir no próximo tick
 		if (EE_IsEnabled(EE_GODMODE) && EE_ValidPlayer(damagedid) && amount > 0.0
 			&& EE_RawState(damagedid) == 1 && !EE_IsPaused(damagedid)
 			&& !(GetPlayerTeam(playerid) != NO_TEAM && GetPlayerTeam(playerid) == GetPlayerTeam(damagedid))
@@ -2358,7 +2238,7 @@ public OnPlayerGiveDamage(playerid, damagedid, Float:amount, EE_T_WEAPON:weaponi
 
 public OnPlayerKeyStateChange(playerid, EE_T_KEY:newkeys, EE_T_KEY:oldkeys)
 {
-	// c-bug: agachou logo depois de atirar com deagle/shotgun/rifles
+
 	if ((_:newkeys & 2) && !(_:oldkeys & 2) && EE_ValidPlayer(playerid) && EE_IsEnabled(EE_CBUG)
 		&& EE_RawState(playerid) == 1 && gEE_P[playerid][acCbugTick]
 		&& GetTickCount() - gEE_P[playerid][acCbugTick] < gEE_Prot[EE_CBUG][dpValue])
@@ -2427,7 +2307,7 @@ public OnUnoccupiedVehicleUpdate(vehicleid, playerid, passenger_seat, Float:new_
 
 public OnTrailerUpdate(playerid, vehicleid)
 {
-	// puxar trailers/veículos distantes com o próprio veículo
+
 	if (EE_ValidPlayer(playerid) && EE_ValidVehicle(vehicleid) && EE_IsEnabled(EE_VEH_TROLL) && !EE_IsPlayerImmune(playerid))
 	{
 		new Float:x, Float:y, Float:z;
@@ -2466,7 +2346,7 @@ public OnPlayerPickUpPickup(playerid, pickupid)
 		{
 			new det[48];
 			format(det, sizeof det, "pickup %d a %.0f m", pickupid, dist);
-			if (EE_Detect(playerid, EE_FAKEPICKUP, det)) return 1; // não repassa ao gamemode
+			if (EE_Detect(playerid, EE_FAKEPICKUP, det)) return 1;
 		}
 	}
 	#if defined EE_OnPlayerPickUpPickup
@@ -2567,7 +2447,7 @@ public OnVehicleMod(playerid, vehicleid, componentid)
 
 public OnVehicleRespray(playerid, vehicleid, color1, color2)
 {
-	// pay'n'spray conserta o veículo: libera a vida do veículo
+
 	if (EE_ValidVehicle(vehicleid))
 	{
 		gEE_VehHealth[vehicleid] = 1000.0;
@@ -2613,7 +2493,7 @@ public OnVehicleSpawn(vehicleid)
 #endif
 
 #if !EE_OMP
-// No open.mp a validação de dialogid já é feita pelo próprio servidor.
+
 public OnDialogResponse(playerid, dialogid, response, listitem, inputtext[])
 {
 	if (EE_ValidPlayer(playerid) && gEE_Global && gEE_Prot[EE_DIALOG][dpEnabled])
@@ -2643,9 +2523,6 @@ public OnDialogResponse(playerid, dialogid, response, listitem, inputtext[])
 #endif
 #endif
 
-/* ===========================================================================
- *  Funções remotas usadas pelos filterscripts (<eagleeye_fs>)
- * ========================================================================= */
 forward EE_R_GiveMoney(playerid, amount);
 forward EE_R_ResetMoney(playerid);
 forward EE_R_GetMoney(playerid);
@@ -2662,11 +2539,6 @@ forward EE_R_Spawn(playerid);
 forward EE_R_Checkpoint(playerid, race, Float:x, Float:y, Float:z, Float:size);
 forward EE_R_Pickup(pickupid, Float:x, Float:y, Float:z);
 
-/* ===========================================================================
- *  Hooks de natives
- * ========================================================================= */
-
-// ---------- dinheiro
 stock EE_T_BOOL:EE_GivePlayerMoney(playerid, money)
 {
 	if (0 <= playerid < MAX_PLAYERS)
@@ -2699,7 +2571,6 @@ stock EE_T_BOOL:EE_ResetPlayerMoney(playerid)
 #endif
 #define ResetPlayerMoney EE_ResetPlayerMoney
 
-// retorna sempre o valor do SERVIDOR (o do cliente pode estar hackeado)
 stock EE_GetPlayerMoney(playerid)
 {
 	if (0 <= playerid < MAX_PLAYERS && IsPlayerConnected(playerid) && !IsPlayerNPC(playerid)) return gEE_P[playerid][acMoney];
@@ -2712,7 +2583,6 @@ stock EE_GetPlayerMoney(playerid)
 #endif
 #define GetPlayerMoney EE_GetPlayerMoney
 
-// ---------- vida / colete
 stock EE_T_BOOL:EE_SetPlayerHealth(playerid, Float:health)
 {
 	if (0 <= playerid < MAX_PLAYERS)
@@ -2745,7 +2615,6 @@ stock EE_T_BOOL:EE_SetPlayerArmour(playerid, Float:armour)
 #endif
 #define SetPlayerArmour EE_SetPlayerArmour
 
-// ---------- armas
 static stock EE_TrackGiveWeapon(playerid, weaponid, ammo)
 {
 	new slot = EE_WeaponSlot(weaponid);
@@ -2869,7 +2738,6 @@ stock EE_AddPlayerClassEx(teamid, skin, Float:x, Float:y, Float:z, Float:angle,
 #endif
 #define AddPlayerClassEx EE_AddPlayerClassEx
 
-// ---------- spawn
 stock EE_T_BOOL:EE_SpawnPlayer(playerid)
 {
 	if (0 <= playerid < MAX_PLAYERS) gEE_P[playerid][acSpawnAllowed] = true;
@@ -2882,7 +2750,6 @@ stock EE_T_BOOL:EE_SpawnPlayer(playerid)
 #endif
 #define SpawnPlayer EE_SpawnPlayer
 
-// ---------- posição
 stock EE_T_BOOL:EE_SetPlayerPos(playerid, Float:x, Float:y, Float:z)
 {
 	EE_PositionImmunity(playerid, 3000);
@@ -2937,7 +2804,7 @@ stock EE_T_BOOL:EE_TogglePlayerSpectating(playerid, EE_T_BOOL:toggle)
 	if (0 <= playerid < MAX_PLAYERS)
 	{
 		gEE_P[playerid][acSpawnTick] = GetTickCount();
-		if (!toggle) gEE_P[playerid][acSpawnAllowed] = true; // sair do spectate gera spawn
+		if (!toggle) gEE_P[playerid][acSpawnAllowed] = true;
 	}
 	return TogglePlayerSpectating(playerid, toggle);
 }
@@ -2981,7 +2848,6 @@ stock EE_T_BOOL:EE_SetVehicleVelocity(vehicleid, Float:x, Float:y, Float:z)
 #endif
 #define SetVehicleVelocity EE_SetVehicleVelocity
 
-// ---------- jetpack
 stock EE_T_BOOL:EE_SetPlayerSpecialAction(playerid, EE_T_SACTION:actionid)
 {
 	if (0 <= playerid < MAX_PLAYERS && _:actionid == 2) gEE_P[playerid][acJetpack] = true;
@@ -2994,7 +2860,6 @@ stock EE_T_BOOL:EE_SetPlayerSpecialAction(playerid, EE_T_SACTION:actionid)
 #endif
 #define SetPlayerSpecialAction EE_SetPlayerSpecialAction
 
-// ---------- checkpoints
 stock EE_T_BOOL:EE_SetPlayerCheckpoint(playerid, Float:x, Float:y, Float:z, Float:size)
 {
 	if (0 <= playerid < MAX_PLAYERS)
@@ -3053,7 +2918,6 @@ stock EE_T_BOOL:EE_DisablePlayerRaceCP(playerid)
 #endif
 #define DisablePlayerRaceCheckpoint EE_DisablePlayerRaceCP
 
-// ---------- pickups
 static stock EE_TrackPickup(pickupid, Float:x, Float:y, Float:z)
 {
 	if (0 <= pickupid < MAX_PICKUPS)
@@ -3079,7 +2943,7 @@ stock EE_CreatePickup(model, type, Float:x, Float:y, Float:z, virtualworld = 0)
 
 stock EE_AddStaticPickup(model, type, Float:x, Float:y, Float:z, virtualworld = 0)
 {
-	// AddStaticPickup não retorna o ID: usa CreatePickup para poder validar
+
 	return (EE_TrackPickup(CreatePickup(model, type, x, y, z, virtualworld), x, y, z) != -1) ? 1 : 0;
 }
 #if defined _ALS_AddStaticPickup
@@ -3101,7 +2965,6 @@ stock EE_T_BOOL:EE_DestroyPickup(pickupid)
 #endif
 #define DestroyPickup EE_DestroyPickup
 
-// ---------- veículos
 stock EE_T_BOOL:EE_SetVehicleHealth(vehicleid, Float:health)
 {
 	if (EE_ValidVehicle(vehicleid)) gEE_VehHealth[vehicleid] = health;
@@ -3173,7 +3036,6 @@ stock EE_AddStaticVehicleEx(modelid, Float:x, Float:y, Float:z, Float:angle, col
 #endif
 #define AddStaticVehicleEx EE_AddStaticVehicleEx
 
-// ---------- dialogs (somente SA-MP; o open.mp já valida sozinho)
 #if !EE_OMP
 stock EE_ShowPlayerDialog(playerid, dialogid, style, const caption[], const info[], const button1[], const button2[])
 {
@@ -3188,9 +3050,6 @@ stock EE_ShowPlayerDialog(playerid, dialogid, style, const caption[], const info
 #define ShowPlayerDialog EE_ShowPlayerDialog
 #endif
 
-/* ===========================================================================
- *  Implementação das funções remotas (filterscripts)
- * ========================================================================= */
 public EE_R_GiveMoney(playerid, amount)          { GivePlayerMoney(playerid, amount); return 1; }
 public EE_R_ResetMoney(playerid)                 { ResetPlayerMoney(playerid); return 1; }
 public EE_R_GetMoney(playerid)                   { return GetPlayerMoney(playerid); }
@@ -3217,7 +3076,7 @@ public EE_R_ResetWeapons(playerid)               { ResetPlayerWeapons(playerid);
 public EE_R_PosImmunity(playerid, ms)            { EE_PositionImmunity(playerid, ms); return 1; }
 public EE_R_VehImmunity(vehicleid, Float:health)
 {
-	// health < 0.0 => apenas imunidade de posição (SetVehiclePos/Velocity)
+
 	if (EE_ValidVehicle(vehicleid) && health >= 0.0) gEE_VehHealth[vehicleid] = health;
 	EE_VehicleOccupantsImmunity(vehicleid, 3000);
 	return 1;
@@ -3240,7 +3099,7 @@ public EE_R_Spawn(playerid)
 public EE_R_Checkpoint(playerid, race, Float:x, Float:y, Float:z, Float:size)
 {
 	if (!(0 <= playerid < MAX_PLAYERS)) return 1;
-	// size < 0.0 => checkpoint desativado
+
 	if (race)
 	{
 		gEE_P[playerid][acRCP] = size >= 0.0;
@@ -3257,8 +3116,7 @@ public EE_R_Checkpoint(playerid, race, Float:x, Float:y, Float:z, Float:size)
 }
 public EE_R_Pickup(pickupid, Float:x, Float:y, Float:z)
 {
-	// pickups criados por filterscripts: o ID pode coincidir com os do gamemode,
-	// então apenas registramos a posição (x = -99999 => destruído)
+
 	if (0 <= pickupid < MAX_PICKUPS)
 	{
 		if (x < -90000.0) gEE_Pickups[pickupid][dpkValid] = false;

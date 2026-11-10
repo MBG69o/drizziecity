@@ -225,6 +225,25 @@ Os comandos valem para o **seu** servidor, aquele registrado no seu nome no `don
 
 As alterações chegam ao servidor em até `intervalo` segundos (padrão 10), **sem reiniciar o gamemode**. Se o bot cair, o servidor continua usando a última configuração recebida.
 
+## 🛡️ Proteção da API (anti-DDoS)
+
+A API que os servidores do jogo acessam tem proteção contra abuso na camada HTTP (`bot/src/guard.js`):
+
+| Proteção | Como funciona | Padrão |
+|---|---|---|
+| Limite por IP | Cada IP pode fazer um número limitado de requisições por minuto, com um pico permitido. Acima disso recebe `429`. | 120/min, pico 60 (`AC_RATE_LIMIT`, `AC_RATE_BURST`) |
+| Bloqueio automático | IP que continua insistindo depois do `429` fica bloqueado. | 20 negadas/min → 10 min |
+| Anti-adivinhação de token | Muitos tokens errados seguidos bloqueiam o IP. | 20 erros em 10 min → 30 min |
+| Anti-lixo na memória | Cada IP só pode deixar poucos tokens novos "aguardando login" por hora. | 5/hora |
+| Limite por servidor | Um servidor (token) não pode fazer requisições em excesso. | 180/min |
+| Conexões lentas (slowloris) | Conexões que não terminam de enviar o pedido são derrubadas. | 10s cabeçalhos, 15s total |
+| Tamanhos | Corpo, cabeçalhos e URL acima do limite são recusados na hora. | 4 KB / 8 KB / 2 KB |
+| Conexões simultâneas | Teto de conexões abertas ao mesmo tempo. | 1000 (`AC_MAX_CONNECTIONS`) |
+
+Um servidor do jogo faz entre 6 e 20 requisições por minuto, bem abaixo dos limites. Se vários servidores saírem do mesmo IP (a mesma hospedagem), aumente `AC_RATE_LIMIT`.
+
+> **DDoS volumétrico** (inundação de rede muito grande) não tem como ser barrado por nenhum app: precisa ser filtrado antes, na rede. Na Discloud quem faz isso é a **Cloudflare**, que já fica na frente do site. Com `AC_TRUST_PROXY=true`, o bot usa o IP real enviado pela Cloudflare (`CF-Connecting-IP`) para aplicar os limites.
+
 ## 🧩 API para o gamemode
 
 ```pawn
