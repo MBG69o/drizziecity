@@ -17,6 +17,7 @@ set(EE_SOURCES
     src/ee_cat_player.cpp    # categoria JOGADOR
     src/ee_cat_weapons.cpp   # categoria ARMAS E COMBATE
     src/ee_cat_movement.cpp  # categoria MOVIMENTO (+ vel. veiculo, crasher pos.)
+    src/ee_cat_vehicles.cpp  # categoria VEICULOS
     src/ee_plugin.cpp
     # src/ee_detections.cpp   # cola sampgdk (hooks de natives + callbacks)
 )

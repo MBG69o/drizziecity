@@ -9,4 +9,5 @@ $CXX test/test_detect.cpp src/ee_detect.cpp -o /tmp/ee_t3 && /tmp/ee_t3
 $CXX test/test_player.cpp src/ee_cat_player.cpp src/ee_detect.cpp -o /tmp/ee_t4 && /tmp/ee_t4
 $CXX test/test_weapons.cpp src/ee_cat_weapons.cpp src/ee_cat_player.cpp src/ee_detect.cpp -o /tmp/ee_t5 && /tmp/ee_t5
 $CXX test/test_movement.cpp src/ee_cat_movement.cpp src/ee_cat_player.cpp src/ee_detect.cpp -o /tmp/ee_t6 && /tmp/ee_t6
+$CXX test/test_vehicles.cpp src/ee_cat_vehicles.cpp src/ee_cat_player.cpp src/ee_detect.cpp -o /tmp/ee_t7 && /tmp/ee_t7
 echo "plugin: TODOS OS TESTES OK"
