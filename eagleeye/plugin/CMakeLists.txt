@@ -15,6 +15,7 @@ set(EE_SOURCES
     src/ee_http.cpp
     src/ee_detect.cpp        # motor: config + tolerancia + relatorios
     src/ee_cat_player.cpp    # categoria JOGADOR
+    src/ee_cat_weapons.cpp   # categoria ARMAS E COMBATE
     src/ee_plugin.cpp
     # src/ee_detections.cpp   # cola sampgdk (hooks de natives + callbacks)
 )
