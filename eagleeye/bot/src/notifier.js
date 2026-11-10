@@ -4,6 +4,10 @@ const {
   EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, escapeMarkdown,
 } = require('discord.js');
 const { PROTECTIONS, byId, byKey } = require('./protections');
+const {
+  CRITICAL, LATEST_INCLUDE, isOutdated, securityReport,
+} = require('./security');
+const { sanitizeGameText } = require('./config-format');
 
 const COLORS = { attack: 0xe74c3c, contained: 0x2ecc71, warn: 0xf1c40f, info: 0x3498db };
 
@@ -24,7 +28,22 @@ const COOLDOWN = {
   weak: 24 * HOUR,
   login: 0,
   token: 0,
+  config: 0,
+  offline: 6 * HOUR,
+  ipchange: 6 * HOUR,
+  clone: 2 * HOUR,
+  outdated: 72 * HOUR,
+  unsynced: 12 * HOUR,
+  critical: 24 * HOUR,
+  nologs: 72 * HOUR,
+  rconweak: 72 * HOUR,
+  fp: 6 * HOUR,
+  massban: HOUR,
+  repeat: 12 * HOUR,
+  evasion: 6 * HOUR,
+  weekly: 7 * 24 * HOUR - 10 * MIN,
 };
+const NOTIFY_STATE_TTL = 8 * 24 * HOUR;
 
 const BURST_WINDOW = 5 * MIN;
 const BURST_LIMIT = 15;          // detecções em 5 min que indicam ataque
@@ -46,14 +65,17 @@ function createNotifier({ store, client, logger = console, now = () => Date.now(
     return MODES.includes(server.notifyMode) ? server.notifyMode : 'ambos';
   }
 
+  // tipos com sufixo (ex.: "evasion:1.2.3.4") usam o intervalo do tipo base
   function canSend(server, type) {
     const last = (server.notifyState || {})[type] || 0;
-    return now() - last >= (COOLDOWN[type] ?? HOUR);
+    return now() - last >= (COOLDOWN[type.split(':')[0]] ?? HOUR);
   }
 
   function markSent(server, type) {
     store.updateServer(server, (s) => {
-      s.notifyState = { ...(s.notifyState || {}), [type]: now() };
+      const state = { ...(s.notifyState || {}), [type]: now() };
+      for (const [k, v] of Object.entries(state)) if (now() - v > NOTIFY_STATE_TTL && k !== 'weekly') delete state[k];
+      s.notifyState = state;
     }, { bump: false });
   }
 
@@ -116,7 +138,6 @@ function createNotifier({ store, client, logger = console, now = () => Date.now(
   }
 
   const protName = (code) => byId.get(code)?.name ?? `#${code}`;
-  const pastAction = (a) => ['', 'kickado', 'banido'][a];
 
   /** Analisa cada detecção que chega do servidor. */
   function onDetection(server, det) {
@@ -147,6 +168,67 @@ function createNotifier({ store, client, logger = console, now = () => Date.now(
           '',
           `Eventos nos últimos 5 minutos: **${attacks.length}**. Acompanhe em \`/ac historico\`.`,
         ].join('\n'),
+      });
+    }
+
+    // 3) possível evasão de ban: IP banido voltou com outro nick
+    if (det.ip) {
+      const prev = store.activeBans(server).find((b) => b.ip === det.ip && b.name.toLowerCase() !== String(det.name).toLowerCase());
+      if (prev && canSend(server, `evasion:${det.ip}`)) {
+        store.queueCommand(server, 'adm', sanitizeGameText(`Possivel evasao de ban: ${det.name} usa o IP de ${prev.name} (banido)`));
+        notify(server, {
+          type: `evasion:${det.ip}`,
+          title: '🕵️ Possível evasão de ban',
+          color: COLORS.attack,
+          text: (u) => [
+            `Olá, ${u}! No seu servidor **${escapeMarkdown(server.name)}**, o jogador **${escapeMarkdown(det.name)}** está usando o mesmo IP (||${det.ip}||) de **${escapeMarkdown(prev.name)}**, que foi banido pelo EagleEYE.`,
+            '',
+            'Pode ser a mesma pessoa com outra conta. Confira com `/ac jogador` e, se for o caso, puna manualmente.',
+          ].join('\n'),
+        });
+      }
+    }
+
+    // 4) jogador reincidente (3+ punições em 24h)
+    if (det.action > 0) {
+      const day = store.getHistory(server).filter((d) => d.action > 0 && now() - d.time < 24 * HOUR
+        && String(d.name).toLowerCase() === String(det.name).toLowerCase());
+      if (day.length >= 3) {
+        notify(server, {
+          type: `repeat:${String(det.name).toLowerCase()}`,
+          title: '🔁 Jogador reincidente',
+          text: (u) => `Olá, ${u}! O jogador **${escapeMarkdown(det.name)}** já foi punido **${day.length} vezes** nas últimas 24h no servidor **${escapeMarkdown(server.name)}** (${[...new Set(day.map((d) => protName(d.code)))].join(', ')}). Considere um ban definitivo.`,
+        });
+      }
+    }
+
+    // 5) possível falso positivo: uma proteção punindo muitos jogadores diferentes
+    if (det.action > 0) {
+      const sameProt = list.filter((d) => d.code === det.code && d.action > 0);
+      const players = new Set(sameProt.map((d) => String(d.name).toLowerCase()));
+      if (players.size >= 8) {
+        notify(server, {
+          type: `fp:${det.code}`,
+          title: '🤔 Possível falso positivo',
+          text: (u) => [
+            `Olá, ${u}! A proteção **${protName(det.code)}** puniu **${players.size} jogadores diferentes** em 5 minutos no servidor **${escapeMarkdown(server.name)}**.`,
+            '',
+            'Pode ser um ataque, mas também pode ser um **falso positivo** (limite muito baixo, lag ou um sistema do gamemode). Se jogadores legítimos estão sendo punidos, mude essa proteção para **aviso** e ajuste o limite.',
+          ].join('\n'),
+          components: [new ActionRowBuilder().addComponents(new ButtonBuilder()
+            .setCustomId(`ee:secwarn:${server.id}:${det.code}`).setLabel(`Mudar ${protName(det.code)} para aviso`.slice(0, 80)).setStyle(ButtonStyle.Secondary))],
+        });
+      }
+    }
+
+    // 6) bans em massa
+    const bans = list.filter((d) => d.action === 2);
+    if (det.action === 2 && bans.length >= 5) {
+      notify(server, {
+        type: 'massban',
+        title: '🔨 Muitos bans em pouco tempo',
+        color: COLORS.attack,
+        text: (u) => `Olá, ${u}! O EagleEYE baniu **${bans.length} jogadores** em 5 minutos no servidor **${escapeMarkdown(server.name)}**. Confira em \`/ac moderacao bans\` se está tudo certo; se algum foi engano, desbana pelo botão.`,
       });
     }
 
@@ -225,6 +307,79 @@ function createNotifier({ store, client, logger = console, now = () => Date.now(
     });
   }
 
+  /**
+   * Cada consulta do servidor do jogo: verifica IP, versão do include e senha do RCON.
+   * O IP conhecido fica salvo (server.knownAddress) para não alarmar depois de reiniciar o bot.
+   */
+  const ipChanges = new Map(); // serverId -> [time]
+  function onStatus(server, status) {
+    if (!server.owners.length || !status.address) return;
+    const known = server.knownAddress;
+    if (!known) {
+      store.updateServer(server, (s) => { s.knownAddress = status.address; }, { bump: false });
+    } else if (known !== status.address) {
+      const t = now();
+      const list = (ipChanges.get(server.id) || []).filter((x) => t - x < 10 * MIN);
+      list.push(t);
+      ipChanges.set(server.id, list);
+      store.updateServer(server, (s) => { s.knownAddress = status.address; }, { bump: false });
+      if (list.length >= 3) {
+        notify(server, {
+          type: 'clone',
+          title: '🚨 Token sendo usado em dois lugares',
+          color: COLORS.attack,
+          text: (u) => [
+            `Olá, ${u}! O token do seu servidor **${escapeMarkdown(server.name)}** está sendo usado por **dois endereços diferentes ao mesmo tempo** (||${known}|| e ||${status.address}||).`,
+            '',
+            'Isso indica que **o token vazou** e outra pessoa está usando. Gere um novo token agora: o servidor verdadeiro recebe o novo sozinho, e a cópia para de funcionar.',
+          ].join('\n'),
+          components: [new ActionRowBuilder().addComponents(new ButtonBuilder()
+            .setCustomId(`ee:secrot:${server.id}:0`).setLabel('Gerar novo token').setStyle(ButtonStyle.Danger))],
+        });
+      } else {
+        notify(server, {
+          type: 'ipchange',
+          title: '🌐 Servidor conectado de outro IP',
+          text: (u) => [
+            `Olá, ${u}! O seu servidor **${escapeMarkdown(server.name)}** passou a se conectar de outro endereço: ||${known}|| → ||${status.address}||.`,
+            '',
+            'Se você trocou de hospedagem ou o IP mudou, pode ignorar. Se **não** foi você, alguém pode estar usando o seu token: gere um novo.',
+          ].join('\n'),
+          components: [new ActionRowBuilder().addComponents(new ButtonBuilder()
+            .setCustomId(`ee:secrot:${server.id}:0`).setLabel('Gerar novo token').setStyle(ButtonStyle.Secondary))],
+        });
+      }
+    }
+    if (status.version && isOutdated(status.version) && server.activated) {
+      notify(server, {
+        type: 'outdated',
+        title: '⬆️ Include desatualizado',
+        color: COLORS.info,
+        text: (u) => `Olá, ${u}! O servidor **${escapeMarkdown(server.name)}** está com o EagleEYE **v${status.version}**, e a versão mais recente é a **v${LATEST_INCLUDE}**. Atualize o \`eagleeye.inc\` e recompile para receber as proteções e correções novas.`,
+      });
+    }
+    if (status.rconWeak && server.activated) {
+      notify(server, {
+        type: 'rconweak',
+        title: '🔑 Senha do RCON fraca',
+        text: (u) => `Olá, ${u}! A senha do RCON do servidor **${escapeMarkdown(server.name)}** é fraca (menos de 8 caracteres ou uma senha padrão). Com ela, alguém pode tomar o controle do servidor. Troque por uma senha forte no \`server.cfg\` (\`rcon_password\`) ou \`config.json\` (\`rcon.password\`).`,
+      });
+    }
+  }
+
+  /** Mudanças importantes feitas por alguém: avisa os outros donos. */
+  function onConfigChange(server, userId, what) {
+    const others = server.owners.filter((id) => id !== userId);
+    if (!others.length) return;
+    notify(server, {
+      recipients: others,
+      type: 'config',
+      title: '⚙️ Mudança importante na configuração',
+      color: COLORS.info,
+      text: (u) => `Olá, ${u}! <@${userId}> alterou o servidor **${escapeMarkdown(server.name)}**: **${what}**. Veja tudo em \`/ac servidor auditoria\`.`,
+    });
+  }
+
   const fixButtons = (server, ...buttons) => [new ActionRowBuilder().addComponents(buttons.map(([id, label, style]) => new ButtonBuilder()
     .setCustomId(`ee:${id}:${server.id}:0`).setLabel(label).setStyle(style)))];
 
@@ -246,7 +401,75 @@ function createNotifier({ store, client, logger = console, now = () => Date.now(
       const unconfirmed = persisted(server, 'unconfirmed', online && !server.activated);
       const disabled = persisted(server, 'disabled', online && server.activated && !server.global);
       const weak = persisted(server, 'weak', online && server.activated && server.global && enabled < PROTECTIONS.length / 2);
+      // servidor fora do ar há mais de 10 minutos (só se ele já tinha se conectado)
+      const st = store.getStatus(server);
+      if (server.owners.length && server.activated && st.lastSeen && now() - st.lastSeen > 10 * MIN) {
+        notify(server, {
+          type: 'offline',
+          title: '🔴 Servidor fora do ar',
+          color: COLORS.attack,
+          text: (u) => `Olá, ${u}! O servidor **${escapeMarkdown(server.name)}** está **sem contato com o EagleEYE** desde <t:${Math.floor(st.lastSeen / 1000)}:R>. Enquanto isso, as configurações do Discord não chegam e os logs não são enviados. Confira se o servidor caiu ou se ele perdeu a conexão com a internet.`,
+        });
+      }
       if (!online) continue;
+
+      // configuração do Discord não está sendo aplicada
+      if (persisted(server, 'unsynced', st.configVersion !== server.version)) {
+        notify(server, {
+          type: 'unsynced',
+          title: '⏳ Configuração não aplicada',
+          text: (u) => `Olá, ${u}! O servidor **${escapeMarkdown(server.name)}** está online, mas **não aplicou as últimas mudanças** feitas no Discord há mais de 30 minutos. Isso costuma acontecer com o include desatualizado: atualize o \`eagleeye.inc\` e recompile.`,
+        });
+      }
+
+      // proteções essenciais desligadas
+      const criticalOff = CRITICAL.filter((k) => !server.protections[k].enabled);
+      if (persisted(server, 'critical', server.activated && server.global && criticalOff.length > 0)) {
+        notify(server, {
+          type: 'critical',
+          title: '⚠️ Proteções essenciais desligadas',
+          text: (u) => `Olá, ${u}! No servidor **${escapeMarkdown(server.name)}**, estas proteções essenciais estão **desligadas**: ${criticalOff.map((k) => `**${byKey.get(k).name}**`).join(', ')}. Sem elas o servidor fica exposto aos cheats mais comuns.`,
+          components: fixButtons(server, ['seccrit', 'Ligar proteções essenciais', ButtonStyle.Success]),
+        });
+      }
+
+      // sem canal de logs
+      if (persisted(server, 'nologs', server.activated && !Object.keys(server.logChannels || {}).length)) {
+        notify(server, {
+          type: 'nologs',
+          title: '📭 Sem canal de logs',
+          color: COLORS.info,
+          text: (u) => `Olá, ${u}! O servidor **${escapeMarkdown(server.name)}** não tem canal de logs. Você não está vendo as detecções em tempo real. Use \`/ac servidor logs canal:#canal\`.`,
+        });
+      }
+
+      // relatório semanal de segurança
+      if (server.activated) {
+        const last = (server.notifyState || {}).weekly;
+        if (!last) {
+          store.updateServer(server, (s) => { s.notifyState = { ...(s.notifyState || {}), weekly: now() }; }, { bump: false });
+        } else if (canSend(server, 'weekly')) {
+          const rep = securityReport(store, server);
+          const week = store.getHistory(server).filter((d) => now() - d.time < 7 * 24 * HOUR);
+          const kicks = week.filter((d) => d.action === 1).length;
+          const bansWeek = week.filter((d) => d.action === 2).length;
+          notify(server, {
+            type: 'weekly',
+            title: '📊 Relatório semanal de segurança',
+            color: rep.score >= 70 ? COLORS.contained : COLORS.warn,
+            text: (u) => [
+              `Olá, ${u}! Este é o resumo da semana do servidor **${escapeMarkdown(server.name)}**:`,
+              '',
+              `🛡️ Nota de segurança: **${rep.score}/100** (${rep.grade})`,
+              `🚨 Detecções: **${week.length}** · 👢 Kicks: **${kicks}** · 🔨 Bans: **${bansWeek}**`,
+              '',
+              ...rep.items.filter((i) => !i.ok).slice(0, 4).map((i) => `❌ ${i.label} — ${i.tip}`),
+              rep.items.every((i) => i.ok) ? '✅ Tudo certo! Continue assim.' : 'Use `/ac seguranca` para ver todos os itens.',
+            ].join('\n'),
+          });
+        }
+      }
+
       if (unconfirmed) {
         notify(server, {
           type: 'unconfirmed',
@@ -273,7 +496,7 @@ function createNotifier({ store, client, logger = console, now = () => Date.now(
   }
 
   return {
-    notify, onDetection, onAuthFail, onLogin, onTokenRotated, checkProtection, sent, MODES,
+    notify, onDetection, onAuthFail, onLogin, onTokenRotated, onStatus, onConfigChange, checkProtection, sent, MODES,
   };
 }
 

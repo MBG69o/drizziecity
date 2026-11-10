@@ -178,6 +178,7 @@ Os comandos valem para o **seu** servidor, aquele registrado no seu nome no `don
 | `/ac global ativo:<true/false>` | Liga ou desliga o anti-cheat inteiro. |
 | `/ac historico [nick]` | Últimas detecções. |
 | `/ac jogador nick:<…>` | Ficha do jogador: detecções por proteção, IPs usados, bans e eventos recentes. |
+| `/ac seguranca` | Verificação de segurança: nota de 0 a 100, o que está bom ou ruim e botões para corrigir. |
 | `/ac estatisticas [periodo]` | Total de avisos, kicks e bans, e o top 10 de proteções e de jogadores (24h, 7 ou 30 dias). |
 
 **`/ac protecao`**
@@ -228,20 +229,44 @@ As alterações chegam ao servidor em até `intervalo` segundos (padrão 10), **
 
 ## 🔔 Notificações de segurança
 
-O bot avisa os **donos** de cada servidor, por DM e no canal de logs, quando algo importante acontece:
+O bot avisa os **donos** de cada servidor, por DM e no canal de logs, sempre com base em eventos reais:
 
+**Ataques e abuso**
 | Notificação | Quando |
 |---|---|
-| 🚨 **Suposto ataque detectado** | 15 ou mais detecções em 5 minutos (vários cheaters ao mesmo tempo). |
-| 🛡️ **Ataque de bots, RCON ou crasher** | Flood de conexões/reconexões, NPC falso, crasher ou força bruta no RCON. |
+| 🚨 **Suposto ataque detectado** | 15 ou mais detecções em 5 minutos. |
+| 🛡️ **Ataque de bots, RCON ou crasher** | Flood de conexões ou reconexões, NPC falso, crasher ou força bruta no RCON. |
 | 🔐 **Tentativa de acesso bloqueada** | 10 tokens errados usando o ID do servidor em 10 minutos. |
-| ⚠️ **Servidor desprotegido** | Online há 30 min sem o anti-cheat confirmado, com ele desligado, ou com menos da metade das proteções ativas. Vem com um botão para resolver. |
-| 👤 **Novo acesso** / 🔑 **Token trocado** | Outra pessoa fez login no servidor ou gerou um novo token. |
+| 🚨 **Token sendo usado em dois lugares** | O token aparece em dois IPs alternando ao mesmo tempo (vazamento). Vem com o botão **Gerar novo token**. |
+| 🌐 **Servidor conectado de outro IP** | O servidor passou a se conectar de um endereço novo. |
+
+**Jogadores**
+| Notificação | Quando |
+|---|---|
+| 🕵️ **Possível evasão de ban** | Um IP banido pelo EagleEYE voltou com outro nick. Os admins no jogo também são avisados. |
+| 🔁 **Jogador reincidente** | O mesmo nick foi punido 3 vezes em 24 horas. |
+| 🔨 **Muitos bans em pouco tempo** | 5 bans ou mais em 5 minutos. |
+| 🤔 **Possível falso positivo** | Uma proteção puniu 8 jogadores diferentes em 5 minutos. Vem com o botão **Mudar para aviso**. |
+
+**Configuração e saúde do servidor**
+| Notificação | Quando |
+|---|---|
+| ⚠️ **Servidor desprotegido** | Online há 30 minutos sem o anti-cheat confirmado, desligado, ou com menos da metade das proteções. Vem com um botão para resolver. |
+| ⚠️ **Proteções essenciais desligadas** | Dinheiro, armas, jetpack, crasher, RCON, fake kill, airbreak, velocidade ou godmode desligadas. Vem com um botão para religar. |
+| 🔴 **Servidor fora do ar** | Mais de 10 minutos sem contato com o bot. |
+| ⏳ **Configuração não aplicada** | Online, mas há 30 minutos sem aplicar as mudanças feitas no Discord. |
+| ⬆️ **Include desatualizado** | O servidor usa uma versão do `eagleeye.inc` mais antiga que a atual. |
+| 🔑 **Senha do RCON fraca** | Menos de 8 caracteres ou uma senha padrão. O include só envia "fraca: sim/não", nunca a senha. |
+| 📭 **Sem canal de logs** | O anti-cheat está ativo, mas sem canal para as detecções. |
+| 👤 **Novo acesso** / 🔑 **Token trocado** / ⚙️ **Mudança importante** | Outra pessoa fez login, trocou o token, desligou o anti-cheat, aplicou um preset, restaurou ou importou a configuração, ou mexeu nas permissões. |
+| 📊 **Relatório semanal** | A cada 7 dias: a nota de segurança, as detecções, os kicks, os bans e o que falta corrigir. |
 
 Exemplo:
 > Olá, @dono! Seu servidor **Drizzie RP** teve um suposto ataque detectado: **18 detecções em 5 minutos**. ✅ Conseguimos conter o ataque: **18** jogador(es) foram kickados pelo EagleEYE.
 
 A mensagem só diz **"conseguimos conter"** quando o EagleEYE de fato puniu ou bloqueou alguém. Se as proteções estiverem em modo aviso, ela diz isso e sugere mudar para kick. Cada tipo de aviso tem um intervalo mínimo para não virar spam.
+
+**Verificação de segurança:** `/ac seguranca` mostra a nota de **0 a 100** do servidor, com cada item verificado (anti-cheat ligado, proteções essenciais, punição, cobertura, canal de logs, versão do include, senha do RCON, notificações e sincronização) e botões para corrigir.
 
 Configure com `/ac servidor notificacoes modo:` (`ambos`, `dm`, `canal` ou `desligado`). Se a DM do dono estiver fechada, a notificação vai para o canal de logs com menção.
 

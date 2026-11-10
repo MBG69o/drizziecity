@@ -14,6 +14,7 @@ const { normalizeId } = require('./store');
 const { PRESETS } = require('./presets');
 const { collectStats, buildPresenceTexts } = require('./presence');
 const { createNotifier } = require('./notifier');
+const { securityReport, CRITICAL } = require('./security');
 
 const MAX_WHITELIST = 64;
 const LOGIN_MAX_FAILS = 5;
@@ -332,6 +333,7 @@ function createDiscordBot({ store, permissions, token, projectGuildId, logger = 
         const on = sub === 'ativar';
         store.updateServer(server, (s) => { for (const k of r.keys) s.protections[k].enabled = on; });
         audit(interaction, server, `${sub} ${r.keys.join(',')}`);
+        if (!on && r.keys.length > 1) notifier.onConfigChange(server, interaction.user.id, `desativou ${r.name}`);
         return reply(interaction, `${on ? '🟢' : '🔴'} **${r.name}** ${on ? 'ativada(s)' : 'desativada(s)'}. ${pollMsg}`);
       }
 
@@ -367,6 +369,7 @@ function createDiscordBot({ store, permissions, token, projectGuildId, logger = 
         if (ativo && !server.activated) return interaction.reply(activationMessage(server, interaction.user.id));
         store.updateServer(server, (s) => { s.global = ativo; });
         audit(interaction, server, `global = ${ativo}`);
+        if (!ativo) notifier.onConfigChange(server, interaction.user.id, 'desligou o anti-cheat inteiro');
         return reply(interaction, ativo ? `🟢 Anti-cheat **LIGADO** em ${serverLabel(server)}.` : `🔴 Anti-cheat **DESLIGADO** em ${serverLabel(server)}.`);
       }
 
@@ -398,6 +401,7 @@ function createDiscordBot({ store, permissions, token, projectGuildId, logger = 
       case 'restaurar': {
         store.updateServer(server, (s) => { s.protections = defaultProtectionState(); s.global = true; });
         audit(interaction, server, 'restaurar padrões');
+        notifier.onConfigChange(server, interaction.user.id, 'restaurou todas as proteções para o padrão');
         return reply(interaction, '♻️ Todas as proteções voltaram para a configuração padrão.');
       }
 
@@ -434,6 +438,7 @@ function createDiscordBot({ store, permissions, token, projectGuildId, logger = 
         if (!preset) return reply(interaction, '❌ Preset inválido.');
         store.updateServer(server, (s) => { s.protections = preset.build(); });
         audit(interaction, server, `preset ${key}`);
+        notifier.onConfigChange(server, interaction.user.id, `aplicou o preset ${preset.name}`);
         return reply(interaction, `✅ Preset **${preset.name}** aplicado: ${preset.desc} ${pollMsg}`);
       }
 
@@ -460,6 +465,7 @@ function createDiscordBot({ store, permissions, token, projectGuildId, logger = 
           return interaction.editReply(`❌ ${err.message}`);
         }
         audit(interaction, server, `importar configuração (${att.name})`);
+        notifier.onConfigChange(server, interaction.user.id, `importou uma configuração (${att.name})`);
         return interaction.editReply(`✅ Configuração importada em ${serverLabel(server)}. ${pollMsg}`);
       }
 
@@ -482,6 +488,25 @@ function createDiscordBot({ store, permissions, token, projectGuildId, logger = 
         store.updateServer(server, (s) => { s.banHours = horas; }, { bump: false });
         audit(interaction, server, `duração dos bans = ${horas}h`);
         return reply(interaction, horas ? `⏱️ Novos bans do anti-cheat duram **${horas}h** e são desfeitos automaticamente.` : '⏱️ Novos bans do anti-cheat são **permanentes**.');
+      }
+
+      case 'seguranca': {
+        const rep = securityReport(store, server);
+        const bar = '🟩'.repeat(Math.round(rep.score / 10)) + '⬜'.repeat(10 - Math.round(rep.score / 10));
+        const embed = new EmbedBuilder()
+          .setTitle(`🛡️ Verificação de segurança — ${server.name}`.slice(0, 256))
+          .setColor(rep.score >= 90 ? COLORS.ok : rep.score >= 70 ? COLORS.info : rep.score >= 50 ? COLORS.warn : COLORS.ban)
+          .setDescription([
+            `**Nota: ${rep.score}/100** (${rep.grade})`,
+            bar,
+            '',
+            ...rep.items.map((i) => `${i.ok ? '✅' : '❌'} ${i.label}${i.ok ? '' : `\n└ ${i.tip}`}`),
+          ].join('\n').slice(0, 4000));
+        const fixes = [];
+        if (!server.activated || !server.global) fixes.push(new ButtonBuilder().setCustomId(`ee:secon:${server.id}:0`).setLabel('Ligar anti-cheat').setStyle(ButtonStyle.Success));
+        if (rep.criticalOff.length || rep.items.find((i) => i.key === 'punish' && !i.ok)) fixes.push(new ButtonBuilder().setCustomId(`ee:seccrit:${server.id}:0`).setLabel('Corrigir proteções essenciais').setStyle(ButtonStyle.Primary));
+        if (!rep.items.find((i) => i.key === 'coverage').ok) fixes.push(new ButtonBuilder().setCustomId(`ee:secall:${server.id}:0`).setLabel('Ativar todas').setStyle(ButtonStyle.Secondary));
+        return interaction.reply({ embeds: [embed], components: fixes.length ? [new ActionRowBuilder().addComponents(fixes)] : [], flags: MessageFlags.Ephemeral });
       }
 
       case 'notificacoes': {
@@ -617,6 +642,7 @@ function createDiscordBot({ store, permissions, token, projectGuildId, logger = 
       if (role) s.roles = add ? [...new Set([...s.roles, role.id])] : s.roles.filter((id) => id !== role.id);
     }, { bump: false });
     audit(interaction, server, `donos ${sub} user=${user?.id ?? '-'} role=${role?.id ?? '-'}`);
+    notifier.onConfigChange(server, interaction.user.id, `${add ? 'deu' : 'tirou'} permissão de ${[user && `<@${user.id}>`, role && `<@&${role.id}>`].filter(Boolean).join(' e ')}`);
     const who = [user && `<@${user.id}>`, role && `<@&${role.id}>`].filter(Boolean).join(' e ');
     return reply(interaction, `✅ ${who} ${add ? 'agora pode' : 'não pode mais'} configurar ${serverLabel(server)}.`);
   }
@@ -644,6 +670,33 @@ function createDiscordBot({ store, permissions, token, projectGuildId, logger = 
 
     if (!permissions.isAllowed(server, interaction)) {
       return reply(interaction, '⛔ Você não tem permissão para configurar esse servidor.');
+    }
+    if (action === 'secrot') {
+      if (!permissions.isOwner(server, interaction)) return reply(interaction, '⛔ Só um dono pode gerar um novo token.');
+      const tok = store.rotateToken(server);
+      audit(interaction, server, 'novo token de acesso (notificação de segurança)');
+      notifier.onTokenRotated(server, interaction.user.id);
+      return interaction.update({
+        content: `🔑 Novo token gerado para ${serverLabel(server)}: \`${tok}\`\nO servidor verdadeiro recebe esse token sozinho na próxima consulta; qualquer cópia com o token antigo para de funcionar.`,
+        embeds: [], components: [],
+      });
+    }
+    if (action === 'secwarn') {
+      const prot = byId.get(Number(catKey));
+      if (!prot) return reply(interaction, '❌ Proteção inválida.');
+      store.updateServer(server, (s) => { s.protections[prot.key].action = 0; });
+      audit(interaction, server, `notificação: ${prot.name} mudou para aviso`);
+      return interaction.update({ content: `✅ **${prot.name}** agora só avisa (ninguém é punido por ela). Ajuste o limite com \`/ac protecao limite\`.`, components: [] });
+    }
+    if (action === 'seccrit') {
+      store.updateServer(server, (s) => {
+        for (const k of CRITICAL) {
+          s.protections[k].enabled = true;
+          if (s.protections[k].action === 0) s.protections[k].action = 1;
+        }
+      });
+      audit(interaction, server, 'proteções essenciais ligadas com kick');
+      return interaction.update({ content: `✅ Proteções essenciais ligadas (com **kick**) em ${serverLabel(server)}.`, embeds: [], components: [] });
     }
     if (action === 'secon' || action === 'secall') {
       if (action === 'secon') {
@@ -689,7 +742,7 @@ function createDiscordBot({ store, permissions, token, projectGuildId, logger = 
     try {
       // botões das notificações de segurança enviadas por DM
       const dmSecurity = !interaction.guildId && (interaction.isButton && interaction.isButton())
-        && /^ee:(secon|secall):/.test(interaction.customId || '');
+        && /^ee:(secon|secall|secrot|secwarn|seccrit):/.test(interaction.customId || '');
       // o bot só funciona dentro do Discord do projeto
       if (interaction.guildId !== projectGuildId && !dmSecurity) {
         if (interaction.isAutocomplete()) return await interaction.respond([]);

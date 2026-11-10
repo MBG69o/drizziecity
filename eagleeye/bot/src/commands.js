@@ -32,6 +32,7 @@ const acCommand = new SlashCommandBuilder()
     .addStringOption((o) => o.setName('nick').setDescription('Filtrar por nick').setRequired(false)))
   .addSubcommand((s) => s.setName('jogador').setDescription('Ficha de um jogador: detecções, IPs e bans')
     .addStringOption((o) => o.setName('nick').setDescription('Nick exato do jogo').setRequired(true)))
+  .addSubcommand((s) => s.setName('seguranca').setDescription('Verificação de segurança do servidor: nota de 0 a 100 e o que corrigir'))
   .addSubcommand((s) => s.setName('estatisticas').setDescription('Resumo das detecções')
     .addStringOption((o) => o.setName('periodo').setDescription('Período').setRequired(false).addChoices(
       { name: 'Últimas 24 horas', value: '24h' },

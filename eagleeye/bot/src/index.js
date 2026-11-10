@@ -46,6 +46,7 @@ startApi({
   }),
   onDetection: (server, det) => bot.enqueueDetection(server, det),
   onAuthFail: (server, ip) => bot.notifier.onAuthFail(server, ip),
+  onStatus: (server, status) => bot.notifier.onStatus(server, status),
 });
 
 bot.start().catch((err) => fail(`Não foi possível conectar ao Discord: ${err.message}`));

@@ -11,6 +11,8 @@
 	#error "[EagleEYE] Em filterscripts use <eagleeye_fs>, nao <eagleeye>."
 #endif
 
+#define EE_VERSION "2.2.0"
+
 #if !defined EE_API_HOST
 	#define EE_API_HOST "127.0.0.1:8090"
 #endif
@@ -45,9 +47,11 @@
 #if EE_OMP
 	#define EE_CVAR_NAME "name"
 	#define EE_CVAR_PORT "network.port"
+	#define EE_CVAR_RCONPASS "rcon.password"
 #else
 	#define EE_CVAR_NAME "hostname"
 	#define EE_CVAR_PORT "port"
+	#define EE_CVAR_RCONPASS "rcon_password"
 #endif
 
 #if !defined MAX_PICKUPS
@@ -918,6 +922,15 @@ stock EE_Detect(playerid, code, const detail[] = "-")
 	return 1;
 }
 
+static stock bool:EE_IsRconWeak()
+{
+	new pass[64];
+	GetConsoleVarAsString(EE_CVAR_RCONPASS, pass, sizeof pass);
+	if (strlen(pass) < 8) return true;
+	if (!strcmp(pass, "changeme", true) || !strcmp(pass, "12345678", true) || !strcmp(pass, "password", true) || !strcmp(pass, "senha123", true)) return true;
+	return false;
+}
+
 static stock EE_Poll()
 {
 	if (gEE_ServerId[0] == EOS) return;
@@ -932,8 +945,9 @@ static stock EE_Poll()
 	new host[64], ehost[192], url[512];
 	GetConsoleVarAsString(EE_CVAR_NAME, host, sizeof host);
 	EE_UrlEncode(host, ehost);
-	format(url, sizeof url, "%s/ac/config?id=%s&token=%s&v=%d&players=%d&ack=%d&max=%d&port=%d&host=%s",
-		EE_API_HOST, gEE_ServerId, gEE_Token, gEE_Version, players, gEE_LastCmd, GetMaxPlayers(), GetConsoleVarAsInt(EE_CVAR_PORT), ehost);
+	format(url, sizeof url, "%s/ac/config?id=%s&token=%s&v=%d&players=%d&ack=%d&max=%d&port=%d&ver=%s&rcw=%d&host=%s",
+		EE_API_HOST, gEE_ServerId, gEE_Token, gEE_Version, players, gEE_LastCmd, GetMaxPlayers(), GetConsoleVarAsInt(EE_CVAR_PORT),
+		EE_VERSION, EE_IsRconWeak() ? 1 : 0, ehost);
 	gEE_PollPending = true;
 	gEE_PollSentTick = tick;
 	HTTP(0, HTTP_GET, url, "", "EE_OnConfig");
@@ -997,6 +1011,13 @@ static stock EE_RunCommand(id, const type[], const arg[])
 	else if (!strcmp(type, "plist"))
 	{
 		EE_SendPlayerList();
+	}
+	else if (!strcmp(type, "adm"))
+	{
+		new msg[144];
+		EE_Copy(msg, arg);
+		for (new i = 0; msg[i] != EOS; i++) if (msg[i] == '_') msg[i] = ' ';
+		EE_SecurityNotice(msg);
 	}
 	else if (!strcmp(type, "aviso"))
 	{
@@ -1506,7 +1527,11 @@ public OnGameModeInit()
 	if (gEE_Timer != -1) KillTimer(gEE_Timer);
 	gEE_Timer = SetTimer("EE_Tick", EE_TICK_MS, true);
 	gEE_PollCounter = 0;
-	print("[EagleEYE] EagleEYE Anti-Cheat carregado.");
+	printf("[EagleEYE] EagleEYE Anti-Cheat v%s carregado.", EE_VERSION);
+	if (EE_IsRconWeak())
+	{
+		EE_SecurityNotice("A senha do RCON e fraca (menos de 8 caracteres ou senha padrao). Troque no server.cfg/config.json!");
+	}
 
 	#if defined EE_OnGameModeInit
 		new ret = EE_OnGameModeInit();

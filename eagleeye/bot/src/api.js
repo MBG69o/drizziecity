@@ -54,7 +54,7 @@ function cleanName(name) {
  */
 function startApi({
   store, host, port, allowedIps = [], trustProxy = false, onDetection, logger = console,
-  guard = new Guard(), maxConnections = 1000, onAuthFail = () => {},
+  guard = new Guard(), maxConnections = 1000, onAuthFail = () => {}, onStatus = () => {},
 }) {
   /** Token errado: conta para o bloqueio do IP e avisa o dono se o ID existir. */
   function authFailed(url, ip) {
@@ -167,7 +167,10 @@ function startApi({
         port: toInt(url.searchParams.get('port')),
         address: ip,
         configVersion: clientVersion,
+        version: (url.searchParams.get('ver') || '').slice(0, 16) || undefined,
+        rconWeak: url.searchParams.has('rcw') ? url.searchParams.get('rcw') === '1' : undefined,
       });
+      try { onStatus(srv, store.getStatus(srv)); } catch (err) { logger.error('[api] onStatus', err); }
       const hostname = cleanName(url.searchParams.get('host'));
       if (hostname && !srv.customName && hostname !== srv.name) {
         store.updateServer(srv, (s) => { s.name = hostname; }, { bump: false });
