@@ -30,8 +30,8 @@
  *       #include <open.mp>          // ou <a_samp>
  *
  *       #define EE_API_HOST "ip.do.bot:8090"     // endereço público do bot (sem http://)
- *       // bot hospedado como site (ex.: Discloud): "eagleeye.discloud.app"
- *       // só HTTPS no open.mp: "https://eagleeye.discloud.app" (depende da versão)
+ *       // bot hospedado como site (ex.: Discloud): "eagleeye.discloud.dev"
+ *       // só HTTPS no open.mp: "https://eagleeye.discloud.dev" (depende da versão)
  *       #include <eagleeye>
  *
  *   Opcionais (antes do include):
