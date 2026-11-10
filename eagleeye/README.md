@@ -2,10 +2,10 @@
 
 Anti-cheat **server-side** para **SA-MP 0.3.7 / 0.3.DL** e **open.mp** com **34 proteções**, configurado pelo **Discord** com comandos `/ac`.
 
-**Vários servidores, um bot.** Cada servidor que usa o include recebe um **ID fixo** e mostra no console um **token de acesso** (ex.: `EE-7K2QMX-ABCD-EFGH-JKLM`). O dono faz `/ac login token:...` no Discord e passa a controlar as proteções daquele servidor. Um mesmo bot pode atender quantos servidores você quiser, cada um com a sua configuração, seus donos e seu canal de logs.
+**Vários servidores, um bot.** Na primeira vez que o servidor liga, o próprio include **gera um token de acesso** (ex.: `EE-7K2QMX-ABCD-EFGH-JKLM-NPQR`) e mostra no console. O dono faz `/ac login token:...` no Discord, o bot passa a reconhecer aquele servidor e salva o token dele. O servidor do jogo e o bot **podem estar em máquinas diferentes**. Um mesmo bot pode atender quantos servidores você quiser, cada um com a sua configuração, seus donos e seu canal de logs.
 
 ```
-┌──────────────────────┐  1º boot: GET /ac/register  ┌──────────────────────┐   /ac login token      ┌──────────┐
+┌──────────────────────┐  1º boot: gera o token      ┌──────────────────────┐   /ac login token      ┌──────────┐
 │ Servidor A (EE-7K2..)│ ──────────────────────────▶ │                      │ ◀───────────────────── │ Discord  │
 │ Servidor B (EE-Q9M..)│ ── GET /ac/config (10s) ──▶ │ Bot EagleEYE (Node)  │ ─── logs por servidor ▶│ (donos)  │
 │ Servidor C ...       │ ── POST /ac/report ───────▶ │                      │                        │          │
@@ -25,29 +25,31 @@ O servidor do jogo usa só o **native `HTTP()`**, que já vem no SA-MP e no open
 
 ## 🔑 Token de acesso e login
 
-1. Na **primeira** inicialização, o gamemode se registra sozinho no bot e salva a identidade em `scriptfiles/eagleeye_servidor.cfg`.
+1. Na **primeira** inicialização, o **próprio include gera o token** e salva em `scriptfiles/eagleeye_servidor.cfg`. Não existe etapa de registro.
 2. O console mostra:
    ```
-   [EagleEYE] Token de acesso: EE-7K2QMX-ABCD-EFGH-JKLM
-   [EagleEYE] No Discord use: /ac login token:EE-7K2QMX-ABCD-EFGH-JKLM
+   [EagleEYE] Token de acesso: EE-7K2QMX-ABCD-EFGH-JKLM-NPQR
+   [EagleEYE] No Discord use: /ac login token:EE-7K2QMX-ABCD-EFGH-JKLM-NPQR
    ```
-   Para ver de novo, digite `eagleeye` no console ou no RCON.
-3. No **Discord do projeto**, o cliente roda `/ac login token:EE-7K2QMX-ABCD-EFGH-JKLM`. Quem faz o login vira **dono** do servidor, e o bot salva o vínculo em `data/donos.json`:
+   O começo do token (`EE-7K2QMX`) é o **ID fixo** do servidor. Para ver de novo, digite `eagleeye` no console ou no RCON.
+3. O servidor já começa a consultar o bot no endereço `EE_API_HOST`. Enquanto ninguém fez login, o bot responde **"aguardando login"**, e o servidor usa a configuração padrão.
+4. No **Discord do projeto**, o cliente roda `/ac login token:EE-7K2QMX-ABCD-EFGH-JKLM-NPQR`. O bot reconhece o servidor (que já se conectou com esse token), guarda o hash do token e salva o dono em `data/donos.json`:
    ```json
    {
      "294929472947294828472": { "servidor": "Drizzie RP", "IDF": "EE-7K2QMX" }
    }
    ```
-4. **Confirmação:** o servidor nasce com o anti-cheat **desligado**. Depois do login, o bot mostra o servidor encontrado com o botão **✅ Confirmar e ativar**. Só esse dono pode clicar. A qualquer momento, `/ac meuservidor` busca o servidor pelo ID do Discord do cliente e mostra o mesmo botão.
-5. O ID **nunca muda**, mesmo reiniciando o servidor ou o bot. **Faça backup do `eagleeye_servidor.cfg`**: ele guarda o **token da API** (secreto, usado só entre o servidor e o bot; é diferente do token de acesso).
+5. **Confirmação:** o servidor nasce com o anti-cheat **desligado**. Depois do login, o bot mostra o servidor encontrado com o botão **✅ Confirmar e ativar**. Só esse dono pode clicar. A qualquer momento, `/ac meuservidor` busca o servidor pelo ID do Discord do cliente e mostra o mesmo botão.
+6. O token **nunca muda sozinho**, mesmo reiniciando o servidor ou o bot. **Faça backup do `eagleeye_servidor.cfg`.** Se ele se perder, o servidor gera um token novo (com outro ID) e o dono precisa fazer login de novo.
+
+**Bot e servidor em máquinas diferentes:** funciona normalmente. O único requisito é que o servidor do jogo consiga acessar o bot por **HTTP simples** no endereço de `EE_API_HOST` (IP ou domínio público + porta). Hospedagens que só expõem HTTPS ou que não aceitam conexões de entrada não servem para a API. Veja a seção de instalação.
 
 Segurança:
-- O bot guarda só o **hash** do token da API.
-- O token de acesso pode ser trocado com `/ac servidor novachave`.
+- O bot guarda só o **hash** do token.
+- O `/ac login` só funciona com o token de um servidor que **já se conectou** ao bot. Não dá para "reservar" um token inventado.
+- `/ac servidor novachave` gera um token novo: o bot entrega ao servidor na próxima consulta, o servidor salva no `.cfg` e mostra no console, e o antigo para de valer.
 - Login errado 5 vezes bloqueia a pessoa por 10 minutos.
-- O registro de servidores é limitado a 5 por IP por hora.
-
-Perdeu o `eagleeye_servidor.cfg` mas quer manter o ID? Um dono usa `/ac token`: o bot gera um token novo e mostra como recriar o arquivo. Outra opção é fixar no gamemode com `#define EE_SERVER_ID` e `#define EE_SERVER_TOKEN`.
+- Para fixar o token no código em vez do `.cfg`: `#define EE_SERVER_TOKEN "EE-XXXXXX-XXXX-XXXX-XXXX-XXXX"`.
 
 ## 🔒 Proteções (34)
 
@@ -127,9 +129,9 @@ npm install
 npm start                 # ou: pm2 start src/index.js --name eagleeye
 ```
 
-- **Bot público** (outros donos de servidor podem usar): deixe `AC_REGISTER_KEY` vazio.
-- **Bot privado**: defina `AC_REGISTER_KEY`. Só gamemodes com `#define EE_REGISTER_KEY "mesma_chave"` conseguem se registrar.
-- Libere a porta `AC_API_PORT` (padrão 8090) no firewall para os servidores do jogo.
+- No `.env`, `AC_API_HOST=0.0.0.0` faz a API aceitar conexões de fora. `AC_API_PORT` é a porta (padrão 8090).
+- Libere a porta `AC_API_PORT` no firewall para os servidores do jogo.
+- A API precisa responder por **HTTP simples** (o `HTTP()` do SA-MP não faz HTTPS). Teste a partir da máquina do servidor do jogo: `curl "http://ENDERECO_DO_BOT:8090/ac/config?id=x&token=x"` deve responder `unauthorized`.
 
 ### 2. Gamemode
 
@@ -140,8 +142,7 @@ npm start                 # ou: pm2 start src/index.js --name eagleeye
 ```pawn
 #include <open.mp>                     // ou <a_samp>
 
-#define EE_API_HOST "ip-do-bot:8090"  // sem http://
-// #define EE_REGISTER_KEY "..."      // só se o bot exigir
+#define EE_API_HOST "ip-ou-dominio-do-bot:8090"  // endereço PÚBLICO do bot, sem http://
 #include <eagleeye>
 
 #include <sscanf2>
@@ -149,7 +150,9 @@ npm start                 # ou: pm2 start src/index.js --name eagleeye
 // ...
 ```
 
-4. Compile e inicie. Copie o ID e a chave do console e faça `/ac login` no Discord.
+4. Compile e inicie. Copie o **token de acesso** do console e faça `/ac login token:...` no Discord.
+
+> O padrão de `EE_API_HOST` é `127.0.0.1:8090`, que só funciona com o bot **na mesma máquina** do servidor. Se o bot estiver em outra hospedagem, defina o endereço público dele. Se não definir, o console mostra `Nao foi possivel falar com o bot (127.0.0.1:8090) - codigo 2`.
 
 ### 3. Filterscripts
 
@@ -209,7 +212,7 @@ Os comandos valem para o **seu** servidor, aquele registrado no seu nome no `don
 | `resumo ativo:<…>` | Resumo diário das últimas 24h, à meia-noite (`AC_TIMEZONE`, padrão America/Sao_Paulo). |
 | `banduracao horas:<n>` | Duração dos novos bans do AC. Quando vencem, o bot desbane sozinho. `0` = permanente. |
 | `auditoria` | As últimas 15 alterações: quem mudou o quê e quando. |
-| `novachave` / `token` / `logout` | Novo token de acesso, novo token da API (recuperação), sair do servidor. *(só dono)* |
+| `novachave` / `logout` | Novo token de acesso (o servidor recebe sozinho), sair do servidor. *(só dono)* |
 
 **`/ac imune adicionar/remover/listar`** e **`/ac donos adicionar/remover/listar`**: nicks ignorados pelo AC e quem pode configurar o servidor.
 
@@ -240,7 +243,7 @@ EE_CommandFloodCheck(playerid, cmdtext);   // para Pawn.CMD: chame em OnPlayerCo
 ```
 
 Defines opcionais (antes do `#include <eagleeye>`):
-- `EE_REGISTER_KEY`, `EE_SERVER_ID` + `EE_SERVER_TOKEN`, `EE_ID_FILE`;
+- `EE_SERVER_TOKEN` (fixa o token no código), `EE_ID_FILE` (nome do arquivo em `scriptfiles`);
 - `EE_TICK_MS`, `EE_HIT_WINDOW_MS`, `EE_REPORT_COOLDOWN`, `EE_COLOR`;
 - `EE_KEEP_STUNT_BONUS` (por padrão o AC desliga o stunt bonus, que dá dinheiro no cliente).
 

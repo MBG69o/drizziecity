@@ -22,7 +22,7 @@ const PERIOD_LABEL = { '24h': 'últimas 24 horas', '7d': 'últimos 7 dias', '30d
 // comandos que funcionam sem servidor ativo
 const NO_SERVER_SUBS = new Set(['login', 'meuservidor', 'servidor/lista', 'servidor/usar']);
 // comandos que exigem ser dono do servidor
-const OWNER_SUBS = new Set(['servidor/logout', 'servidor/novachave', 'servidor/token']);
+const OWNER_SUBS = new Set(['servidor/logout', 'servidor/novachave']);
 const TIMEZONE = process.env.AC_TIMEZONE || 'America/Sao_Paulo';
 
 function createDiscordBot({ store, permissions, token, projectGuildId, logger = console }) {
@@ -204,13 +204,18 @@ function createDiscordBot({ store, permissions, token, projectGuildId, logger = 
 
     if (sub === 'login') {
       if (loginBlocked(userId)) return reply(interaction, '⛔ Muitas tentativas erradas. Aguarde 10 minutos.');
-      const parsed = store.parseAccessToken(interaction.options.getString('token', true));
-      const server = parsed && parsed.server;
-      if (!server || !store.checkLoginKey(server, parsed.key)) {
+      const result = store.loginWithToken(interaction.options.getString('token', true));
+      if (result.error) {
         loginFails.get(userId).push(Date.now());
-        audit(interaction, server, 'login FALHOU');
-        return reply(interaction, '❌ Token de acesso inválido. Confira no console do servidor (digite `eagleeye` no console para ver o token).');
+        audit(interaction, null, `login FALHOU (${result.error})`);
+        const msg = {
+          format: '❌ Token em formato inválido. Ele aparece no console assim: `EE-XXXXXX-XXXX-XXXX-XXXX-XXXX` (digite `eagleeye` no console para ver).',
+          token: '❌ Token incorreto para esse servidor. Confira no console do servidor (digite `eagleeye` no console).',
+          notseen: '❌ Esse servidor ainda não se conectou ao bot. Confira se ele está ligado e se o `EE_API_HOST` do gamemode aponta para o endereço público do bot. Depois de ligar, aguarde uns 10 segundos e tente de novo.',
+        }[result.error];
+        return reply(interaction, msg);
       }
+      const { server } = result;
       store.updateServer(server, (s) => {
         if (!s.owners.includes(userId)) s.owners.push(userId);
       }, { bump: false });
@@ -290,23 +295,12 @@ function createDiscordBot({ store, permissions, token, projectGuildId, logger = 
       }
 
       case 'novachave': {
-        store.rotateLoginKey(server);
-        audit(interaction, server, 'novo token de acesso');
-        return reply(interaction, `🔑 Novo token de acesso de ${serverLabel(server)}: \`${store.accessToken(server)}\`\nO token antigo parou de funcionar (o console do servidor também mostra o novo). Quem já fez login continua com acesso; use \`/ac donos remover\` para tirar alguém.`);
-      }
-
-      case 'token': {
         const tok = store.rotateToken(server);
-        audit(interaction, server, 'novo token da API');
+        audit(interaction, server, 'novo token de acesso');
         return reply(interaction, [
-          `🔐 Novo token da API de ${serverLabel(server)} gerado. **O servidor do jogo vai parar de se conectar até você atualizar o token.**`,
-          '',
-          'Edite `scriptfiles/eagleeye_servidor.cfg` no servidor e deixe assim:',
-          '```',
-          `id=${server.id}`,
-          `token=${tok}`,
-          '```',
-          'Depois reinicie o gamemode. **Nunca compartilhe esse token.**',
+          `🔑 Novo token de acesso de ${serverLabel(server)}: \`${tok}\``,
+          `O servidor recebe esse token sozinho na próxima consulta${store.isServerOnline(server) ? '' : ' (quando voltar a ficar online)'}, salva no \`eagleeye_servidor.cfg\` e mostra no console. A partir daí o token antigo para de funcionar.`,
+          'Quem já fez login continua com acesso; use `/ac donos remover` para tirar alguém.',
         ].join('\n'));
       }
 

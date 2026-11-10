@@ -15,42 +15,64 @@ const { Permissions } = require('../src/permissions');
 let server; let store; let base; let dir; const detections = [];
 const quiet = { log() {}, error() {} };
 
+// gera um token como o include faz (EE-XXXXXX-XXXX-XXXX-XXXX-XXXX)
+const ALPHA = '23456789ABCDEFGHJKMNPQRSTUVWXYZ';
+const rnd = (n) => Array.from({ length: n }, () => ALPHA[Math.floor(Math.random() * ALPHA.length)]).join('');
+const genToken = () => `EE-${rnd(6)}-${rnd(4)}-${rnd(4)}-${rnd(4)}-${rnd(4)}`;
+
+/** Simula um servidor novo: gera o token, consulta o bot (WAIT) e o dono faz /ac login. */
 async function register(host = 'Meu%20Servidor') {
-  const text = await (await fetch(`${base}/ac/register?host=${host}&port=7777`)).text();
-  const [, id, token, key] = text.split('\n')[0].split(' ');
-  return { id, token, key, text };
+  const token = genToken();
+  const id = token.slice(0, 9);
+  const wait = await (await fetch(`${base}/ac/config?id=${id}&token=${token}&v=0&players=3&max=50&port=7777&host=${host}`)).text();
+  const login = store.loginWithToken(token);
+  return { id, token, wait, login };
 }
 
 before(async () => {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), 'eagleeye-'));
   store = new Store(dir).load();
-  server = startApi({ store, host: '127.0.0.1', port: 0, registerLimit: 1000, onDetection: (s, d) => detections.push([s.id, d]), logger: quiet });
+  server = startApi({ store, host: '127.0.0.1', port: 0, onDetection: (s, d) => detections.push([s.id, d]), logger: quiet });
   await new Promise((r) => server.once('listening', r));
   base = `http://127.0.0.1:${server.address().port}`;
 });
 after(() => server.close());
 
-test('registro cria ID fixo, token e chave de login', async () => {
-  const r = await register();
-  assert.match(r.text, /^REG EE-[2-9A-Z]{6} [0-9a-f]{64} [2-9A-Z]{4}-[2-9A-Z]{4}-[2-9A-Z]{4}\nEND\n$/);
-  const srv = store.getServer(r.id);
-  assert.strictEqual(srv.name, 'Meu Servidor');
-  assert.notStrictEqual(srv.tokenHash, r.token, 'o token não pode ser salvo em texto puro');
-  assert.ok(fs.existsSync(path.join(dir, 'servers', `${r.id}.json`)));
+test('servidor novo: token do include fica aguardando e o /ac login o reconhece', async () => {
+  const token = genToken();
+  const id = token.slice(0, 9);
+  // antes de qualquer conexão o login é recusado (ninguém pode "reservar" um token inventado)
+  assert.strictEqual(store.loginWithToken(token).error, 'notseen');
+  const res = await fetch(`${base}/ac/config?id=${id}&token=${token}&v=0&players=4&max=50&port=7777&host=Meu%20Servidor`);
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(await res.text(), 'WAIT\nEND\n');
+  assert.strictEqual(store.getServer(id), null, 'sem login o bot não cria o servidor');
+  const login = store.loginWithToken(token.toLowerCase().replace(/-/g, ' '));
+  assert.ok(login.created && login.server.id === id);
+  assert.strictEqual(login.server.name, 'Meu Servidor');
+  assert.strictEqual(store.getStatus(login.server).players, 4);
+  assert.notStrictEqual(login.server.tokenHash, token, 'o token não pode ser salvo em texto puro');
+  assert.ok(fs.existsSync(path.join(dir, 'servers', `${id}.json`)));
+  // depois do login o servidor passa a receber a configuração
+  const text = await (await fetch(`${base}/ac/config?id=${id}&token=${token}&v=0`)).text();
+  assert.match(text, /^EAGLE /);
+  // novo login com o mesmo token (outro dono) funciona; token errado não
+  assert.strictEqual(store.loginWithToken(token).created, false);
+  assert.strictEqual(store.loginWithToken(`${id}-AAAA-BBBB-CCCC-DDDD`).error, 'token');
+  assert.strictEqual(store.loginWithToken('lixo').error, 'format');
 });
-
-test('config exige token correto e responde 410 para ID desconhecido', async () => {
+test('config exige token correto', async () => {
   const r = await register();
   assert.strictEqual((await fetch(`${base}/ac/config?id=${r.id}&token=errado&v=0`)).status, 401);
-  assert.strictEqual((await fetch(`${base}/ac/config?id=EE-ZZZZZZ&token=${r.token}&v=0`)).status, 410);
+  assert.strictEqual((await fetch(`${base}/ac/config?id=${r.id}&token=${r.id}-AAAA-BBBB-CCCC-DDDD&v=0`)).status, 401);
+  // ID do parâmetro diferente do ID do token
+  assert.strictEqual((await fetch(`${base}/ac/config?id=EE-ZZZZZZ&token=${r.token}&v=0`)).status, 401);
 });
-
-test('config completa inclui chave de login e todas as proteções', async () => {
+test('config completa inclui todas as proteções', async () => {
   const r = await register();
   const text = await (await fetch(`${base}/ac/config?id=${r.id}&token=${r.token}&v=0&players=5&max=100&ack=0`)).text();
   const lines = text.trim().split('\n');
   assert.strictEqual(lines[0], 'EAGLE 1 0 10'); // desligado até o dono confirmar
-  assert.strictEqual(lines[1], `K ${r.key}`);
   assert.strictEqual(lines.filter((l) => l.startsWith('P ')).length, PROTECTIONS.length);
   assert.strictEqual(lines.at(-1), 'END');
   assert.strictEqual(store.getStatus(store.getServer(r.id)).players, 5);
@@ -92,25 +114,20 @@ test('relatório de detecção vai para o servidor certo', async () => {
   assert.strictEqual((await fetch(`${base}/ac/report?id=${r.id}&token=x`, { method: 'POST', body })).status, 401);
 });
 
-test('chave de login: confere, ignora formatação e pode ser trocada', async () => {
+test('novo token: enviado ao servidor e o antigo para de valer quando ele troca', async () => {
   const r = await register();
   const srv = store.getServer(r.id);
-  assert.ok(store.checkLoginKey(srv, r.key.toLowerCase().replace(/-/g, ' ')));
-  assert.ok(!store.checkLoginKey(srv, 'AAAA-BBBB-CCCC'));
-  const v = srv.version;
-  const nova = store.rotateLoginKey(srv);
-  assert.ok(!store.checkLoginKey(srv, r.key));
-  assert.ok(store.checkLoginKey(srv, nova));
-  assert.strictEqual(srv.version, v + 1, 'servidor recarrega para mostrar a chave nova');
-});
-
-test('novo token invalida o antigo', async () => {
-  const r = await register();
-  const tok = store.rotateToken(store.getServer(r.id));
-  assert.strictEqual((await fetch(`${base}/ac/config?id=${r.id}&token=${r.token}&v=0`)).status, 401);
+  const tok = store.rotateToken(srv);
+  assert.ok(tok.startsWith(`${r.id}-`));
+  // com o token antigo o servidor recebe a linha T com o novo
+  const text = await (await fetch(`${base}/ac/config?id=${r.id}&token=${r.token}&v=${srv.version}`)).text();
+  assert.match(text, new RegExp(`\\nT ${tok}\\n|^OK\\nT ${tok}\\n`));
+  // o servidor passa a usar o novo: o antigo deixa de funcionar
   assert.strictEqual((await fetch(`${base}/ac/config?id=${r.id}&token=${tok}&v=0`)).status, 200);
+  assert.strictEqual(srv.pendingToken, null);
+  assert.strictEqual((await fetch(`${base}/ac/config?id=${r.id}&token=${r.token}&v=0`)).status, 401);
+  assert.strictEqual(store.loginWithToken(tok).server.id, r.id);
 });
-
 test('donos.json salva o IDF de cada servidor pelo ID do Discord do dono', async () => {
   const r = await register('Drizzie%20RP');
   const srv = store.getServer(r.id);
@@ -165,17 +182,6 @@ test('dados persistem após reiniciar o bot', async () => {
   const again = new Store(dir).load();
   assert.ok(again.authServer(r.id, r.token).server);
   assert.strictEqual(again.serverOfDono('u7').id, r.id);
-});
-
-test('registro com chave obrigatória e limite por IP', async () => {
-  const s2 = startApi({ store, host: '127.0.0.1', port: 0, registerKey: 'segredo123', onDetection() {}, logger: quiet });
-  await new Promise((res) => s2.once('listening', res));
-  const b2 = `http://127.0.0.1:${s2.address().port}`;
-  assert.strictEqual((await fetch(`${b2}/ac/register`)).status, 403);
-  const codes = [];
-  for (let i = 0; i < 6; i++) codes.push((await fetch(`${b2}/ac/register?rk=segredo123`)).status);
-  assert.deepStrictEqual(codes, [200, 200, 200, 200, 200, 429]);
-  s2.close();
 });
 
 test('validações', () => {
@@ -285,18 +291,13 @@ test('estatísticas e auditoria', async () => {
   assert.strictEqual(store.getAudit(srv).at(-1).text, 'ativar jetpack');
 });
 
-test('token de acesso: ID + chave em um só token, aceito com ou sem formatação', async () => {
-  const r = await register();
-  const srv = store.getServer(r.id);
-  const tok = store.accessToken(srv);
-  assert.strictEqual(tok, `${r.id}-${r.key}`);
-  assert.match(tok, /^EE-[2-9A-Z]{6}-[2-9A-Z]{4}-[2-9A-Z]{4}-[2-9A-Z]{4}$/);
-  for (const variant of [tok, tok.toLowerCase(), ` ${tok} `, tok.replace(/-/g, '')]) {
-    const p = store.parseAccessToken(variant);
-    assert.ok(p && p.server && p.server.id === r.id && store.checkLoginKey(p.server, p.key), variant);
-  }
-  const wrong = store.parseAccessToken(`${r.id}-AAAA-BBBB-CCCC`);
-  assert.ok(wrong.server && !store.checkLoginKey(wrong.server, wrong.key));
-  assert.strictEqual(store.parseAccessToken('lixo'), null);
-  assert.strictEqual(store.parseAccessToken('EE-ZZZZZZ-AAAA-BBBB-CCCC').server, null);
+test('formato do token do include é o mesmo que o bot aceita', () => {
+  const inc = fs.readFileSync(path.join(__dirname, '../../pawn/include/eagleeye.inc'), 'utf8');
+  assert.match(inc, /#define EE_TOKEN_LEN \(29\)/);
+  assert.match(inc, /i == 9 \|\| i == 14 \|\| i == 19 \|\| i == 24/, 'traços nas mesmas posições');
+  const { normalizeToken } = require('../src/store');
+  const t = genToken();
+  assert.strictEqual(t.length, 29);
+  assert.strictEqual(normalizeToken(t), t);
+  assert.deepStrictEqual([9, 14, 19, 24].map((i) => t[i]), ['-', '-', '-', '-']);
 });

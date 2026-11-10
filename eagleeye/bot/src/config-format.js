@@ -6,9 +6,9 @@ const { PROTECTIONS } = require('./protections');
  * Monta a resposta em texto que o include Pawn entende (Pawn não tem parser JSON).
  *
  *   EAGLE <versao> <global> <pollSegundos>
- *   K <chave de login do Discord>
  *   P <id> <ativo> <acao> <tolerancia> <valor>
  *   W <nick>
+ *   T <novo token de acesso>
  *   C <id> <tipo> <argumento>
  *   END
  *
@@ -20,7 +20,6 @@ function buildConfigResponse(state, clientVersion, commands) {
     // só liga se o dono já confirmou a ativação no Discord
     const on = state.global && state.activated !== false;
     lines.push(`EAGLE ${state.version} ${on ? 1 : 0} ${state.pollSeconds}`);
-    if (state.loginKey) lines.push(`K ${state.loginKey}`);
     for (const p of PROTECTIONS) {
       const s = state.protections[p.key];
       lines.push(`P ${p.id} ${s.enabled ? 1 : 0} ${s.action} ${s.tolerance} ${Math.trunc(s.value) || 0}`);
@@ -29,6 +28,8 @@ function buildConfigResponse(state, clientVersion, commands) {
   } else {
     lines.push('OK');
   }
+  // token novo gerado no Discord: o include salva e passa a usar
+  if (state.pendingToken) lines.push(`T ${state.pendingToken}`);
   for (const c of commands) lines.push(`C ${c.id} ${c.type} ${c.arg}`);
   lines.push('END');
   return `${lines.join('\n')}\n`;

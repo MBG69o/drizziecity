@@ -19,17 +19,26 @@ function randomCode(len) {
   return out;
 }
 
-const newServerId = () => `EE-${randomCode(6)}`;
-const newLoginKey = () => `${randomCode(4)}-${randomCode(4)}-${randomCode(4)}`;
-const newToken = () => crypto.randomBytes(32).toString('hex');
 const hashToken = (token) => crypto.createHash('sha256').update(String(token)).digest('hex');
+const PENDING_TTL_MS = 24 * 3600 * 1000;
+const MAX_PENDING = 5000;
+
+/*
+ * Token de acesso: gerado pelo PRÓPRIO include na primeira inicialização.
+ *   EE-XXXXXX-XXXX-XXXX-XXXX-XXXX   (EE-XXXXXX = ID fixo do servidor)
+ * Aceita minúsculas, espaços e sem traços; devolve no formato canônico ou null.
+ */
+function normalizeToken(text) {
+  const t = String(text || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (!/^EE[A-Z0-9]{22}$/.test(t)) return null;
+  const b = t.slice(2);
+  return `EE-${b.slice(0, 6)}-${b.slice(6, 10)}-${b.slice(10, 14)}-${b.slice(14, 18)}-${b.slice(18, 22)}`;
+}
+const tokenId = (token) => token.slice(0, 9);
+const newAccessToken = (id) => `${id}-${randomCode(4)}-${randomCode(4)}-${randomCode(4)}-${randomCode(4)}`;
 
 function normalizeId(id) {
   return String(id || '').trim().toUpperCase();
-}
-
-function normalizeLoginKey(key) {
-  return String(key || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
 }
 
 function safeEqualStr(a, b) {
@@ -44,7 +53,9 @@ function defaultServer(id) {
     name: id,
     customName: false,
     tokenHash: null,
-    loginKey: null,
+    // troca de token (/ac servidor novachave): enviado ao servidor até ele passar a usar
+    pendingToken: null,
+    pendingTokenHash: null,
     createdAt: Date.now(),
     createdIp: null,
     version: 1,
@@ -70,8 +81,9 @@ function defaultServer(id) {
 }
 
 /**
- * Armazena vários servidores SA-MP/open.mp, cada um com ID fixo, token da API
- * (só o hash é guardado) e chave de login para o Discord.
+ * Armazena vários servidores SA-MP/open.mp. Cada um é identificado pelo token
+ * que o include gerou (só o hash é guardado); o servidor passa a existir aqui
+ * quando o dono faz /ac login com esse token.
  *
  *   data/servers/<ID>.json   configuração de cada servidor
  *   data/history/<ID>.jsonl  detecções
@@ -93,6 +105,8 @@ class Store {
     this.selection = {};
     this.history = new Map();
     this.status = new Map();
+    // servidores que já se conectaram com um token, mas o dono ainda não fez /ac login
+    this.pending = new Map();
   }
 
   load() {
@@ -136,48 +150,78 @@ class Store {
   }
 
   // ------------------------------------------------------------- servidores
-  createServer({ name, ip }) {
-    let id;
-    do { id = newServerId(); } while (this.servers.has(id));
-    const token = newToken();
-    const server = defaultServer(id);
-    server.tokenHash = hashToken(token);
-    server.loginKey = newLoginKey();
-    server.createdIp = ip || null;
-    if (name) server.name = String(name).slice(0, 64);
-    this.servers.set(id, server);
-    this.saveServer(server);
-    return { server, token };
-  }
-
   getServer(id) {
     return this.servers.get(normalizeId(id)) || null;
   }
 
-  /** @returns {{server?: object, error?: 'unknown'|'token'}} */
+  /**
+   * Autentica o servidor do jogo pelo token que o include gerou.
+   * @returns {{server?: object, error?: 'token'|'pending', id?: string, tokenHash?: string}}
+   *   pending = token válido, mas o dono ainda não fez /ac login
+   */
   authServer(id, token) {
-    const server = this.getServer(id);
-    if (!server) return { error: 'unknown' };
-    if (!token || !safeEqualStr(hashToken(token), server.tokenHash)) return { error: 'token' };
-    return { server };
+    const tok = normalizeToken(token);
+    if (!tok || (id && normalizeId(id) !== tokenId(tok))) return { error: 'token' };
+    const h = hashToken(tok);
+    const server = this.getServer(tokenId(tok));
+    if (!server) return { error: 'pending', id: tokenId(tok), tokenHash: h };
+    if (server.tokenHash && safeEqualStr(h, server.tokenHash)) return { server };
+    if (server.pendingTokenHash && safeEqualStr(h, server.pendingTokenHash)) {
+      // o servidor recebeu o token novo e já passou a usar: o antigo deixa de valer
+      this.updateServer(server, (s) => {
+        s.tokenHash = s.pendingTokenHash;
+        s.pendingToken = null;
+        s.pendingTokenHash = null;
+      }, { bump: false });
+      return { server };
+    }
+    return { error: 'token' };
   }
 
-  /** Token de acesso mostrado no console: "<ID>-<chave>", ex.: EE-7K2QMX-ABCD-EFGH-JKLM */
-  accessToken(server) {
-    return server.loginKey ? `${server.id}-${server.loginKey}` : null;
+  /** Servidor que se conectou ao bot, mas ainda não tem dono no Discord. */
+  notePending(id, tokenHash, info) {
+    const now = Date.now();
+    if (!this.pending.has(id) && this.pending.size >= MAX_PENDING) {
+      for (const [k, v] of this.pending) if (now - v.lastSeen > PENDING_TTL_MS) this.pending.delete(k);
+      if (this.pending.size >= MAX_PENDING) this.pending.delete(this.pending.keys().next().value);
+    }
+    this.pending.set(id, { ...info, tokenHash, lastSeen: now });
   }
 
-  /** Separa o token de acesso em servidor + chave. Aceita minúsculas, espaços e sem traços. */
-  parseAccessToken(text) {
-    const t = String(text || '').toUpperCase().replace(/\s+/g, '');
-    const m = /^(EE-?[A-Z0-9]{6})-?([A-Z0-9]{4}-?[A-Z0-9]{4}-?[A-Z0-9]{4})$/.exec(t);
-    if (!m) return null;
-    const id = m[1].startsWith('EE-') ? m[1] : `EE-${m[1].slice(2)}`;
-    return { server: this.getServer(id), key: m[2] };
+  getPending(id) {
+    const p = this.pending.get(id);
+    if (!p || Date.now() - p.lastSeen > PENDING_TTL_MS) return null;
+    return p;
   }
 
-  checkLoginKey(server, key) {
-    return safeEqualStr(normalizeLoginKey(key), normalizeLoginKey(server.loginKey));
+  /**
+   * /ac login token:...  A partir daqui o bot reconhece o servidor e guarda o hash do token.
+   * @returns {{server?: object, created?: boolean, error?: 'format'|'token'|'notseen'}}
+   */
+  loginWithToken(text) {
+    const tok = normalizeToken(text);
+    if (!tok) return { error: 'format' };
+    const id = tokenId(tok);
+    const h = hashToken(tok);
+    const existing = this.getServer(id);
+    if (existing) {
+      const ok = (existing.tokenHash && safeEqualStr(h, existing.tokenHash))
+        || (existing.pendingTokenHash && safeEqualStr(h, existing.pendingTokenHash));
+      return ok ? { server: existing, created: false } : { error: 'token' };
+    }
+    // só cria se um servidor de verdade já se conectou ao bot com esse token
+    const seen = this.getPending(id);
+    if (!seen || !safeEqualStr(h, seen.tokenHash)) return { error: 'notseen' };
+    const server = defaultServer(id);
+    server.tokenHash = h;
+    server.createdIp = seen.address || null;
+    if (seen.name) server.name = String(seen.name).slice(0, 64);
+    this.servers.set(id, server);
+    this.saveServer(server);
+    this.pending.delete(id);
+    const { tokenHash, lastSeen, name, ...status } = seen;
+    this.status.set(id, { ...status, configVersion: -1, lastSeen });
+    return { server, created: true };
   }
 
   /** Altera a configuração. bump=true faz o servidor do jogo recarregar. */
@@ -189,14 +233,16 @@ class Store {
     return server;
   }
 
-  rotateLoginKey(server) {
-    // incrementa a versão para o servidor receber e mostrar a chave nova no console
-    return this.updateServer(server, (s) => { s.loginKey = newLoginKey(); }).loginKey;
-  }
-
+  /**
+   * Gera um token novo (/ac servidor novachave). O bot envia ao servidor nas
+   * próximas consultas (linha "T"); quando o servidor passa a usar, o antigo para de valer.
+   */
   rotateToken(server) {
-    const token = newToken();
-    this.updateServer(server, (s) => { s.tokenHash = hashToken(token); }, { bump: false });
+    const token = newAccessToken(server.id);
+    this.updateServer(server, (s) => {
+      s.pendingToken = token;
+      s.pendingTokenHash = hashToken(token);
+    });
     return token;
   }
 
@@ -460,4 +506,6 @@ class Store {
   }
 }
 
-module.exports = { Store, normalizeId, normalizeLoginKey, hashToken };
+module.exports = {
+  Store, normalizeId, normalizeToken, hashToken,
+};

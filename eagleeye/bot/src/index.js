@@ -16,10 +16,6 @@ if (!process.env.DISCORD_TOKEN) fail('Defina DISCORD_TOKEN no .env.');
 const projectGuildId = (process.env.DISCORD_GUILD_ID || '').trim();
 if (!/^\d{5,25}$/.test(projectGuildId)) fail('Defina DISCORD_GUILD_ID no .env com o ID do Discord do projeto (o bot só funciona nele).');
 
-const registerKey = process.env.AC_REGISTER_KEY || '';
-if (registerKey && !/^[A-Za-z0-9_-]{8,128}$/.test(registerKey)) {
-  fail('AC_REGISTER_KEY deve ter de 8 a 128 caracteres (letras, números, _ e -).');
-}
 
 const store = new Store(process.env.AC_DATA_DIR || path.join(__dirname, '..', 'data')).load();
 console.log(`[store] ${store.servers.size} servidor(es) carregado(s).`);
@@ -38,7 +34,6 @@ startApi({
   host: process.env.AC_API_HOST || '0.0.0.0',
   port: Number.parseInt(process.env.AC_API_PORT || '8090', 10),
   allowedIps: String(process.env.AC_ALLOWED_IPS || '').split(',').map((s) => s.trim()).filter(Boolean),
-  registerKey,
   onDetection: (server, det) => bot.enqueueDetection(server, det),
 });
 

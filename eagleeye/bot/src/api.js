@@ -7,8 +7,6 @@ const { byId } = require('./protections');
 
 const MAX_BODY = 4096;
 const MAX_PLAYERS_BODY = 16384;
-const REGISTER_LIMIT = 5;              // registros por IP (padrão)
-const REGISTER_WINDOW_MS = 60 * 60 * 1000;
 
 function clientIp(req) {
   return (req.socket.remoteAddress || '').replace(/^::ffff:/, '');
@@ -31,28 +29,21 @@ function cleanName(name) {
 
 /**
  * API HTTP consumida pelo include Pawn (native HTTP do SA-MP/open.mp).
- *   GET  /ac/register?rk=&host=&port=                         -> REG <id> <token> <chave>
  *   GET  /ac/config?id=&token=&v=&players=&max=&ack=&host=    -> configuração em texto
+ *                                                               (WAIT se o dono ainda não fez /ac login)
  *   POST /ac/report?id=&token=  (x-www-form-urlencoded)        -> registra detecção
  *   POST /ac/players?id=&token= (p=id,nome,ping,score;...)    -> jogadores online
  */
 function startApi({
-  store, host, port, allowedIps = [], registerKey = '', registerLimit = REGISTER_LIMIT, onDetection, onRegister = () => {}, logger = console,
+  store, host, port, allowedIps = [], onDetection, logger = console,
 }) {
-  const registrations = new Map(); // ip -> [timestamps]
-
-  function canRegister(ip) {
-    const now = Date.now();
-    const list = (registrations.get(ip) || []).filter((t) => now - t < REGISTER_WINDOW_MS);
-    if (list.length >= registerLimit) return false;
-    list.push(now);
-    registrations.set(ip, list);
-    return true;
-  }
-
   function authenticate(url, res) {
     const result = store.authServer(url.searchParams.get('id'), url.searchParams.get('token'));
-    if (result.error === 'unknown') { send(res, 410, 'unknown server'); return null; }
+    if (result.error === 'pending') {
+      // token válido gerado pelo include, mas o dono ainda não fez /ac login
+      send(res, 202, 'WAIT\nEND\n');
+      return null;
+    }
     if (result.error) { send(res, 401, 'unauthorized'); return null; }
     return result.server;
   }
@@ -82,18 +73,21 @@ function startApi({
     const ip = clientIp(req);
     if (allowedIps.length && !allowedIps.includes(ip)) return send(res, 403, 'forbidden');
 
-    if (req.method === 'GET' && url.pathname === '/ac/register') {
-      if (registerKey && url.searchParams.get('rk') !== registerKey) return send(res, 403, 'invalid register key');
-      if (!canRegister(ip)) return send(res, 429, 'too many registrations');
-      const { server: srv, token } = store.createServer({ name: cleanName(url.searchParams.get('host')), ip });
-      logger.log(`[api] novo servidor registrado: ${srv.id} (${srv.name}) de ${ip}`);
-      onRegister(srv);
-      return send(res, 200, `REG ${srv.id} ${token} ${srv.loginKey}\nEND\n`);
-    }
-
     if (req.method === 'GET' && url.pathname === '/ac/config') {
-      const srv = authenticate(url, res);
-      if (!srv) return undefined;
+      const auth = store.authServer(url.searchParams.get('id'), url.searchParams.get('token'));
+      if (auth.error === 'pending') {
+        // o bot ainda não conhece o servidor: guarda os dados para o /ac login reconhecer
+        store.notePending(auth.id, auth.tokenHash, {
+          name: cleanName(url.searchParams.get('host')),
+          players: toInt(url.searchParams.get('players')),
+          maxPlayers: toInt(url.searchParams.get('max')),
+          port: toInt(url.searchParams.get('port')),
+          address: ip,
+        });
+        return send(res, 200, 'WAIT\nEND\n');
+      }
+      if (auth.error) return send(res, 401, 'unauthorized');
+      const srv = auth.server;
       const clientVersion = toInt(url.searchParams.get('v'), -1);
       const ack = toInt(url.searchParams.get('ack'), 0);
       store.setStatus(srv, {

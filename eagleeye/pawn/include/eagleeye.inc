@@ -8,29 +8,33 @@
  *   eagleeye/bot). O servidor fala com o bot via HTTP nativo (não precisa de
  *   nenhum plugin .dll/.so extra).
  *
- *   ID FIXO DO SERVIDOR
- *   -------------------
- *   Na primeira vez que o gamemode inicia, o servidor se registra no bot,
- *   recebe um ID fixo (salvo em scriptfiles/eagleeye_servidor.cfg) e mostra
- *   no console o TOKEN DE ACESSO que o dono usa para fazer login no Discord:
+ *   TOKEN DE ACESSO
+ *   ---------------
+ *   Na primeira vez que o gamemode inicia, o PRÓPRIO include gera um token
+ *   (salvo em scriptfiles/eagleeye_servidor.cfg) e mostra no console:
  *
- *       [EagleEYE] Token de acesso: EE-7K2QMX-ABCD-EFGH-JKLM
- *       [EagleEYE] No Discord use: /ac login token:EE-7K2QMX-ABCD-EFGH-JKLM
+ *       [EagleEYE] Token de acesso: EE-7K2QMX-ABCD-EFGH-JKLM-NPQR
+ *       [EagleEYE] No Discord use: /ac login token:EE-7K2QMX-ABCD-EFGH-JKLM-NPQR
  *
- *   Digite "eagleeye" no console/RCON para ver o token de acesso novamente.
+ *   O começo do token (EE-7K2QMX) é o ID fixo do servidor. O bot só passa a
+ *   reconhecer o servidor quando o dono faz /ac login com esse token; até lá
+ *   o servidor fica "aguardando login" e usa a configuração padrão.
+ *   O servidor do jogo e o bot podem estar em máquinas diferentes: basta o
+ *   servidor conseguir acessar o EE_API_HOST.
+ *
+ *   Digite "eagleeye" no console/RCON para ver o token novamente.
  *   FAÇA BACKUP do arquivo eagleeye_servidor.cfg (ele é a identidade do servidor).
  *
  *   USO (no topo do gamemode):
  *
  *       #include <open.mp>          // ou <a_samp>
  *
- *       #define EE_API_HOST "127.0.0.1:8090"     // ip:porta do bot (sem http://)
+ *       #define EE_API_HOST "ip.do.bot:8090"     // endereço público do bot (sem http://)
  *       #include <eagleeye>
  *
  *   Opcionais (antes do include):
- *       #define EE_REGISTER_KEY "..."   // se o bot exigir AC_REGISTER_KEY
- *       #define EE_SERVER_ID    "EE-XXXXXX"  // fixa o ID manualmente
- *       #define EE_SERVER_TOKEN "..."        // token desse ID (ver /ac token no Discord)
+ *       #define EE_SERVER_TOKEN "EE-XXXXXX-XXXX-XXXX-XXXX-XXXX"  // fixa o token no código
+ *                                                                (ignora o .cfg)
  *
  *   Inclua o eagleeye LOGO DEPOIS do a_samp/open.mp e ANTES de qualquer
  *   outro include. Filterscripts usam <eagleeye_fs>.
@@ -54,9 +58,6 @@
 
 #if !defined EE_API_HOST
 	#define EE_API_HOST "127.0.0.1:8090"
-#endif
-#if !defined EE_REGISTER_KEY
-	#define EE_REGISTER_KEY ""
 #endif
 #if !defined EE_ID_FILE
 	#define EE_ID_FILE "eagleeye_servidor.cfg"
@@ -312,9 +313,8 @@ static stock
 	gEE_LastCmd = 0,
 	gEE_ServerId[24],
 	gEE_Token[72],
-	gEE_LoginKey[24],
-	bool:gEE_RegisterPending = false,
-	gEE_RegisterCounter = 0,
+	bool:gEE_Linked = false,       // o dono já fez /ac login com o token?
+	bool:gEE_WaitNotified = false,
 	gEE_Whitelist[EE_MAX_WHITELIST][MAX_PLAYER_NAME + 1],
 	gEE_WhitelistCount = 0,
 	gEE_Timer = -1,
@@ -344,7 +344,6 @@ forward OnEagleEyeAdminCheck(playerid);
 
 forward EE_Tick();
 forward EE_OnConfig(index, response_code, data[]);
-forward EE_OnRegister(index, response_code, data[]);
 forward EE_OnReport(index, response_code, data[]);
 forward EE_DoPunish(playerid, serial, action, code);
 
@@ -734,18 +733,59 @@ stock EE_ReloadConfig()
 }
 
 /* ===========================================================================
- *  Identidade do servidor (ID fixo + token)
+ *  Identidade do servidor: token gerado pelo próprio include
+ *  Formato: EE-XXXXXX-XXXX-XXXX-XXXX-XXXX (o começo, EE-XXXXXX, é o ID fixo)
  * ========================================================================= */
+#define EE_TOKEN_LEN (29)
+
+static stock bool:EE_ValidToken(const t[])
+{
+	if (strlen(t) != EE_TOKEN_LEN || t[0] != 'E' || t[1] != 'E' || t[2] != '-') return false;
+	for (new i = 3; i < EE_TOKEN_LEN; i++)
+	{
+		if (i == 9 || i == 14 || i == 19 || i == 24)
+		{
+			if (t[i] != '-') return false;
+		}
+		else if (!(('0' <= t[i] <= '9') || ('A' <= t[i] <= 'Z'))) return false;
+	}
+	return true;
+}
+
+static stock EE_GenerateToken(dest[], size = sizeof dest)
+{
+	// sem 0/O/1/I/L para não confundir na hora de digitar
+	static const alpha[] = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
+	new host[64], seed = GetTickCount() ^ (gettime() * 7919) ^ random(cellmax);
+	GetConsoleVarAsString("hostname", host, sizeof host);
+	for (new i = 0; host[i] != EOS; i++) seed = seed * 31 + host[i];
+	new out[EE_TOKEN_LEN + 1], o = 0, r;
+	out[o++] = 'E'; out[o++] = 'E'; out[o++] = '-';
+	for (new i = 0; i < 22; i++)
+	{
+		if (i == 6 || i == 10 || i == 14 || i == 18) out[o++] = '-';
+		// xorshift32 misturado com random() e o relógio
+		seed ^= seed << 13;
+		seed ^= seed >>> 17;
+		seed ^= seed << 5;
+		r = (seed ^ random(cellmax) ^ GetTickCount()) & 0x7FFFFFFF;
+		out[o++] = alpha[r % (sizeof alpha - 1)];
+	}
+	out[o] = EOS;
+	EE_Copy(dest, out, size);
+}
+
+static stock EE_SetToken(const token[])
+{
+	EE_Copy(gEE_Token, token);
+	strmid(gEE_ServerId, token, 0, 9, sizeof gEE_ServerId); // EE-XXXXXX
+}
+
 static stock EE_PrintLogin()
 {
 	print("[EagleEYE] ---------------------------------------------------------------");
-	if (gEE_LoginKey[0])
-	{
-		// token de acesso = ID fixo + chave de login
-		printf("[EagleEYE] Token de acesso: %s-%s", gEE_ServerId, gEE_LoginKey);
-		printf("[EagleEYE] No Discord use: /ac login token:%s-%s", gEE_ServerId, gEE_LoginKey);
-	}
-	else printf("[EagleEYE] Servidor %s registrado. Token de acesso: (aguardando o bot)", gEE_ServerId);
+	printf("[EagleEYE] Token de acesso: %s", gEE_Token);
+	if (!gEE_Linked) printf("[EagleEYE] No Discord use: /ac login token:%s", gEE_Token);
 	print("[EagleEYE] Guarde esse token! Quem tiver ele pode configurar o anti-cheat.");
 	print("[EagleEYE] ---------------------------------------------------------------");
 }
@@ -754,9 +794,9 @@ static stock EE_LoadIdentity()
 {
 	gEE_ServerId[0] = EOS;
 	gEE_Token[0] = EOS;
-	#if defined EE_SERVER_ID && defined EE_SERVER_TOKEN
-		EE_Copy(gEE_ServerId, EE_SERVER_ID);
-		EE_Copy(gEE_Token, EE_SERVER_TOKEN);
+	new token[72];
+	#if defined EE_SERVER_TOKEN
+		EE_Copy(token, EE_SERVER_TOKEN);
 	#else
 		new File:f = fopen(EE_ID_FILE, io_read);
 		if (f)
@@ -766,18 +806,13 @@ static stock EE_LoadIdentity()
 			{
 				len = strlen(line);
 				while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r' || line[len - 1] == ' ')) line[--len] = EOS;
-				if (!strcmp(line, "id=", false, 3) && len > 3) strmid(gEE_ServerId, line, 3, len, sizeof gEE_ServerId);
-				else if (!strcmp(line, "token=", false, 6) && len > 6) strmid(gEE_Token, line, 6, len, sizeof gEE_Token);
+				if (!strcmp(line, "token=", false, 6) && len > 6) strmid(token, line, 6, len, sizeof token);
 			}
 			fclose(f);
 		}
 	#endif
-	if (gEE_ServerId[0] == EOS || gEE_Token[0] == EOS)
-	{
-		gEE_ServerId[0] = EOS;
-		gEE_Token[0] = EOS;
-		return 0;
-	}
+	if (!EE_ValidToken(token)) return 0;
+	EE_SetToken(token);
 	return 1;
 }
 
@@ -790,54 +825,10 @@ static stock EE_SaveIdentity()
 		return 0;
 	}
 	new line[128];
-	fwrite(f, "# EagleEYE Anti-Cheat - identidade deste servidor. NAO compartilhe o token!\r\n");
-	format(line, sizeof line, "id=%s\r\n", gEE_ServerId);
-	fwrite(f, line);
+	fwrite(f, "# EagleEYE Anti-Cheat - token deste servidor. NAO compartilhe!\r\n");
 	format(line, sizeof line, "token=%s\r\n", gEE_Token);
 	fwrite(f, line);
 	fclose(f);
-	return 1;
-}
-
-static stock EE_Register()
-{
-	if (gEE_RegisterPending) return;
-	new host[64], ehost[192], url[512];
-	GetConsoleVarAsString("hostname", host, sizeof host);
-	EE_UrlEncode(host, ehost);
-	format(url, sizeof url, "%s/ac/register?rk=%s&host=%s&port=%d", EE_API_HOST, EE_REGISTER_KEY, ehost, GetConsoleVarAsInt("port"));
-	gEE_RegisterPending = true;
-	HTTP(1, HTTP_GET, url, "", "EE_OnRegister");
-	print("[EagleEYE] Registrando este servidor no bot do Discord...");
-}
-
-public EE_OnRegister(index, response_code, data[])
-{
-	gEE_RegisterPending = false;
-	if (response_code != 200)
-	{
-		printf("[EagleEYE] Falha ao registrar no bot (%s) - codigo %d. Tentando novamente em 60s.", EE_API_HOST, response_code);
-		if (response_code == 403) print("[EagleEYE] O bot exige uma chave de registro: defina EE_REGISTER_KEY igual ao AC_REGISTER_KEY do bot.");
-		return 1;
-	}
-	// REG <id> <token> <chave de login>
-	new idx = 0, tok[16];
-	EE_Token(data, idx, tok);
-	if (strcmp(tok, "REG") || tok[0] == EOS) return 1;
-	EE_Token(data, idx, gEE_ServerId);
-	EE_Token(data, idx, gEE_Token);
-	EE_Token(data, idx, gEE_LoginKey);
-	if (gEE_ServerId[0] == EOS || gEE_Token[0] == EOS)
-	{
-		gEE_ServerId[0] = EOS;
-		gEE_Token[0] = EOS;
-		return 1;
-	}
-	EE_SaveIdentity();
-	print("[EagleEYE] Servidor registrado com sucesso!");
-	EE_PrintLogin();
-	gEE_Version = 0;
-	EE_Poll();
 	return 1;
 }
 
@@ -1080,22 +1071,9 @@ static stock EE_RunCommand(id, const type[], const arg[])
 public EE_OnConfig(index, response_code, data[])
 {
 	gEE_PollPending = false;
-	if (response_code == 410)
-	{
-		// o bot não conhece mais este ID: registra de novo
-		#if !defined EE_SERVER_ID
-			print("[EagleEYE] O bot nao reconhece este ID de servidor. Registrando novamente...");
-			gEE_ServerId[0] = EOS;
-			gEE_Token[0] = EOS;
-			EE_Register();
-		#else
-			print("[EagleEYE] O bot nao reconhece o EE_SERVER_ID definido no gamemode.");
-		#endif
-		return 1;
-	}
 	if (response_code == 401)
 	{
-		if (!gEE_Offline) printf("[EagleEYE] Token invalido para este ID! Confira scriptfiles/%s ou use /ac token no Discord.", EE_ID_FILE);
+		if (!gEE_Offline) printf("[EagleEYE] O bot recusou o token deste servidor! Confira scriptfiles/%s.", EE_ID_FILE);
 		gEE_Offline = true;
 		return 1;
 	}
@@ -1116,6 +1094,24 @@ public EE_OnConfig(index, response_code, data[])
 
 	// resposta truncada/inválida: ignora por segurança
 	if (strfind(data, "END") == -1) return 1;
+
+	// o dono ainda não fez /ac login com o token
+	if (!strcmp(data, "WAIT", false, 4))
+	{
+		gEE_Linked = false;
+		if (!gEE_WaitNotified)
+		{
+			gEE_WaitNotified = true;
+			print("[EagleEYE] Conectado ao bot. Aguardando o dono fazer login no Discord:");
+			EE_PrintLogin();
+		}
+		return 1;
+	}
+	if (!gEE_Linked)
+	{
+		gEE_Linked = true;
+		print("[EagleEYE] Servidor vinculado no Discord! Configuracao recebida do bot.");
+	}
 
 	new len = strlen(data), pos = 0, line[160], tok[32], idx, end;
 	new bool:fullConfig = false;
@@ -1141,13 +1137,16 @@ public EE_OnConfig(index, response_code, data[])
 			gEE_WhitelistCount = 0;
 			fullConfig = true;
 		}
-		else if (!strcmp(tok, "K"))
+		else if (!strcmp(tok, "T"))
 		{
-			// K <chave de login>
-			EE_Token(line, idx, tok);
-			if (tok[0] != EOS && strcmp(tok, gEE_LoginKey))
+			// T <novo token>: o dono gerou um token novo no Discord (/ac servidor novachave)
+			new newToken[40];
+			EE_Token(line, idx, newToken);
+			if (EE_ValidToken(newToken) && !strcmp(newToken, gEE_ServerId, false, 9) && strcmp(newToken, gEE_Token))
 			{
-				EE_Copy(gEE_LoginKey, tok);
+				EE_SetToken(newToken);
+				EE_SaveIdentity();
+				print("[EagleEYE] Token de acesso trocado pelo Discord. Novo token:");
 				EE_PrintLogin();
 			}
 		}
@@ -1464,16 +1463,7 @@ public EE_Tick()
 {
 	new tick = GetTickCount();
 
-	if (gEE_ServerId[0] == EOS)
-	{
-		// ainda não registrado: tenta a cada 60s
-		if (++gEE_RegisterCounter >= 60000 / EE_TICK_MS)
-		{
-			gEE_RegisterCounter = 0;
-			EE_Register();
-		}
-	}
-	else if (++gEE_PollCounter >= gEE_PollSeconds * 1000 / EE_TICK_MS)
+	if (++gEE_PollCounter >= gEE_PollSeconds * 1000 / EE_TICK_MS)
 	{
 		gEE_PollCounter = 0;
 		EE_Poll();
@@ -1562,7 +1552,6 @@ public OnGameModeInit()
 	if (gEE_Timer != -1) KillTimer(gEE_Timer);
 	gEE_Timer = SetTimer("EE_Tick", EE_TICK_MS, true);
 	gEE_PollCounter = 0;
-	gEE_RegisterCounter = 0;
 	print("[EagleEYE] EagleEYE Anti-Cheat carregado.");
 
 	#if defined EE_OnGameModeInit
@@ -1573,9 +1562,18 @@ public OnGameModeInit()
 	if (EE_LoadIdentity())
 	{
 		printf("[EagleEYE] ID do servidor: %s (digite 'eagleeye' no console para ver o token de acesso)", gEE_ServerId);
-		EE_Poll();
 	}
-	else EE_Register();
+	else
+	{
+		// primeira inicialização: o próprio include gera o token
+		new token[EE_TOKEN_LEN + 1];
+		EE_GenerateToken(token);
+		EE_SetToken(token);
+		EE_SaveIdentity();
+		print("[EagleEYE] Primeira inicializacao: token de acesso gerado.");
+		EE_PrintLogin();
+	}
+	EE_Poll();
 	return ret;
 }
 #if defined _ALS_OnGameModeInit
@@ -1612,8 +1610,8 @@ public OnRconCommand(cmd[])
 {
 	if (!strcmp(cmd, "eagleeye", true) && cmd[0] != EOS)
 	{
-		if (gEE_ServerId[0] == EOS) print("[EagleEYE] Servidor ainda nao registrado no bot.");
-		else EE_PrintLogin();
+		EE_PrintLogin();
+		if (!gEE_Linked) print("[EagleEYE] Situacao: aguardando login no Discord.");
 		printf("[EagleEYE] Anti-cheat %s | config v%d | bot %s", gEE_OnOff[gEE_Global ? 1 : 0], gEE_Version, gEE_BotState[gEE_Offline ? 1 : 0]);
 		return 1;
 	}

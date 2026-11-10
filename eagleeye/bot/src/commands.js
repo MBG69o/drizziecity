@@ -58,7 +58,6 @@ const acCommand = new SlashCommandBuilder()
       .addIntegerOption((o) => o.setName('horas').setDescription('0 = permanente · máx. 8760 (1 ano)').setRequired(true).setMinValue(0).setMaxValue(8760)))
     .addSubcommand((s) => s.setName('auditoria').setDescription('Quem alterou o quê nas configurações'))
     .addSubcommand((s) => s.setName('novachave').setDescription('Gera um novo token de acesso (o antigo para de funcionar) (dono)'))
-    .addSubcommand((s) => s.setName('token').setDescription('Gera um novo token da API para o servidor (dono, recuperação)'))
     .addSubcommand((s) => s.setName('logout').setDescription('Sai do servidor (deixa de ser dono)')))
   // ---------------------------------------------------------- proteções
   .addSubcommandGroup((g) => g.setName('protecao').setDescription('Configurar proteções')
