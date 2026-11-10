@@ -13,6 +13,7 @@ const { isValidNick, isValidIPv4Pattern, sanitizeGameText } = require('./config-
 const { normalizeId } = require('./store');
 const { PRESETS } = require('./presets');
 const { collectStats, buildPresenceTexts } = require('./presence');
+const { createNotifier } = require('./notifier');
 
 const MAX_WHITELIST = 64;
 const LOGIN_MAX_FAILS = 5;
@@ -30,12 +31,14 @@ function createDiscordBot({ store, permissions, token, projectGuildId, logger = 
   if (!projectGuildId) throw new Error('projectGuildId é obrigatório (o bot só funciona no Discord do projeto).');
   const client = new Client({ intents: [GatewayIntentBits.Guilds] });
   const logQueues = new Map(); // channelId -> [embeds]
+  const notifier = createNotifier({ store, client, logger });
   const loginFails = new Map(); // userId -> [timestamps]
 
   // ------------------------------------------------------------------ logs
   function enqueueDetection(server, det) {
     const prot = byId.get(det.code);
     if (!prot) return;
+    try { notifier.onDetection(server, det); } catch (err) { logger.error('[notificacoes]', err); }
     const embed = buildDetectionEmbed(server, det, prot);
     for (const channelId of Object.values(server.logChannels)) {
       const q = logQueues.get(channelId) || [];
@@ -217,6 +220,7 @@ function createDiscordBot({ store, permissions, token, projectGuildId, logger = 
         return reply(interaction, msg);
       }
       const { server } = result;
+      notifier.onLogin(server, userId, result.created);
       store.updateServer(server, (s) => {
         if (!s.owners.includes(userId)) s.owners.push(userId);
       }, { bump: false });
@@ -298,6 +302,7 @@ function createDiscordBot({ store, permissions, token, projectGuildId, logger = 
       case 'novachave': {
         const tok = store.rotateToken(server);
         audit(interaction, server, 'novo token de acesso');
+        notifier.onTokenRotated(server, interaction.user.id);
         return reply(interaction, [
           `🔑 Novo token de acesso de ${serverLabel(server)}: \`${tok}\``,
           `O servidor recebe esse token sozinho na próxima consulta${store.isServerOnline(server) ? '' : ' (quando voltar a ficar online)'}, salva no \`eagleeye_servidor.cfg\` e mostra no console. A partir daí o token antigo para de funcionar.`,
@@ -479,6 +484,19 @@ function createDiscordBot({ store, permissions, token, projectGuildId, logger = 
         return reply(interaction, horas ? `⏱️ Novos bans do anti-cheat duram **${horas}h** e são desfeitos automaticamente.` : '⏱️ Novos bans do anti-cheat são **permanentes**.');
       }
 
+      case 'notificacoes': {
+        const modo = interaction.options.getString('modo', true);
+        store.updateServer(server, (s) => { s.notifyMode = modo; }, { bump: false });
+        audit(interaction, server, `notificações de segurança = ${modo}`);
+        const desc = {
+          ambos: 'por **DM** e no **canal de logs**',
+          dm: 'só por **DM** (se a DM estiver fechada, vai para o canal de logs)',
+          canal: 'só no **canal de logs**, com menção aos donos',
+          desligado: '**desligadas**',
+        }[modo];
+        return reply(interaction, `🔔 Notificações de segurança de ${serverLabel(server)}: ${desc}.`);
+      }
+
       case 'auditoria': {
         const list = store.getAudit(server).slice(-15).reverse();
         if (!list.length) return reply(interaction, 'Nenhuma alteração registrada ainda.');
@@ -627,6 +645,20 @@ function createDiscordBot({ store, permissions, token, projectGuildId, logger = 
     if (!permissions.isAllowed(server, interaction)) {
       return reply(interaction, '⛔ Você não tem permissão para configurar esse servidor.');
     }
+    if (action === 'secon' || action === 'secall') {
+      if (action === 'secon') {
+        if (!server.activated && !permissions.isOwner(server, interaction)) return reply(interaction, '⛔ Só um dono pode ativar o anti-cheat.');
+        if (!server.activated) store.activate(server);
+        else store.updateServer(server, (s) => { s.global = true; });
+      } else {
+        store.updateServer(server, (s) => { for (const p of PROTECTIONS) s.protections[p.key].enabled = true; });
+      }
+      audit(interaction, server, `notificação: ${action === 'secon' ? 'anti-cheat ativado' : 'todas as proteções ativadas'}`);
+      return interaction.update({
+        content: `✅ ${action === 'secon' ? 'Anti-cheat ativado' : 'Todas as proteções ativadas'} em ${serverLabel(server)}. O servidor aplica em até ${server.pollSeconds}s.`,
+        components: [],
+      });
+    }
     if (action === 'unban') {
       const ban = store.activeBans(server).find((b) => b.id === Number(catKey));
       if (ban) {
@@ -655,8 +687,11 @@ function createDiscordBot({ store, permissions, token, projectGuildId, logger = 
 
   client.on(Events.InteractionCreate, async (interaction) => {
     try {
+      // botões das notificações de segurança enviadas por DM
+      const dmSecurity = !interaction.guildId && (interaction.isButton && interaction.isButton())
+        && /^ee:(secon|secall):/.test(interaction.customId || '');
       // o bot só funciona dentro do Discord do projeto
-      if (interaction.guildId !== projectGuildId) {
+      if (interaction.guildId !== projectGuildId && !dmSecurity) {
         if (interaction.isAutocomplete()) return await interaction.respond([]);
         if (interaction.isRepliable()) {
           return await interaction.reply({ content: '⛔ Este bot só pode ser usado no Discord oficial do projeto.', flags: MessageFlags.Ephemeral });
@@ -749,11 +784,14 @@ function createDiscordBot({ store, permissions, token, projectGuildId, logger = 
         sendToServer(server, [statsEmbed(server, '24h').setTitle(`🗓️ Resumo diário — ${server.name}`.slice(0, 256))]);
       }
     }
+    // servidores desprotegidos (aviso aos donos depois de 30 min na mesma situação)
+    try { notifier.checkProtection(); } catch (err) { logger.error('[notificacoes]', err); }
   }
   setInterval(() => { try { checkServers(); } catch (err) { logger.error('[tarefas]', err); } }, 30 * 1000).unref();
 
   return {
     client,
+    notifier,
     enqueueDetection,
     checkServers,
     start: () => client.login(token),

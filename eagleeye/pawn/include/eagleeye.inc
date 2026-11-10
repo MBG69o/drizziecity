@@ -267,6 +267,9 @@ static stock
 	gEE_Token[72],
 	bool:gEE_Linked = false,
 	bool:gEE_WaitNotified = false,
+	bool:gEE_LastGlobal = true,
+	bool:gEE_ConfigLoaded = false,
+	gEE_SecurityCounter = 0,
 	gEE_Whitelist[EE_MAX_WHITELIST][MAX_PLAYER_NAME + 1],
 	gEE_WhitelistCount = 0,
 	gEE_Timer = -1,
@@ -813,6 +816,19 @@ static stock EE_NotifyAdmins(const msg[])
 	}
 }
 
+static stock EE_SecurityNotice(const msg[])
+{
+	new out[180];
+	format(out, sizeof out, "[EagleEYE] [Seguranca] %s", msg);
+	print(out);
+	EE_NotifyAdmins(out);
+}
+
+static stock bool:EE_IsAttackCode(code)
+{
+	return code == EE_RECONNECT || code == EE_IPFLOOD || code == EE_CRASHER || code == EE_RCON || code == EE_FAKENPC;
+}
+
 static stock EE_Punish(playerid, code, action, const detail[])
 {
 	new name[MAX_PLAYER_NAME + 1], msg[180];
@@ -824,6 +840,11 @@ static stock EE_Punish(playerid, code, action, const detail[])
 	EE_NotifyAdmins(msg);
 	printf("[EagleEYE] %s (%d) punido (%s) - %s: %s", name, playerid,
 		gEE_ActShort[(action == EE_ACTION_BAN) ? 1 : 0], gEE_Names[code], detail);
+	if (EE_IsAttackCode(code))
+	{
+		format(msg, sizeof msg, "Possivel ataque contido (%s): %s (%s) foi %s.", gEE_Names[code], name, gEE_P[playerid][acIp], gEE_ActPast[(action == EE_ACTION_BAN) ? 1 : 0]);
+		EE_SecurityNotice(msg);
+	}
 
 	if (funcidx("OnEagleEyePunish") != -1)
 	{
@@ -1107,6 +1128,20 @@ public EE_OnConfig(index, response_code, data[])
 			if (IsPlayerConnected(i)) EE_RefreshWhitelist(i);
 		}
 		printf("[EagleEYE] Configuracao v%d carregada do Discord (anti-cheat %s).", gEE_Version, gEE_OnOff[gEE_Global ? 1 : 0]);
+		if (gEE_ConfigLoaded && gEE_LastGlobal && !gEE_Global)
+		{
+			EE_SecurityNotice("ATENCAO: o anti-cheat foi DESATIVADO pelo Discord. O servidor esta desprotegido!");
+		}
+		else if (gEE_ConfigLoaded && !gEE_LastGlobal && gEE_Global)
+		{
+			EE_SecurityNotice("Anti-cheat reativado pelo Discord. Servidor protegido.");
+		}
+		else if (!gEE_ConfigLoaded && !gEE_Global)
+		{
+			EE_SecurityNotice("O anti-cheat esta DESATIVADO. Ative as protecoes no Discord (/ac meuservidor ou /ac global).");
+		}
+		gEE_LastGlobal = gEE_Global;
+		gEE_ConfigLoaded = true;
 	}
 	return 1;
 }
@@ -1380,6 +1415,19 @@ public EE_Tick()
 		EE_Poll();
 	}
 
+	if (++gEE_SecurityCounter >= 600000 / EE_TICK_MS)
+	{
+		gEE_SecurityCounter = 0;
+		if (gEE_Linked && !gEE_Global)
+		{
+			EE_SecurityNotice("Lembrete: o servidor esta DESPROTEGIDO (anti-cheat desligado). Ative no Discord.");
+		}
+		else if (!gEE_Linked)
+		{
+			printf("[EagleEYE] Lembrete: usando a configuracao padrao. Faca /ac login token:%s no Discord para configurar e receber alertas.", gEE_Token);
+		}
+	}
+
 	for (new i = 0, j = GetPlayerPoolSize(); i <= j; i++)
 	{
 		if (!IsPlayerConnected(i) || gEE_P[i][acNPC] || gEE_P[i][acPunished]) continue;
@@ -1568,7 +1616,9 @@ public OnRconLoginAttempt(ip[], password[], success)
 					new det[64];
 					format(det, sizeof det, "%d senhas RCON erradas do IP %s (IP bloqueado 1h)", gEE_RconCount[slot], ip);
 					BlockIpAddress(ip, 3600000);
-					printf("[EagleEYE] %s", det);
+					new notice[96];
+					format(notice, sizeof notice, "Ataque ao RCON contido: IP %s bloqueado por 1 hora.", ip);
+					EE_SecurityNotice(notice);
 					new bool:found = false;
 					for (new p = 0, j = GetPlayerPoolSize(); p <= j; p++)
 					{

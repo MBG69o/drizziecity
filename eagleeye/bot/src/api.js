@@ -54,8 +54,17 @@ function cleanName(name) {
  */
 function startApi({
   store, host, port, allowedIps = [], trustProxy = false, onDetection, logger = console,
-  guard = new Guard(), maxConnections = 1000,
+  guard = new Guard(), maxConnections = 1000, onAuthFail = () => {},
 }) {
+  /** Token errado: conta para o bloqueio do IP e avisa o dono se o ID existir. */
+  function authFailed(url, ip) {
+    guard.authFailed(ip);
+    const target = store.getServer(url.searchParams.get('id'));
+    if (target) {
+      try { onAuthFail(target, ip); } catch (err) { logger.error('[api] onAuthFail', err); }
+    }
+  }
+
   /** Autentica e aplica o limite por servidor. Responde sozinho quando não pode seguir. */
   function authenticate(url, res, ip) {
     const result = store.authServer(url.searchParams.get('id'), url.searchParams.get('token'));
@@ -65,7 +74,7 @@ function startApi({
       return null;
     }
     if (result.error) {
-      guard.authFailed(ip);
+      authFailed(url, ip);
       send(res, 401, 'unauthorized');
       return null;
     }
@@ -145,7 +154,7 @@ function startApi({
         return send(res, 200, 'WAIT\nEND\n');
       }
       if (auth.error) {
-        guard.authFailed(ip);
+        authFailed(url, ip);
         return send(res, 401, 'unauthorized');
       }
       const srv = auth.server;

@@ -214,6 +214,7 @@ Os comandos valem para o **seu** servidor, aquele registrado no seu nome no `don
 | `resumo ativo:<…>` | Resumo diário das últimas 24h, à meia-noite (`AC_TIMEZONE`, padrão America/Sao_Paulo). |
 | `banduracao horas:<n>` | Duração dos novos bans do AC. Quando vencem, o bot desbane sozinho. `0` = permanente. |
 | `auditoria` | As últimas 15 alterações: quem mudou o quê e quando. |
+| `notificacoes modo:<…>` | Onde receber os alertas de segurança: DM, canal, ambos ou desligado. |
 | `novachave` / `logout` | Novo token de acesso (o servidor recebe sozinho), sair do servidor. *(só dono)* |
 
 **`/ac imune adicionar/remover/listar`** e **`/ac donos adicionar/remover/listar`**: nicks ignorados pelo AC e quem pode configurar o servidor.
@@ -224,6 +225,30 @@ Os comandos valem para o **seu** servidor, aquele registrado no seu nome no `don
 - `AC_BOT_ADMIN_IDS` no `.env` dá acesso total a todos os servidores (suporte do projeto).
 
 As alterações chegam ao servidor em até `intervalo` segundos (padrão 10), **sem reiniciar o gamemode**. Se o bot cair, o servidor continua usando a última configuração recebida.
+
+## 🔔 Notificações de segurança
+
+O bot avisa os **donos** de cada servidor, por DM e no canal de logs, quando algo importante acontece:
+
+| Notificação | Quando |
+|---|---|
+| 🚨 **Suposto ataque detectado** | 15 ou mais detecções em 5 minutos (vários cheaters ao mesmo tempo). |
+| 🛡️ **Ataque de bots, RCON ou crasher** | Flood de conexões/reconexões, NPC falso, crasher ou força bruta no RCON. |
+| 🔐 **Tentativa de acesso bloqueada** | 10 tokens errados usando o ID do servidor em 10 minutos. |
+| ⚠️ **Servidor desprotegido** | Online há 30 min sem o anti-cheat confirmado, com ele desligado, ou com menos da metade das proteções ativas. Vem com um botão para resolver. |
+| 👤 **Novo acesso** / 🔑 **Token trocado** | Outra pessoa fez login no servidor ou gerou um novo token. |
+
+Exemplo:
+> Olá, @dono! Seu servidor **Drizzie RP** teve um suposto ataque detectado: **18 detecções em 5 minutos**. ✅ Conseguimos conter o ataque: **18** jogador(es) foram kickados pelo EagleEYE.
+
+A mensagem só diz **"conseguimos conter"** quando o EagleEYE de fato puniu ou bloqueou alguém. Se as proteções estiverem em modo aviso, ela diz isso e sugere mudar para kick. Cada tipo de aviso tem um intervalo mínimo para não virar spam.
+
+Configure com `/ac servidor notificacoes modo:` (`ambos`, `dm`, `canal` ou `desligado`). Se a DM do dono estiver fechada, a notificação vai para o canal de logs com menção.
+
+No jogo, o include avisa no console e para os admins online:
+- ataques contidos (bots, RCON, crasher);
+- quando o anti-cheat é desligado ou religado pelo Discord;
+- um lembrete a cada 10 minutos enquanto o servidor estiver desprotegido.
 
 ## 🛡️ Proteção da API (anti-DDoS)
 

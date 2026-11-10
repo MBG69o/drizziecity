@@ -45,6 +45,7 @@ startApi({
     burst: Number.parseInt(process.env.AC_RATE_BURST || '60', 10),
   }),
   onDetection: (server, det) => bot.enqueueDetection(server, det),
+  onAuthFail: (server, ip) => bot.notifier.onAuthFail(server, ip),
 });
 
 bot.start().catch((err) => fail(`Não foi possível conectar ao Discord: ${err.message}`));

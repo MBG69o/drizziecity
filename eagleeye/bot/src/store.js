@@ -77,6 +77,8 @@ function defaultServer(id) {
     alerts: true,           // avisa no canal quando o servidor cai/volta
     dailySummary: false,    // resumo diário no canal de logs
     lastSummaryDay: null,
+    notifyMode: 'ambos',    // notificações de segurança: ambos | dm | canal | desligado
+    notifyState: {},        // último envio de cada tipo (anti-spam)
   };
 }
 

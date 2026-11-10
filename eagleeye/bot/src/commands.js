@@ -57,6 +57,13 @@ const acCommand = new SlashCommandBuilder()
     .addSubcommand((s) => s.setName('banduracao').setDescription('Duração dos bans do anti-cheat (desban automático)')
       .addIntegerOption((o) => o.setName('horas').setDescription('0 = permanente · máx. 8760 (1 ano)').setRequired(true).setMinValue(0).setMaxValue(8760)))
     .addSubcommand((s) => s.setName('auditoria').setDescription('Quem alterou o quê nas configurações'))
+    .addSubcommand((s) => s.setName('notificacoes').setDescription('Onde receber os alertas de segurança (ataques, servidor desprotegido...)')
+      .addStringOption((o) => o.setName('modo').setDescription('Entrega').setRequired(true).addChoices(
+        { name: 'DM e canal de logs (padrão)', value: 'ambos' },
+        { name: 'Só DM', value: 'dm' },
+        { name: 'Só canal de logs (com menção)', value: 'canal' },
+        { name: 'Desligar', value: 'desligado' },
+      )))
     .addSubcommand((s) => s.setName('novachave').setDescription('Gera um novo token de acesso (o antigo para de funcionar) (dono)'))
     .addSubcommand((s) => s.setName('logout').setDescription('Sai do servidor (deixa de ser dono)')))
   // ---------------------------------------------------------- proteções
