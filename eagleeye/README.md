@@ -133,6 +133,8 @@ npm start                 # ou: pm2 start src/index.js --name eagleeye
 - Libere a porta `AC_API_PORT` no firewall para os servidores do jogo.
 - A API precisa responder por **HTTP simples** (o `HTTP()` do SA-MP não faz HTTPS). Teste a partir da máquina do servidor do jogo: `curl "http://ENDERECO_DO_BOT:8090/ac/config?id=x&token=x"` deve responder `unauthorized`.
 
+> **Hospedando na Discloud?** Publique o bot como **site** (não como bot) seguindo [`bot/DISCLOUD.md`](bot/DISCLOUD.md). O `discloud.config` já vem pronto em `bot/`.
+
 ### 2. Gamemode
 
 1. Copie `pawn/include/eagleeye.inc` (e `eagleeye_fs.inc`) para a pasta `pawno/include` ou `qawno/include`.

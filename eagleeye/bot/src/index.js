@@ -29,11 +29,15 @@ const bot = createDiscordBot({
   projectGuildId,
 });
 
+// AC_API_PORT tem prioridade; PORT é a variável usada por várias hospedagens de sites
+const apiPort = Number.parseInt(process.env.AC_API_PORT || process.env.PORT || '8090', 10);
+
 startApi({
   store,
   host: process.env.AC_API_HOST || '0.0.0.0',
-  port: Number.parseInt(process.env.AC_API_PORT || '8090', 10),
+  port: apiPort,
   allowedIps: String(process.env.AC_ALLOWED_IPS || '').split(',').map((s) => s.trim()).filter(Boolean),
+  trustProxy: /^(1|true|sim)$/i.test(process.env.AC_TRUST_PROXY || ''),
   onDetection: (server, det) => bot.enqueueDetection(server, det),
 });
 

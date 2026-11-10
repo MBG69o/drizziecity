@@ -8,9 +8,20 @@ const { byId } = require('./protections');
 const MAX_BODY = 4096;
 const MAX_PLAYERS_BODY = 16384;
 
-function clientIp(req) {
+function clientIp(req, trustProxy) {
+  // atrás de proxy (ex.: site na Discloud) o IP real vem no X-Forwarded-For
+  if (trustProxy) {
+    const fwd = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
+    if (fwd) return fwd.replace(/^::ffff:/, '');
+  }
   return (req.socket.remoteAddress || '').replace(/^::ffff:/, '');
 }
+
+const HOME_PAGE = `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>EagleEYE API</title><style>body{font-family:system-ui,sans-serif;background:#0f1115;color:#e6e6e6;display:grid;place-items:center;min-height:100vh;margin:0}
+main{max-width:520px;padding:24px;text-align:center}h1{margin:0 0 8px}p{color:#a8b0bd;line-height:1.5}code{background:#1c2029;padding:2px 6px;border-radius:4px}</style></head>
+<body><main><h1>🦅 EagleEYE API</h1><p>API online. Os servidores SA-MP/open.mp se conectam aqui com o token gerado pelo include,
+e os donos fazem <code>/ac login</code> no Discord do projeto.</p></main></body></html>`;
 
 function send(res, status, body) {
   res.writeHead(status, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
@@ -35,7 +46,7 @@ function cleanName(name) {
  *   POST /ac/players?id=&token= (p=id,nome,ping,score;...)    -> jogadores online
  */
 function startApi({
-  store, host, port, allowedIps = [], onDetection, logger = console,
+  store, host, port, allowedIps = [], trustProxy = false, onDetection, logger = console,
 }) {
   function authenticate(url, res) {
     const result = store.authServer(url.searchParams.get('id'), url.searchParams.get('token'));
@@ -70,7 +81,15 @@ function startApi({
       return send(res, 400, 'bad request');
     }
 
-    const ip = clientIp(req);
+    const ip = clientIp(req, trustProxy);
+
+    // página inicial e verificação de saúde (públicas, sem dados)
+    if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/health')) {
+      if (url.pathname === '/health') return send(res, 200, 'OK');
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+      return res.end(HOME_PAGE);
+    }
+
     if (allowedIps.length && !allowedIps.includes(ip)) return send(res, 403, 'forbidden');
 
     if (req.method === 'GET' && url.pathname === '/ac/config') {

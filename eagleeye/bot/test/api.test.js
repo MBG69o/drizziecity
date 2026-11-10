@@ -301,3 +301,19 @@ test('formato do token do include é o mesmo que o bot aceita', () => {
   assert.strictEqual(normalizeToken(t), t);
   assert.deepStrictEqual([9, 14, 19, 24].map((i) => t[i]), ['-', '-', '-', '-']);
 });
+
+test('modo site: página inicial, /health e IP real atrás de proxy', async () => {
+  const home = await fetch(`${base}/`);
+  assert.strictEqual(home.status, 200);
+  assert.match(await home.text(), /EagleEYE API/);
+  assert.strictEqual(await (await fetch(`${base}/health`)).text(), 'OK');
+
+  const s2 = startApi({ store, host: '127.0.0.1', port: 0, trustProxy: true, onDetection() {}, logger: quiet });
+  await new Promise((r) => s2.once('listening', r));
+  const b2 = `http://127.0.0.1:${s2.address().port}`;
+  const token = genToken();
+  const id = token.slice(0, 9);
+  await fetch(`${b2}/ac/config?id=${id}&token=${token}&v=0`, { headers: { 'X-Forwarded-For': '177.10.20.30, 10.0.0.1' } });
+  assert.strictEqual(store.getPending(id).address, '177.10.20.30');
+  s2.close();
+});
