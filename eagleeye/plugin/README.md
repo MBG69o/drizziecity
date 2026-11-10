@@ -24,10 +24,25 @@ O **núcleo de segurança** está implementado e com testes que rodam (inclusive
 - Segredos (host, pepper, chaves) **ofuscados** no binário via `tools/obfuscate.py`. *(confirmado: não aparecem em texto)*
 - Sistema de licenças no **bot**: `/ac licenca criar | listar | revogar | reativar | info` (só admin), endpoint `/plugin/license` assinado e revogação em tempo real.
 
+## Detecções portadas (34/34, testadas)
+
+Toda a lógica das 34 proteções já está em C++, dividida por categoria e com testes que rodam (64 bits, sem o SDK):
+
+| Arquivo | Categoria | Proteções |
+|---|---|---|
+| `ee_detect.cpp` | motor | parser da config do bot, tolerância/janela/cooldown, fila de relatórios |
+| `ee_cat_player.cpp` | jogador | dinheiro, vida, colete, jetpack, godmode, spawn falso |
+| `ee_cat_weapons.cpp` | armas | armas, fake kill, rapid fire, alcance, dano, munição, c-bug, aimbot |
+| `ee_cat_movement.cpp` | movimento | velocidade a pé, teleporte, airbreak, pickup/checkpoint falso (+ velocidade em veículo e posição-crasher) |
+| `ee_cat_vehicles.cpp` | veículos | reparo, car warp, veículo troll, tuning, spam, assento inválido |
+| `ee_cat_network.cpp` | rede | flood, divulgação, dialog, ping, conexões por IP, reconexão, RCON, NPC falso |
+
+As detecções são **funções puras**: recebem os valores já lidos do jogo e devolvem a detecção + a correção. Rode `bash test/run.sh` para ver todos os testes.
+
 ## O que falta para o binário final
 
-- **Baixar o SDK do SA-MP + sampgdk** e compilar o `.dll`/`.so` (veja `BUILD.md`). Não deu para baixar no ambiente onde isto foi montado.
-- **Portar a lógica de detecção** das 34 proteções (hoje no `eagleeye.inc` v2.2.0) para `src/ee_detections.cpp`. É a etapa que esconde as regras dentro do binário, e deve ser feita e **testada num servidor real**, porque C++ mal testado derruba o servidor. O esqueleto (`ee_plugin.cpp`) já tem o ponto de entrada onde ela encaixa.
+- **Baixar o SDK do SA-MP + sampgdk** e compilar o `.dll`/`.so` (veja `BUILD.md`). O proxy do ambiente onde isto foi montado bloqueia o download.
+- **A cola sampgdk** (`ee_detections.cpp`): ligar os callbacks do servidor e os hooks dos natives (GivePlayerMoney, SetPlayerHealth...) às funções já portadas. É código de ligação, não de lógica, e precisa ser **testado num servidor real** antes de distribuir.
 
 ## Como o cliente instala
 
