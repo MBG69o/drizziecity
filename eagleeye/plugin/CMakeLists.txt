@@ -13,8 +13,10 @@ set(EE_SOURCES
     src/ee_store.cpp
     src/ee_license.cpp
     src/ee_http.cpp
+    src/ee_detect.cpp        # motor: config + tolerancia + relatorios
+    src/ee_cat_player.cpp    # categoria JOGADOR
     src/ee_plugin.cpp
-    # src/ee_detections.cpp   # logica de deteccao (portada do include v2.2.0)
+    # src/ee_detections.cpp   # cola sampgdk (hooks de natives + callbacks)
 )
 
 add_library(eagleeye SHARED ${EE_SOURCES})
