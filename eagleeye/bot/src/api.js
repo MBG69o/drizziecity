@@ -242,6 +242,10 @@ function startApi({
             port: toInt(url.searchParams.get('port')),
             address: ip,
           });
+        } else {
+          // Não registrou: limite de tokens novos por IP. Atrás de proxy isso
+          // normalmente é AC_TRUST_PROXY desligado (todos no mesmo IP).
+          logger.log(`[api] ${auth.id} aguardando login, mas o limite de novos tokens do IP ${ip} foi atingido. Se estiver atrás de proxy, ligue AC_TRUST_PROXY=true.`);
         }
         return send(res, 200, 'WAIT\nEND\n');
       }

@@ -21,7 +21,7 @@ class Guard {
     blockMs = 10 * 60 * 1000,  // tempo de bloqueio por excesso
     authFailsToBlock = 20,     // tokens errados em 10 min até bloquear
     authBlockMs = 30 * 60 * 1000,
-    newTokensPerHour = 5,      // tokens novos (servidores aguardando login) por IP por hora
+    newTokensPerHour = 20,     // tokens novos (servidores aguardando login) por IP por hora
     serverRatePerMin = 180,    // requisições por minuto por servidor (token)
     now = () => Date.now(),
   } = {}) {

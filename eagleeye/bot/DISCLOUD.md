@@ -76,3 +76,10 @@ Recompile o gamemode e ligue o servidor. O console mostra o token, e você faz `
 Os servidores, donos, bans e o histórico ficam na pasta `data/` dentro do app.
 - Use o botão **Backup** da Discloud com frequência.
 - ⚠️ Confira se um **Commit** ou **Rebuild** apaga arquivos criados pelo app. Se apagar, faça backup antes de enviar uma versão nova. Se a pasta `data/` se perder, cada dono precisa refazer o `/ac login` (o token dos servidores continua o mesmo).
+
+## 7. ⚠️ AC_TRUST_PROXY (muito importante na Discloud)
+Como site, **todo** o tráfego chega pelo proxy da Discloud/Cloudflare. Se `AC_TRUST_PROXY` estiver desligado, o bot enxerga **o mesmo IP (o do proxy) para todos os servidores e acessos web**, e aí:
+- os servidores ficam **piscando online/offline** (batem juntos no limite de requisições);
+- o `/ac login` e o site passam a responder **"o servidor ainda não se conectou"** (o limite de "novos tokens por IP" barra o registro).
+
+**Deixe `AC_TRUST_PROXY=true`** (já é o padrão). Só use `false` se rodar o bot direto, sem proxy.

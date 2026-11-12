@@ -77,7 +77,12 @@ startApi({
   host: process.env.AC_API_HOST || '0.0.0.0',
   port: apiPort,
   allowedIps: String(process.env.AC_ALLOWED_IPS || '').split(',').map((s) => s.trim()).filter(Boolean),
-  trustProxy: /^(1|true|sim)$/i.test(process.env.AC_TRUST_PROXY || ''),
+  // Padrão TRUE: quase todo mundo roda atrás de um proxy (Discloud/Cloudflare/Nginx),
+  // onde o IP real vem em cf-connecting-ip/x-forwarded-for. Sem isso, todos os
+  // servidores aparecem com o MESMO IP (o do proxy) e se atrapalham nos limites
+  // (rate limit e "novos tokens por IP"), causando flapping e erro de "não conectou".
+  // Rodando direto, sem proxy, defina AC_TRUST_PROXY=false.
+  trustProxy: !/^(0|false|nao|não|off)$/i.test((process.env.AC_TRUST_PROXY || '').trim()),
   maxConnections: Number.parseInt(process.env.AC_MAX_CONNECTIONS || '1000', 10),
   guard: new Guard({
     ratePerMin: Number.parseInt(process.env.AC_RATE_LIMIT || '120', 10),
