@@ -80,6 +80,8 @@ function defaultServer(id) {
     notifyMode: 'ambos',    // notificações de segurança: ambos | dm | canal | desligado
     notifyState: {},        // último envio de cada tipo (anti-spam)
     publicBadge: false,     // selo/página de status pública ligados pelo dono
+    webhookUrl: '',         // webhook de saída do Discord do cliente (opcional)
+    webhookMinAction: 1,    // ação mínima enviada ao webhook: 0 aviso, 1 kick, 2 ban
   };
 }
 
@@ -384,7 +386,16 @@ class Store {
 
   // ---------------------------------------------- jogadores online (plist)
   setPlayers(server, list) {
+    const prev = this.players.get(server.id);
+    const before = new Set((prev && prev.list || []).map((p) => String(p.name || '').toLowerCase()));
     this.players.set(server.id, { time: Date.now(), list });
+    // nicks que ENTRARAM desde a última lista (para a watchlist)
+    const joined = [];
+    for (const p of list) {
+      const n = String(p.name || '');
+      if (n && !before.has(n.toLowerCase())) joined.push(n);
+    }
+    return joined;
   }
 
   getPlayers(server) {

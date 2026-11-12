@@ -15,8 +15,9 @@
 const { PROTECTIONS, CATEGORIES, ACTIONS, byKey } = require('./protections');
 const { gradeLetter } = require('./dashboard');
 const { sanitizeGameText, isValidNick, isValidIPv4Pattern } = require('./config-format');
-const { serverStats } = require('./stats');
+const { serverStats, cleanlinessRanking } = require('./stats');
 const achievements = require('./achievements');
+const webhooks = require('./webhooks');
 
 function jsonBody(res, send, status, obj) {
   send(res, status, JSON.stringify(obj), { 'Content-Type': 'application/json; charset=utf-8' });
@@ -52,6 +53,8 @@ function serverView(store, security, trust, s) {
     grade: rep.grade, gradeLetter: gradeLetter(rep.score), score: rep.score,
     publicBadge: !!s.publicBadge, lastSeen: st.lastSeen || 0, protections: prot,
     achievements: achievements.compute(s, st, store.getHistory(s)).earned,
+    webhookUrl: s.webhookUrl || '', webhookMinAction: Number.isInteger(s.webhookMinAction) ? s.webhookMinAction : 1,
+    detections24h: store.getHistory(s).filter((d) => Date.now() - d.time < 24 * 3600 * 1000).length,
   };
 }
 
@@ -60,7 +63,7 @@ function serverView(store, security, trust, s) {
  * Retorna true se tratou a rota.
  */
 function handleWebApp(req, res, url, ctx) {
-  const { store, webauth, trust, security, send, readBody, logger, onAuthCode, blacklist } = ctx;
+  const { store, webauth, trust, security, send, readBody, logger, onAuthCode, blacklist, watchlist } = ctx;
   const path = url.pathname;
   if (path !== '/app' && !path.startsWith('/app/')) return false;
 
@@ -157,7 +160,18 @@ function handleWebApp(req, res, url, ctx) {
     }
     recent.sort((a, b) => b.time - a.time);
     const worst = trust ? trust.worst(sess.ownerKey, 10) : [];
-    jsonBody(res, send, 200, { ok: true, owner: { name: sess.name || '' }, servers, recent: recent.slice(0, 50), worst });
+    const ranking = servers.length > 1 ? cleanlinessRanking(servers) : [];
+    // procurados online agora, em qualquer servidor do dono
+    const watchedOnline = [];
+    if (watchlist) {
+      for (const s of scopedServers(store, sess)) {
+        const pl = (store.getPlayers(s) || {}).list || [];
+        for (const p of pl) {
+          if (watchlist.isWatched(sess.ownerKey, p.name)) watchedOnline.push({ nick: p.name, server: s.name, id: p.id });
+        }
+      }
+    }
+    jsonBody(res, send, 200, { ok: true, owner: { name: sess.name || '' }, servers, recent: recent.slice(0, 50), worst, ranking, watchedOnline });
     return true;
   }
 
@@ -300,6 +314,55 @@ function handleWebApp(req, res, url, ctx) {
     return true;
   }
 
+  // --- webhook de saída (auth) ---
+  if (req.method === 'POST' && path === '/app/api/webhook') {
+    readBody(req, res, 512, (body) => {
+      const t = writeTarget(body);
+      if (t.err) return jsonBody(res, send, t.err[0], { error: t.err[1] });
+      const { server, j } = t;
+      const wurl = String(j.url || '').trim();
+      if (wurl && !webhooks.isValidWebhook(wurl)) return jsonBody(res, send, 400, { error: 'Use um webhook do Discord (https://discord.com/api/webhooks/...).' });
+      const min = [0, 1, 2].includes(j.minAction) ? j.minAction : 1;
+      store.updateServer(server, (s) => { s.webhookUrl = wurl; s.webhookMinAction = min; }, { bump: false });
+      return jsonBody(res, send, 200, { ok: true, webhookUrl: wurl, webhookMinAction: min });
+    });
+    return true;
+  }
+
+  // --- procurados (watchlist): listar (auth) ---
+  if (req.method === 'GET' && path === '/app/api/watchlist') {
+    const sess = session();
+    if (!sess) return jsonBody(res, send, 401, { error: 'sessão expirada' }), true;
+    jsonBody(res, send, 200, { ok: true, entries: watchlist ? watchlist.list(sess.ownerKey) : [] });
+    return true;
+  }
+  // --- procurados: adicionar (auth) ---
+  if (req.method === 'POST' && path === '/app/api/watchlist') {
+    readBody(req, res, 1024, (body) => {
+      const sess = session();
+      if (!sess) return jsonBody(res, send, 401, { error: 'sessão expirada' });
+      if (!watchlist) return jsonBody(res, send, 404, { error: 'indisponível' });
+      let j = {}; try { j = JSON.parse(body); } catch { return jsonBody(res, send, 400, { error: 'json inválido' }); }
+      const nick = String(j.nick || '').trim();
+      if (!isValidNick(nick)) return jsonBody(res, send, 400, { error: 'nick inválido (3-24 caracteres)' });
+      watchlist.add(sess.ownerKey, nick, { note: String(j.note || '').slice(0, 100), by: sess.ownerKey });
+      return jsonBody(res, send, 200, { ok: true, entries: watchlist.list(sess.ownerKey) });
+    });
+    return true;
+  }
+  // --- procurados: remover (auth) ---
+  if (req.method === 'POST' && path === '/app/api/watchlist/remove') {
+    readBody(req, res, 512, (body) => {
+      const sess = session();
+      if (!sess) return jsonBody(res, send, 401, { error: 'sessão expirada' });
+      if (!watchlist) return jsonBody(res, send, 404, { error: 'indisponível' });
+      let j = {}; try { j = JSON.parse(body); } catch { return jsonBody(res, send, 400, { error: 'json inválido' }); }
+      const removed = watchlist.remove(sess.ownerKey, String(j.nick || ''));
+      return jsonBody(res, send, removed ? 200 : 404, { ok: removed, entries: watchlist.list(sess.ownerKey) });
+    });
+    return true;
+  }
+
   // --- selo público (auth) ---
   if (req.method === 'POST' && path === '/app/api/badge') {
     readBody(req, res, 512, (body) => {
@@ -380,6 +443,11 @@ th{color:var(--mut);font-size:12px;text-transform:uppercase;letter-spacing:.04em
 .bar2 .track{flex:1;height:7px;background:#243141;border-radius:5px;overflow:hidden}
 .bar2 .fill{height:100%;background:var(--accent);border-radius:5px}
 .bar2 .n{width:26px;text-align:right;font-variant-numeric:tabular-nums;color:var(--mut)}
+.watchbar{background:rgba(241,196,15,.12);border:1px solid rgba(241,196,15,.4);color:#ffe9a8;border-radius:12px;padding:10px 14px;margin:14px 0;font-size:14px}
+.row2{display:flex;align-items:center;gap:10px;padding:8px 2px;border-bottom:1px solid var(--line);font-size:14px}
+.row2:last-child{border-bottom:0}.row2 .pos{width:22px;font-family:var(--fh);color:var(--mut)}
+.row2 .nm{min-width:90px}.row2 .track{flex:1;height:8px;background:#243141;border-radius:5px;overflow:hidden}
+.row2 .fill{height:100%;background:var(--ok);border-radius:5px}.row2 .sc{width:50px;text-align:right;color:var(--mut)}
 .hide{display:none!important}
 .toast{position:fixed;left:50%;bottom:calc(16px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:#0e151d;border:1px solid var(--line);border-radius:10px;padding:10px 16px;z-index:30;opacity:0;transition:.2s}
 .toast.show{opacity:1}
@@ -419,6 +487,13 @@ th{color:var(--mut);font-size:12px;text-transform:uppercase;letter-spacing:.04em
 
   <div class="card"><div class="kpis" id="kpis"></div></div>
 
+  <div id="watchbar" class="watchbar hide"></div>
+
+  <div class="card hide" id="rankcard">
+   <h2>Ranking — servidor mais limpo</h2>
+   <div id="rank"></div>
+  </div>
+
   <div class="card">
    <div class="row" style="justify-content:space-between">
     <h2 style="margin:0">Anti-cheat</h2>
@@ -450,6 +525,16 @@ th{color:var(--mut);font-size:12px;text-transform:uppercase;letter-spacing:.04em
   </div>
 
   <div class="card">
+   <h2>Webhook de saída — receba os alertas no seu Discord</h2>
+   <div class="row">
+    <input id="wh-url" placeholder="https://discord.com/api/webhooks/..." style="flex:1;min-width:200px" maxlength="200">
+    <select id="wh-min" style="width:auto"><option value="0">avisos+</option><option value="1" selected>kick+ban</option><option value="2">só ban</option></select>
+    <button class="btn sm" id="btn-wh">Salvar</button>
+   </div>
+   <div class="mut" style="font-size:12.5px;margin-top:6px">Só webhooks do Discord. Deixe vazio e salve para desligar. <span id="wh-state"></span></div>
+  </div>
+
+  <div class="card">
    <h2>Histórico de jogador</h2>
    <div class="row"><input id="pq" placeholder="nick exato do jogo" style="flex:1" maxlength="24"><button class="btn sm" id="btn-pq">Buscar</button></div>
    <div id="pres" style="margin-top:12px"></div>
@@ -465,6 +550,17 @@ th{color:var(--mut);font-size:12px;text-transform:uppercase;letter-spacing:.04em
    </div>
    <div class="mut" style="font-size:12.5px;margin-top:6px">Quem entra aqui é banido em <b>todos os seus servidores</b> (por IP) e expulso ao conectar (por nick).</div>
    <div id="bllist" style="margin-top:12px"></div>
+  </div>
+
+  <div class="card">
+   <h2>Procurados — vigie um jogador</h2>
+   <div class="row">
+    <input id="wl-nick" placeholder="nick" style="flex:1;min-width:120px" maxlength="24">
+    <input id="wl-note" placeholder="anotação (opcional)" style="flex:2;min-width:140px" maxlength="100">
+    <button class="btn sm" id="btn-wl">Adicionar</button>
+   </div>
+   <div class="mut" style="font-size:12.5px;margin-top:6px">Não bane — avisa quando a pessoa <b>entra</b> ou é detectada em qualquer servidor seu.</div>
+   <div id="wllist" style="margin-top:12px"></div>
   </div>
 
   <div class="card">
@@ -492,7 +588,7 @@ function api(path,opts){opts=opts||{};opts.headers=opts.headers||{};if(S.session
 
 /* ---- login ---- */
 function showLogin(){$('screen-app').classList.add('hide');$('screen-login').classList.remove('hide')}
-function showApp(){$('screen-login').classList.add('hide');$('screen-app').classList.remove('hide');load();loadBlacklist()}
+function showApp(){$('screen-login').classList.add('hide');$('screen-app').classList.remove('hide');load();loadBlacklist();loadWatchlist()}
 $('btn-start').onclick=function(){
  var tok=$('token').value.trim();if(!tok){return}
  $('btn-start').disabled=true;$('m1').innerHTML='';
@@ -545,9 +641,33 @@ function renderAll(){var s=curServer();if(!s){$('kpis').innerHTML='<div class="k
  ].map(function(k){return '<div class="kpi"><b>'+k[0]+'</b><span>'+k[1]+'</span></div>'}).join('');
  $('glob').checked=!!s.global;$('globlbl').textContent=s.global?'ligado':'desligado';
  $('actinfo').textContent=s.activated?'':'⏳ Ative o servidor no Discord (/ac meuservidor) antes de ligar o anti-cheat.';
- renderAchv();renderTabs();renderProts();renderRecent();renderWorst();loadStats();
+ renderAchv();renderTabs();renderProts();renderRecent();renderWorst();loadStats();renderRank();renderWatchbar();renderWebhook();
 }
 window.addEventListener('resize',function(){if(S.data)loadStats()});
+
+function renderRank(){var d=S.data;var card=$('rankcard');if(!d||!d.ranking||!d.ranking.length){card.classList.add('hide');return}
+ card.classList.remove('hide');var max=d.ranking[0].cleanScore||1;
+ $('rank').innerHTML=d.ranking.map(function(s,i){return '<div class="row2"><span class="pos">'+(i+1)+'º</span><span class="nm">'+esc(s.name)+'</span><span class="track"><span class="fill" style="width:'+Math.round(100*s.cleanScore/Math.max(1,max))+'%"></span></span><span class="sc">'+s.cleanScore+'/100</span></div>'}).join('')}
+function renderWatchbar(){var d=S.data;var el=$('watchbar');var w=(d&&d.watchedOnline)||[];
+ if(!w.length){el.classList.add('hide');return}
+ el.classList.remove('hide');el.innerHTML='👁️ <b>Procurado(s) online agora:</b> '+w.map(function(x){return esc(x.nick)+' <span class="mut">('+esc(x.server)+')</span>'}).join(' · ')}
+function renderWebhook(){var s=curServer();if(!s)return;$('wh-url').value=s.webhookUrl||'';$('wh-min').value=String(s.webhookMinAction);
+ $('wh-state').textContent=s.webhookUrl?'• ligado':'• desligado'}
+$('btn-wh').onclick=function(){var url=$('wh-url').value.trim(),min=parseInt($('wh-min').value,10);
+ api('/app/api/webhook',{method:'POST',body:JSON.stringify({serverId:S.cur,url:url,minAction:min})}).then(function(r){
+  if(r.status!==200){toast('⚠️ '+(r.j.error||'erro'));return}
+  var s=curServer();if(s){s.webhookUrl=r.j.webhookUrl;s.webhookMinAction=r.j.webhookMinAction}renderWebhook();toast(url?'✅ webhook salvo':'✅ webhook desligado')})}
+
+/* ---- procurados ---- */
+function loadWatchlist(){api('/app/api/watchlist').then(function(r){if(r.status===200)renderWatchlist(r.j.entries||[])})}
+function renderWatchlist(list){if(!list.length){$('wllist').innerHTML='<div class="mut">Nenhum jogador vigiado.</div>';return}
+ $('wllist').innerHTML='<div class="scroll"><table><tbody>'+list.map(function(e){
+  return '<tr><td>👁️ <b>'+esc(e.nick)+'</b></td><td class="when">'+esc(e.note||'')+'</td><td class="when">'+ago(e.at)+'</td><td><button class="btn ghost sm wl-rm" data-n="'+esc(e.nick)+'">remover</button></td></tr>'}).join('')+'</tbody></table></div>';
+ Array.prototype.forEach.call($('wllist').querySelectorAll('.wl-rm'),function(b){b.onclick=function(){
+  api('/app/api/watchlist/remove',{method:'POST',body:JSON.stringify({nick:b.getAttribute('data-n')})}).then(function(r){if(r.status===200){renderWatchlist(r.j.entries||[]);toast('✅ removido')}})}})}
+$('btn-wl').onclick=function(){var nick=$('wl-nick').value.trim(),note=$('wl-note').value.trim();if(!nick){toast('informe o nick');return}
+ api('/app/api/watchlist',{method:'POST',body:JSON.stringify({nick:nick,note:note})}).then(function(r){
+  if(r.status!==200){toast('⚠️ '+(r.j.error||'erro'));return}$('wl-nick').value='';$('wl-note').value='';renderWatchlist(r.j.entries||[]);toast('👁️ vigiando')})}
 function renderTabs(){$('tabs').innerHTML=CAT.categories.map(function(c){return '<button class="tab'+(c.key===S.cat?' active':'')+'" data-k="'+c.key+'">'+c.emoji+' '+esc(c.name)+'</button>'}).join('');
  Array.prototype.forEach.call($('tabs').children,function(b){b.onclick=function(){S.cat=b.getAttribute('data-k');renderTabs();renderProts()}})}
 function renderProts(){var s=curServer();if(!s)return;

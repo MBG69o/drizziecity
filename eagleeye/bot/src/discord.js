@@ -19,6 +19,7 @@ const { securityReport, CRITICAL } = require('./security');
 const { Lockdown } = require('./lockdown');
 const { hourlyBuckets } = require('./stats');
 const achievements = require('./achievements');
+const webhooks = require('./webhooks');
 
 const SPARK = '▁▂▃▄▅▆▇█';
 function sparkline(values) {
@@ -40,7 +41,7 @@ const TIMEZONE = process.env.AC_TIMEZONE || 'America/Sao_Paulo';
 
 function createDiscordBot({
   store, permissions, token, projectGuildId, alertChannelId = null, licenses = null, blacklist = null,
-  trust = null, dashboard = null, publicBaseUrl = '', logger = console,
+  trust = null, dashboard = null, watchlist = null, publicBaseUrl = '', logger = console,
 }) {
   if (!projectGuildId) throw new Error('projectGuildId é obrigatório (o bot só funciona no Discord do projeto).');
   const client = new Client({ intents: [GatewayIntentBits.Guilds] });
@@ -68,6 +69,37 @@ function createDiscordBot({
       q.push(embed);
       if (q.length > 200) q.splice(0, q.length - 200);
       logQueues.set(channelId, q);
+    }
+    // webhook de saída do cliente
+    if (webhooks.shouldSend(server, det)) {
+      webhooks.send(server.webhookUrl, webhooks.detectionPayload(server, det)).catch(() => {});
+    }
+    // procurado detectado em flagrante
+    if (watchlist && server.owners[0] && watchlist.isWatched(server.owners[0], det.name)) {
+      const w = watchlist.get(server.owners[0], det.name);
+      const emb = new EmbedBuilder().setTitle('🎯 Procurado detectado!').setColor(COLORS.ban)
+        .setDescription([
+          `O jogador vigiado **${escapeMarkdown(det.name)}** foi pego por **${protName(det.code)}** em **${escapeMarkdown(server.name)}**.`,
+          w && w.note ? `Anotação: ${escapeMarkdown(w.note)}` : '',
+        ].filter(Boolean).join('\n')).setFooter({ text: server.id }).setTimestamp();
+      if (server.alerts) sendToServer(server, [emb]);
+      sendAlert(emb);
+    }
+  }
+
+  // Avisa quando um nick da lista de procurados ENTRA no servidor.
+  function onWatchlistJoin(server, nicks) {
+    if (!watchlist || !server.owners[0]) return;
+    for (const nick of nicks) {
+      if (!watchlist.isWatched(server.owners[0], nick)) continue;
+      const w = watchlist.get(server.owners[0], nick);
+      const emb = new EmbedBuilder().setTitle('👁️ Procurado entrou no servidor').setColor(COLORS.warn)
+        .setDescription([
+          `**${escapeMarkdown(nick)}** (lista de procurados) acabou de entrar em **${escapeMarkdown(server.name)}**.`,
+          w && w.note ? `Anotação: ${escapeMarkdown(w.note)}` : '',
+        ].filter(Boolean).join('\n')).setFooter({ text: server.id }).setTimestamp();
+      if (server.alerts) sendToServer(server, [emb]);
+      sendAlert(emb);
     }
   }
 
@@ -381,7 +413,7 @@ function createDiscordBot({
 
     // quem tem mais de 1 servidor escolhe em qual o comando vai agir
     const picked = interaction.pickedServer || null;
-    const pickable = (!NO_SERVER_SUBS.has(full) || full === 'meuservidor') && group !== 'blacklist';
+    const pickable = (!NO_SERVER_SUBS.has(full) || full === 'meuservidor') && group !== 'blacklist' && group !== 'procurados';
     if (pickable && !picked) {
       const mine = store.serversOfUser(interaction.user.id, permissions.isBotAdmin(interaction));
       if (mine.length > 1) return askServer(interaction, full, mine);
@@ -391,6 +423,7 @@ function createDiscordBot({
     if (NO_SERVER_SUBS.has(full)) return handleServerCommands(interaction, full);
     if (group === 'licenca') return handleLicense(interaction, sub);
     if (group === 'blacklist') return handleBlacklist(interaction, sub);
+    if (group === 'procurados') return handleProcurados(interaction, sub);
 
     const server = picked || store.activeServerFor(interaction.user.id);
     if (!server) return reply(interaction, '❌ Você não tem nenhum servidor. Use `/ac login token:<TOKEN>` (o token de acesso aparece no console do servidor).');
@@ -404,6 +437,7 @@ function createDiscordBot({
     if (group === 'imune') return handleWhitelist(interaction, server, sub);
     if (group === 'donos') return handleOwners(interaction, server, sub);
     if (group === 'selo') return handleSelo(interaction, server, sub);
+    if (group === 'webhook') return handleWebhook(interaction, server, sub);
 
     const pollMsg = `O servidor aplica em até ${server.pollSeconds}s.`;
 
@@ -891,6 +925,51 @@ function createDiscordBot({
     ].join('\n'));
   }
 
+  const WH_LABEL = ['avisos, kicks e bans', 'kicks e bans', 'só bans'];
+  async function handleWebhook(interaction, server, sub) {
+    if (sub === 'ver') {
+      return reply(interaction, server.webhookUrl
+        ? `🔗 Webhook **ligado** para ${serverLabel(server)} — envia: **${WH_LABEL[server.webhookMinAction] || WH_LABEL[1]}**.`
+        : 'Nenhum webhook configurado. Use `/ac webhook definir`.');
+    }
+    if (!permissions.isOwner(server, interaction)) return reply(interaction, '⛔ Apenas donos configuram o webhook.');
+    if (sub === 'remover') {
+      store.updateServer(server, (s) => { s.webhookUrl = ''; }, { bump: false });
+      audit(interaction, server, 'webhook removido');
+      return reply(interaction, '✅ Webhook desligado.');
+    }
+    const url = interaction.options.getString('url', true).trim();
+    if (!webhooks.isValidWebhook(url)) return reply(interaction, '❌ Use um webhook do **Discord** (https://discord.com/api/webhooks/...).');
+    const min = Number.parseInt(interaction.options.getString('minimo') || '1', 10);
+    store.updateServer(server, (s) => { s.webhookUrl = url; s.webhookMinAction = [0, 1, 2].includes(min) ? min : 1; }, { bump: false });
+    audit(interaction, server, 'webhook definido');
+    return reply(interaction, `✅ Webhook ligado para ${serverLabel(server)}! Você vai receber **${WH_LABEL[[0, 1, 2].includes(min) ? min : 1]}** no seu Discord.`);
+  }
+
+  async function handleProcurados(interaction, sub) {
+    if (!watchlist) return reply(interaction, '❌ Indisponível nesta instância.');
+    const mine = store.serversOfUser(interaction.user.id, permissions.isBotAdmin(interaction));
+    if (!mine.length) return reply(interaction, '❌ Você não tem nenhum servidor. Use `/ac login token:<TOKEN>`.');
+    const owned = mine.filter((s) => permissions.isOwner(s, interaction));
+    const ownerKey = (owned[0] || mine[0]).owners[0] || interaction.user.id;
+    if (sub === 'listar') {
+      const list = watchlist.list(ownerKey);
+      if (!list.length) return reply(interaction, 'Nenhum jogador vigiado. Use `/ac procurados adicionar`.');
+      const embed = new EmbedBuilder().setTitle('👁️ Procurados').setColor(COLORS.warn)
+        .setDescription(list.slice(0, 40).map((e) => `**${escapeMarkdown(e.nick)}**${e.note ? ` — ${escapeMarkdown(e.note)}` : ''}`).join('\n').slice(0, 4000))
+        .setFooter({ text: `${list.length} vigiado(s)` });
+      return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
+    }
+    const nick = interaction.options.getString('nick', true).trim();
+    if (!isValidNick(nick)) return reply(interaction, '❌ Nick inválido (3-24 caracteres).');
+    if (sub === 'remover') {
+      const ok = watchlist.remove(ownerKey, nick);
+      return reply(interaction, ok ? `✅ **${escapeMarkdown(nick)}** não é mais vigiado.` : 'Esse nick não estava na lista.');
+    }
+    watchlist.add(ownerKey, nick, { note: interaction.options.getString('anotacao') || '', by: interaction.user.id });
+    return reply(interaction, `👁️ Agora vigiando **${escapeMarkdown(nick)}**. Você será avisado quando ele **entrar** ou for **pego** em qualquer servidor seu.`);
+  }
+
   async function handleOwners(interaction, server, sub) {
     if (sub === 'listar') {
       return reply(interaction, [
@@ -1204,6 +1283,7 @@ function createDiscordBot({
     enqueueDetection,
     checkServers,
     deliverAuthCode,
+    onWatchlistJoin,
     start: () => client.login(token),
   };
 }

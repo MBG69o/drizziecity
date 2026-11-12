@@ -83,4 +83,20 @@ function serverStats(store, server, now = Date.now()) {
   };
 }
 
-module.exports = { hourlyBuckets, dailyBuckets, topProtections, topOffenders, serverStats };
+/**
+ * Ranking "servidor mais limpo" entre os servidores do dono.
+ * Entrada: [{ id, name, score (0-100|null), detections24h, online }].
+ * cleanScore = nota de segurança menos a pressão de detecções nas 24h.
+ */
+function cleanlinessRanking(servers) {
+  return servers
+    .map((s) => {
+      const base = typeof s.score === 'number' ? s.score : 50;
+      const penalty = Math.min(40, (s.detections24h || 0));
+      const cleanScore = Math.max(0, Math.min(100, Math.round(base - penalty)));
+      return { id: s.id, name: s.name, online: !!s.online, detections24h: s.detections24h || 0, cleanScore };
+    })
+    .sort((a, b) => b.cleanScore - a.cleanScore || a.detections24h - b.detections24h);
+}
+
+module.exports = { hourlyBuckets, dailyBuckets, topProtections, topOffenders, serverStats, cleanlinessRanking };

@@ -1,5 +1,18 @@
 # 🦅 EagleEYE — Changelog
 
+## v2.8.0 — 12/11/2026
+
+### 🔔 Webhook de saída (integração)
+- O dono liga um **webhook do próprio Discord** e passa a receber os alertas de detecção no servidor dele, além do bot oficial. Escolhe o que recebe: **avisos+**, **kick+ban** ou **só ban**.
+- Configurável no site (card novo) e no Discord (`/ac webhook definir | remover | ver`). Por segurança, só aceita webhooks do **Discord** (sem SSRF).
+
+### 👁️ Procurados (watchlist)
+- Marque nicks "sob vigilância". O EagleEYE **avisa quando a pessoa entra** em qualquer servidor seu (ou é pega em flagrante) — sem banir. Ótimo para pegar suspeito no ato.
+- No site (card + banner "procurado online agora") e no Discord (`/ac procurados adicionar | remover | listar`). Compartilhado entre os seus servidores.
+
+### 🏆 Ranking "servidor mais limpo"
+- Quem tem mais de um servidor vê um **ranking** deles por "nota de limpeza" (segurança menos a pressão de detecções nas 24h), no topo do site.
+
 ## v2.7.0 — 12/11/2026
 
 ### 📊 Estatísticas visuais no site

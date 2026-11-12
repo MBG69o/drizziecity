@@ -12,6 +12,7 @@ const { Blacklist } = require('./blacklist');
 const { Dashboard } = require('./dashboard');
 const { Trust } = require('./trust');
 const { WebAuth } = require('./webauth');
+const { Watchlist } = require('./watchlist');
 const security = require('./security');
 
 function fail(msg) {
@@ -52,7 +53,9 @@ const trust = new Trust(dataDir);
 const dashboard = new Dashboard(dataDir);
 // Site de gerenciamento com login em 2 etapas (token -> código de 5 min)
 const webauth = new WebAuth();
-console.log('[painel] dashboard web, site de gerenciamento e reputação prontos.');
+// Lista de procurados (watchlist): avisa quando um nick vigiado entra
+const watchlist = new Watchlist(dataDir);
+console.log('[painel] dashboard web, site de gerenciamento, reputação e watchlist prontos.');
 
 const bot = createDiscordBot({
   store,
@@ -65,6 +68,7 @@ const bot = createDiscordBot({
   blacklist,
   trust,
   dashboard,
+  watchlist,
   // base pública do painel/selo (ex.: https://eagleeye.discloud.dev)
   publicBaseUrl: (process.env.AC_PUBLIC_URL || '').trim().replace(/\/+$/, ''),
 });
@@ -98,11 +102,13 @@ startApi({
   security,
   webauth,
   blacklist,
+  watchlist,
   // segurança/ocultação dos endpoints dos servidores de jogo:
   // AC_PATH_SECRET -> prefixo secreto no caminho; AC_APP_KEY -> chave de aplicação (param k)
   pathSecret: (process.env.AC_PATH_SECRET || '').trim(),
   appKey: (process.env.AC_APP_KEY || '').trim(),
   onAuthCode: (server, code) => bot.deliverAuthCode(server, code),
+  onPlayers: (server, joined) => bot.onWatchlistJoin(server, joined),
 });
 
 bot.start().catch((err) => fail(`Não foi possível conectar ao Discord: ${err.message}`));

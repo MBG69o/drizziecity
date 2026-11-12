@@ -63,7 +63,7 @@ function startApi({
   guard = new Guard(), maxConnections = 1000, onAuthFail = () => {}, onStatus = () => {},
   licenses = null, requireLicense = false, dashboard = null, trust = null, security = null,
   webauth = null, onAuthCode = null, blacklist = null,
-  pathSecret = '', appKey = '',
+  pathSecret = '', appKey = '', onPlayers = () => {}, watchlist = null,
 }) {
   const PFX = pathSecret ? `/${String(pathSecret).replace(/^\/+|\/+$/g, '')}` : '';
 
@@ -205,7 +205,7 @@ function startApi({
 
     // ---- site de gerenciamento (login por token + código, gestão de proteções) ----
     if (webauth && (url.pathname === '/app' || url.pathname.startsWith('/app/'))) {
-      if (handleWebApp(req, res, url, { store, webauth, trust, security, send, readBody, logger, onAuthCode, blacklist })) return undefined;
+      if (handleWebApp(req, res, url, { store, webauth, trust, security, send, readBody, logger, onAuthCode, blacklist, watchlist })) return undefined;
     }
 
     if (allowedIps.length && !allowedIps.includes(ip)) return send(res, 403, 'forbidden');
@@ -287,7 +287,8 @@ function startApi({
           const [id, name, ping, score] = e.split(',');
           return { id: toInt(id, -1), name: String(name || '?').slice(0, 24), ping: toInt(ping), score: toInt(score) };
         }).filter((x) => x.id >= 0);
-        store.setPlayers(srv, list);
+        const joined = store.setPlayers(srv, list);
+        if (joined && joined.length) { try { onPlayers(srv, joined); } catch (e) { logger.error('[api] onPlayers', e.message); } }
         send(res, 200, 'OK');
       });
       return undefined;
