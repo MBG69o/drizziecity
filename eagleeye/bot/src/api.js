@@ -1,6 +1,7 @@
 'use strict';
 
 const http = require('http');
+const crypto = require('crypto');
 const { URL, URLSearchParams } = require('url');
 const { buildConfigResponse } = require('./config-format');
 const { byId } = require('./protections');
@@ -61,7 +62,18 @@ function startApi({
   guard = new Guard(), maxConnections = 1000, onAuthFail = () => {}, onStatus = () => {},
   licenses = null, requireLicense = false, dashboard = null, trust = null, security = null,
   webauth = null, onAuthCode = null, blacklist = null,
+  pathSecret = '', appKey = '',
 }) {
+  const PFX = pathSecret ? `/${String(pathSecret).replace(/^\/+|\/+$/g, '')}` : '';
+
+  /** Compara a chave de aplicação em tempo constante (vazia = sem exigência). */
+  function keyOk(provided) {
+    if (!appKey) return true;
+    const a = Buffer.from(String(provided || ''));
+    const b = Buffer.from(String(appKey));
+    return a.length === b.length && crypto.timingSafeEqual(a, b);
+  }
+
   /** Token errado: conta para o bloqueio do IP e avisa o dono se o ID existir. */
   function authFailed(url, ip) {
     guard.authFailed(ip);
@@ -134,9 +146,21 @@ function startApi({
       return send(res, 400, 'bad request');
     }
 
-    // página inicial e verificação de saúde (públicas, sem dados)
+    // Caminho secreto: os endpoints dos servidores de jogo ficam sob /<segredo>/...
+    // Sem o segredo, nada daqui aparece (resposta neutra 404). As páginas do
+    // site (/app, /painel, /s, /badge) continuam públicas no caminho normal.
+    let gamePath = url.pathname;
+    let pathOk = true;
+    if (PFX) {
+      if (url.pathname === PFX || url.pathname.startsWith(`${PFX}/`)) gamePath = url.pathname.slice(PFX.length) || '/';
+      else pathOk = false;
+    }
+
+    // página inicial e verificação de saúde
     if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/health')) {
       if (url.pathname === '/health') return send(res, 200, 'OK');
+      // com caminho secreto, a raiz não revela nada sobre o EagleEYE
+      if (PFX) return send(res, 200, 'OK');
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
       return res.end(HOME_PAGE);
     }
@@ -184,8 +208,20 @@ function startApi({
 
     if (allowedIps.length && !allowedIps.includes(ip)) return send(res, 403, 'forbidden');
 
+    // Daqui pra baixo: endpoints dos servidores de jogo. Exigem o caminho
+    // secreto (quando configurado) e a chave de aplicação. Qualquer coisa fora
+    // disso responde 404 neutro, como um host qualquer sem nada publicado.
+    const isGameRoute = gamePath === '/plugin/license' || gamePath === '/ac/config'
+      || gamePath === '/ac/players' || gamePath === '/ac/report';
+    if (isGameRoute) {
+      if (!pathOk || !keyOk(url.searchParams.get('k'))) return send(res, 404, 'not found');
+    } else if (!pathOk) {
+      // tentou o caminho secreto errado para outra rota: não revela nada
+      return send(res, 404, 'not found');
+    }
+
     // o plugin confirma a licença aqui (resposta assinada; revogação em tempo real)
-    if (req.method === 'GET' && url.pathname === '/plugin/license') {
+    if (req.method === 'GET' && gamePath === '/plugin/license') {
       if (!licenses) return send(res, 404, 'licensing off');
       const key = (url.searchParams.get('key') || '').slice(0, 40);
       const id = (url.searchParams.get('id') || '').slice(0, 16);
@@ -193,7 +229,7 @@ function startApi({
       return send(res, 200, licenses.sign(key, id, nonce, ip).body);
     }
 
-    if (req.method === 'GET' && url.pathname === '/ac/config') {
+    if (req.method === 'GET' && gamePath === '/ac/config') {
       const auth = store.authServer(url.searchParams.get('id'), url.searchParams.get('token'));
       if (auth.error === 'pending') {
         // o bot ainda não conhece o servidor: guarda os dados para o /ac login reconhecer
@@ -236,7 +272,7 @@ function startApi({
       return send(res, 200, buildConfigResponse(srv, clientVersion, commands));
     }
 
-    if (req.method === 'POST' && url.pathname === '/ac/players') {
+    if (req.method === 'POST' && gamePath === '/ac/players') {
       const srv = authenticate(url, res, ip);
       if (!srv) return undefined;
       readBody(req, res, MAX_PLAYERS_BODY, (body) => {
@@ -251,7 +287,7 @@ function startApi({
       return undefined;
     }
 
-    if (req.method === 'POST' && url.pathname === '/ac/report') {
+    if (req.method === 'POST' && gamePath === '/ac/report') {
       const srv = authenticate(url, res, ip);
       if (!srv) return undefined;
       readBody(req, res, MAX_BODY, (body) => {

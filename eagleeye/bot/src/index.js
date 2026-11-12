@@ -93,6 +93,10 @@ startApi({
   security,
   webauth,
   blacklist,
+  // segurança/ocultação dos endpoints dos servidores de jogo:
+  // AC_PATH_SECRET -> prefixo secreto no caminho; AC_APP_KEY -> chave de aplicação (param k)
+  pathSecret: (process.env.AC_PATH_SECRET || '').trim(),
+  appKey: (process.env.AC_APP_KEY || '').trim(),
   onAuthCode: (server, code) => bot.deliverAuthCode(server, code),
 });
 

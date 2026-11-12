@@ -39,6 +39,8 @@
 namespace {
 
 std::string g_apiHost;
+std::string g_apiPath;   // caminho secreto (AC_PATH_SECRET), ex.: "/x7f3k9q2"
+std::string g_apiKey;    // chave de aplicacao (AC_APP_KEY), enviada em &k=
 std::string g_licenseKey;      // vem do config do servidor (ver loadLicenseKey)
 ee::Identity g_identity;
 ee::Grant g_grant;
@@ -74,7 +76,7 @@ std::string makeNonce() {
 // --- comunicacao com o bot -------------------------------------------------
 void checkLicense() {
     std::string nonce = makeNonce();
-    std::string path = "/plugin/license?key=" + g_licenseKey + "&id=" + g_identity.serverId + "&nonce=" + nonce;
+    std::string path = g_apiPath + "/plugin/license?key=" + g_licenseKey + "&id=" + g_identity.serverId + "&nonce=" + nonce + "&k=" + g_apiKey;
     ee::HttpResult r = ee::httpGet(g_apiHost, path);
     if (r.status != 200) return;  // sem resposta: mantem o grant anterior ate a graca vencer
     ee::Grant g = ee::verifyBotResponse(r.body, g_licenseKey, g_identity.serverId, g_sign, nonce);
@@ -88,8 +90,8 @@ void checkLicense() {
 void fetchConfig() {
     // monta /ac/config?id=&token=&... igual ao include; aplica a configuracao.
     // (parsing identico ao do include v2.2.0 - ver ee_detections.cpp)
-    std::string path = "/ac/config?id=" + g_identity.serverId + "&token=" + g_identity.token
-        + "&ver=plugin-2.2.0&rcw=0";
+    std::string path = g_apiPath + "/ac/config?id=" + g_identity.serverId + "&token=" + g_identity.token
+        + "&ver=plugin-2.5.0&rcw=0&k=" + g_apiKey;
     ee::HttpResult r = ee::httpGet(g_apiHost, path);
     if (r.status == 200) {
         // ee::detections::applyConfig(r.body);  // definido em ee_detections.cpp
@@ -134,6 +136,8 @@ PLUGIN_EXPORT bool PLUGIN_CALL Load(void** ppData) {
     sampgdk_init(ppData);
 
     g_apiHost = ee::secrets::apiHost();
+    g_apiPath = ee::secrets::apiPath();
+    g_apiKey = ee::secrets::apiKey();
     g_pepper = ee::secrets::pepper();
     g_sign = ee::secrets::signSecret();
     g_storeHmac = ee::secrets::storeHmac();

@@ -14,6 +14,8 @@ Crie `secrets.json` (fora do git) com os mesmos valores do `.env` do bot:
 ```json
 {
   "api_host": "eagleeye.discloud.dev",
+  "api_path": "<igual ao AC_PATH_SECRET do bot, ex.: /x7f3k9q2>",
+  "api_key": "<igual ao AC_APP_KEY do bot>",
   "license_pepper": "<igual ao AC_LICENSE_PEPPER do bot>",
   "license_sign": "<igual ao AC_LICENSE_SIGN do bot>",
   "store_phrase": "<frase só do plugin>",

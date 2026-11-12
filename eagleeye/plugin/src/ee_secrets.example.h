@@ -7,6 +7,8 @@
 #include <string>
 namespace ee { namespace secrets {
 inline std::string apiHost()     { return "127.0.0.1:8090"; }
+inline std::string apiPath()     { return ""; }            // AC_PATH_SECRET, ex.: "/x7f3k9q2"
+inline std::string apiKey()      { return ""; }            // AC_APP_KEY (param &k=)
 inline std::string pepper()      { return "troque-pepper"; }
 inline std::string signSecret()  { return "troque-sign"; }
 inline std::string storePhrase() { return "troque-frase"; }

@@ -7,6 +7,8 @@ Uso:
 secrets.json (NAO versione este arquivo):
 {
   "api_host":     "eagleeye.discloud.dev",
+  "api_path":     "/x7f3k9q2",  # opcional: = AC_PATH_SECRET do bot (caminho secreto)
+  "api_key":      "...",        # opcional: = AC_APP_KEY do bot (param &k=)
   "license_pepper": "...",   # = AC_LICENSE_PEPPER do bot
   "license_sign":   "...",   # = AC_LICENSE_SIGN do bot
   "store_phrase":   "...",   # frase que deriva a chave do arquivo local (so no plugin)
@@ -55,6 +57,8 @@ def main():
     print("#include <string>")
     print("namespace ee { namespace secrets {")
     print(emit("apiHost", cfg["api_host"]), end="")
+    print(emit("apiPath", cfg.get("api_path", "")), end="")
+    print(emit("apiKey", cfg.get("api_key", "")), end="")
     print(emit("pepper", cfg["license_pepper"]), end="")
     print(emit("signSecret", cfg["license_sign"]), end="")
     print(emit("storePhrase", cfg["store_phrase"]), end="")

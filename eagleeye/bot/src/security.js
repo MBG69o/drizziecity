@@ -3,7 +3,7 @@
 const { PROTECTIONS } = require('./protections');
 
 /** Versão mais recente do include (EE_VERSION em eagleeye.inc). */
-const LATEST_INCLUDE = '2.5.0';
+const LATEST_INCLUDE = '2.6.0';
 
 /** Proteções essenciais: se desligadas, o servidor fica muito exposto. */
 const CRITICAL = ['dinheiro', 'armas', 'jetpack', 'crasher', 'rcon', 'fakekill', 'airbreak', 'velocidade_pe', 'velocidade_veic', 'godmode'];

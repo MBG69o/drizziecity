@@ -1,5 +1,13 @@
 # 🦅 EagleEYE — Changelog
 
+## v2.6.0 — 12/11/2026
+
+### 🕵️ Endpoints da API ocultos e protegidos
+- **Caminho secreto** (`AC_PATH_SECRET`): os endpoints dos servidores de jogo passam a viver sob um prefixo secreto (ex.: `/x7f3k9q2/ac/config`). Sem ele, a raiz e os caminhos padrão respondem só `OK`/`404`, **sem revelar que ali roda um EagleEYE**.
+- **Chave de aplicação** (`AC_APP_KEY`): toda requisição de servidor precisa mandar `&k=<chave>`; sem ela ou errada, **404 neutro** (nem confirma que o endpoint existe). Comparação em tempo constante.
+- **Respostas neutras**: a página inicial deixa de anunciar a API quando o caminho secreto está ativo.
+- Suporte nas três camadas: include (`EE_API_PATH` / `EE_API_KEY`), plugin (segredos **ofuscados** `api_path` / `api_key` no binário — o cliente não vê) e bot. No plugin, por ser compilado, o host, o caminho e a chave ficam realmente escondidos.
+
 ## v2.5.0 — 12/11/2026
 
 ### 🌐 Site de gerenciamento completo (login em 2 etapas)

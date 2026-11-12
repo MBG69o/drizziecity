@@ -11,10 +11,19 @@
 	#error "[EagleEYE] Em filterscripts use <eagleeye_fs>, nao <eagleeye>."
 #endif
 
-#define EE_VERSION "2.5.0"
+#define EE_VERSION "2.6.0"
 
 #if !defined EE_API_HOST
 	#define EE_API_HOST "127.0.0.1:8090"
+#endif
+// Caminho secreto da API (AC_PATH_SECRET no bot). Ex.: "/x7f3k9q2".
+// Deixe vazio para usar os caminhos padrao. Comece com "/" e sem "/" no fim.
+#if !defined EE_API_PATH
+	#define EE_API_PATH ""
+#endif
+// Chave de aplicacao (AC_APP_KEY no bot): enviada em &k=. Vazio = sem chave.
+#if !defined EE_API_KEY
+	#define EE_API_KEY ""
 #endif
 #if !defined EE_ID_FILE
 	#define EE_ID_FILE "eagleeye_servidor.cfg"
@@ -812,12 +821,12 @@ static stock EE_SaveIdentity()
 static stock EE_ReportRaw(playerid, const name[], const ip[], code, action, hits, const detail[])
 {
 	if (gEE_ServerId[0] == EOS) return;
-	new ename[MAX_PLAYER_NAME * 3 + 1], edetail[200], body[400], url[256];
+	new ename[MAX_PLAYER_NAME * 3 + 1], edetail[200], body[400], url[352];
 	EE_UrlEncode(name, ename);
 	EE_UrlEncode(detail, edetail);
 	format(body, sizeof body, "id=%d&nome=%s&ip=%s&cod=%d&acao=%d&hits=%d&tol=%d&det=%s",
 		playerid, ename, ip, code, action, hits, gEE_Prot[code][dpTolerance], edetail);
-	format(url, sizeof url, "%s/ac/report?id=%s&token=%s", EE_API_HOST, gEE_ServerId, gEE_Token);
+	format(url, sizeof url, "%s%s/ac/report?id=%s&token=%s&k=%s", EE_API_HOST, EE_API_PATH, gEE_ServerId, gEE_Token, EE_API_KEY);
 	HTTP(2, HTTP_POST, url, body, "EE_OnReport");
 }
 
@@ -831,7 +840,7 @@ static stock EE_Report(playerid, code, action, hits, const detail[])
 static stock EE_SendPlayerList()
 {
 	if (gEE_ServerId[0] == EOS) return;
-	new name[MAX_PLAYER_NAME + 1], ename[MAX_PLAYER_NAME * 3 + 1], entry[96], url[256], count = 0;
+	new name[MAX_PLAYER_NAME + 1], ename[MAX_PLAYER_NAME * 3 + 1], entry[96], url[352], count = 0;
 	gEE_PListBody = "p=";
 	for (new i = 0, j = GetPlayerPoolSize(); i <= j && count < 80; i++)
 	{
@@ -842,7 +851,7 @@ static stock EE_SendPlayerList()
 		strcat(gEE_PListBody, entry);
 		count++;
 	}
-	format(url, sizeof url, "%s/ac/players?id=%s&token=%s", EE_API_HOST, gEE_ServerId, gEE_Token);
+	format(url, sizeof url, "%s%s/ac/players?id=%s&token=%s&k=%s", EE_API_HOST, EE_API_PATH, gEE_ServerId, gEE_Token, EE_API_KEY);
 	HTTP(3, HTTP_POST, url, gEE_PListBody, "EE_OnReport");
 }
 
@@ -984,9 +993,9 @@ static stock EE_Poll()
 	new host[64], ehost[192], url[512];
 	GetConsoleVarAsString(EE_CVAR_NAME, host, sizeof host);
 	EE_UrlEncode(host, ehost);
-	format(url, sizeof url, "%s/ac/config?id=%s&token=%s&v=%d&players=%d&ack=%d&max=%d&port=%d&ver=%s&rcw=%d&host=%s",
-		EE_API_HOST, gEE_ServerId, gEE_Token, gEE_Version, players, gEE_LastCmd, GetMaxPlayers(), GetConsoleVarAsInt(EE_CVAR_PORT),
-		EE_VERSION, EE_IsRconWeak() ? 1 : 0, ehost);
+	format(url, sizeof url, "%s%s/ac/config?id=%s&token=%s&v=%d&players=%d&ack=%d&max=%d&port=%d&ver=%s&rcw=%d&k=%s&host=%s",
+		EE_API_HOST, EE_API_PATH, gEE_ServerId, gEE_Token, gEE_Version, players, gEE_LastCmd, GetMaxPlayers(), GetConsoleVarAsInt(EE_CVAR_PORT),
+		EE_VERSION, EE_IsRconWeak() ? 1 : 0, EE_API_KEY, ehost);
 	gEE_PollPending = true;
 	gEE_PollSentTick = tick;
 	HTTP(0, HTTP_GET, url, "", "EE_OnConfig");
