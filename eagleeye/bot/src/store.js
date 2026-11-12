@@ -79,6 +79,7 @@ function defaultServer(id) {
     lastSummaryDay: null,
     notifyMode: 'ambos',    // notificações de segurança: ambos | dm | canal | desligado
     notifyState: {},        // último envio de cada tipo (anti-spam)
+    publicBadge: false,     // selo/página de status pública ligados pelo dono
   };
 }
 

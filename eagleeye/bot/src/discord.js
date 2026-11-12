@@ -25,13 +25,14 @@ const MAX_IMPORT_BYTES = 64 * 1024;
 const PERIODS = { '24h': 24 * 3600e3, '7d': 7 * 24 * 3600e3, '30d': 30 * 24 * 3600e3 };
 const PERIOD_LABEL = { '24h': 'últimas 24 horas', '7d': 'últimos 7 dias', '30d': 'últimos 30 dias' };
 // comandos que funcionam sem servidor ativo
-const NO_SERVER_SUBS = new Set(['login', 'meuservidor', 'servidor/lista', 'servidor/usar']);
+const NO_SERVER_SUBS = new Set(['login', 'meuservidor', 'servidor/lista', 'servidor/usar', 'painelweb']);
 // comandos que exigem ser dono do servidor
 const OWNER_SUBS = new Set(['servidor/logout', 'servidor/novachave']);
 const TIMEZONE = process.env.AC_TIMEZONE || 'America/Sao_Paulo';
 
 function createDiscordBot({
-  store, permissions, token, projectGuildId, alertChannelId = null, licenses = null, blacklist = null, logger = console,
+  store, permissions, token, projectGuildId, alertChannelId = null, licenses = null, blacklist = null,
+  trust = null, dashboard = null, publicBaseUrl = '', logger = console,
 }) {
   if (!projectGuildId) throw new Error('projectGuildId é obrigatório (o bot só funciona no Discord do projeto).');
   const client = new Client({ intents: [GatewayIntentBits.Guilds] });
@@ -257,6 +258,22 @@ function createDiscordBot({
       return interaction.reply(activationMessage(server, userId));
     }
 
+    if (sub === 'painelweb') {
+      if (!dashboard) return reply(interaction, '❌ O painel web não está disponível nesta instância.');
+      const mine = store.serversOfUser(userId, permissions.isBotAdmin(interaction));
+      if (!mine.length) return reply(interaction, '❌ Você não tem nenhum servidor. Use `/ac login token:<TOKEN>` primeiro.');
+      const token = dashboard.issue(userId);
+      const base = publicBaseUrl || 'https://SEU-DOMINIO.discloud.dev';
+      const link = `${base}/painel?t=${token}`;
+      return reply(interaction, [
+        '🖥️ **Painel web ao vivo** — seus servidores, jogadores e detecções em tempo real no navegador:',
+        link,
+        '',
+        '⚠️ Esse link é **pessoal e secreto** (dá acesso de leitura aos seus dados). Não compartilhe. Gerar de novo invalida o anterior; vale 30 dias.',
+        publicBaseUrl ? '' : '_Obs.: defina `AC_PUBLIC_URL` no bot para o link já sair com o domínio certo._',
+      ].filter(Boolean).join('\n'));
+    }
+
     if (sub === 'servidor/lista') {
       const list = store.serversOfUser(userId, permissions.isBotAdmin(interaction));
       if (!list.length) return reply(interaction, 'Você não tem acesso a nenhum servidor. Use `/ac login token:<TOKEN>`.');
@@ -374,6 +391,7 @@ function createDiscordBot({
 
     if (group === 'imune') return handleWhitelist(interaction, server, sub);
     if (group === 'donos') return handleOwners(interaction, server, sub);
+    if (group === 'selo') return handleSelo(interaction, server, sub);
 
     const pollMsg = `O servidor aplica em até ${server.pollSeconds}s.`;
 
@@ -625,9 +643,11 @@ function createDiscordBot({
       case 'jogador': {
         const nick = interaction.options.getString('nick', true).trim();
         const info = store.playerInfo(server, nick);
-        if (!info.total && !info.bans.length) return reply(interaction, `Nenhum registro para **${escapeMarkdown(nick)}**.`);
+        const rep = trust && server.owners[0] ? trust.get(server.owners[0], nick) : null;
+        if (!info.total && !info.bans.length && !(rep && rep.known)) return reply(interaction, `Nenhum registro para **${escapeMarkdown(nick)}**.`);
         const embed = new EmbedBuilder().setTitle(`🧍 ${nick}`.slice(0, 256)).setColor(info.bans.some((b) => !b.unbannedAt) ? COLORS.ban : COLORS.warn)
           .addFields(
+            ...(rep ? [{ name: 'Reputação (trust score)', value: `${rep.emoji} **${rep.score}/100** — ${rep.label}` }] : []),
             { name: 'Detecções', value: `**${info.total}** · primeira ${info.first ? ts(info.first) : '-'} · última ${info.last ? ts(info.last) : '-'}` },
             { name: 'Por proteção', value: info.byProtection.map(([c, n]) => `${protName(c)}: **${n}**`).join('\n').slice(0, 1024) || '-', inline: true },
             { name: 'IPs usados', value: info.ips.map((ip) => `||${ip}||`).join('\n').slice(0, 1024) || '-', inline: true },
@@ -822,6 +842,41 @@ function createDiscordBot({
       `Aplicado em **${servers.length}** servidor(es) seu(s)${online < servers.length ? ` (${online} online agora; os demais aplicam quando voltarem)` : ''}.`,
       motivo ? `Motivo: ${escapeMarkdown(motivo)}` : '',
     ].filter(Boolean).join('\n'));
+  }
+
+  // ------------------------------------------- selo público / status
+  async function handleSelo(interaction, server, sub) {
+    const base = publicBaseUrl || 'https://SEU-DOMINIO.discloud.dev';
+    const statusUrl = `${base}/s/${server.id}`;
+    const badgeUrl = `${base}/badge/${server.id}.svg`;
+    if (sub === 'ver') {
+      if (!server.publicBadge) return reply(interaction, 'O selo público está **desligado**. Ligue com `/ac selo publico`.');
+      return reply(interaction, [
+        `🔗 **Página de status:** ${statusUrl}`,
+        `🖼️ **Selo (imagem):** ${badgeUrl}`,
+        '',
+        'Cole no fórum/site do servidor. Em BBCode:',
+        '```',
+        `[url=${statusUrl}][img]${badgeUrl}[/img][/url]`,
+        '```',
+        'Em HTML:',
+        '```',
+        `<a href="${statusUrl}"><img src="${badgeUrl}" alt="Protegido por EagleEYE"></a>`,
+        '```',
+      ].join('\n'));
+    }
+    if (!permissions.isOwner(server, interaction)) return reply(interaction, '⛔ Apenas donos do servidor podem ligar/desligar o selo público.');
+    const on = sub === 'publico';
+    store.updateServer(server, (s) => { s.publicBadge = on; }, { bump: false });
+    audit(interaction, server, `selo publico = ${on}`);
+    if (!on) return reply(interaction, '🔒 Selo público **desligado**. A página de status e o selo ficam indisponíveis.');
+    return reply(interaction, [
+      `🏷️ Selo público **ligado** para ${serverLabel(server)}!`,
+      'A página de status mostra só: nome, online/offline, anti-cheat ligado, nota de segurança e nº de jogadores — **nada sensível**.',
+      `🔗 ${statusUrl}`,
+      `🖼️ ${badgeUrl}`,
+      'Use `/ac selo ver` para pegar o código pronto do fórum/site.',
+    ].join('\n'));
   }
 
   async function handleOwners(interaction, server, sub) {

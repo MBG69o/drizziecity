@@ -5,6 +5,8 @@ const { URL, URLSearchParams } = require('url');
 const { buildConfigResponse } = require('./config-format');
 const { byId } = require('./protections');
 const { Guard } = require('./guard');
+const { buildData, loginPage, dashboardPage, gradeLetter } = require('./dashboard');
+const { badgeSvg, statusPage, stateOf } = require('./badge');
 
 const MAX_BODY = 4096;
 const MAX_PLAYERS_BODY = 16384;
@@ -55,7 +57,7 @@ function cleanName(name) {
 function startApi({
   store, host, port, allowedIps = [], trustProxy = false, onDetection, logger = console,
   guard = new Guard(), maxConnections = 1000, onAuthFail = () => {}, onStatus = () => {},
-  licenses = null, requireLicense = false,
+  licenses = null, requireLicense = false, dashboard = null, trust = null, security = null,
 }) {
   /** Token errado: conta para o bloqueio do IP e avisa o dono se o ID existir. */
   function authFailed(url, ip) {
@@ -134,6 +136,42 @@ function startApi({
       if (url.pathname === '/health') return send(res, 200, 'OK');
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
       return res.end(HOME_PAGE);
+    }
+
+    // ---- Dashboard web ao vivo (acesso por token pessoal do dono) ----
+    if (dashboard && req.method === 'GET' && url.pathname === '/painel') {
+      const t = (url.searchParams.get('t') || '').trim().slice(0, 64);
+      const owner = t ? dashboard.resolve(t) : null;
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+      return res.end(owner ? dashboardPage(t) : loginPage(t ? 'Token inválido ou expirado. Gere um novo com /ac painel.' : ''));
+    }
+    if (dashboard && req.method === 'GET' && url.pathname === '/painel/dados') {
+      const owner = dashboard.resolve((url.searchParams.get('t') || '').trim().slice(0, 64));
+      if (!owner) return send(res, 401, 'unauthorized');
+      const data = buildData(store, trust, security, owner);
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+      return res.end(JSON.stringify(data));
+    }
+
+    // ---- Selo público + página de status (só se o dono ligou; sem dados sensíveis) ----
+    if (req.method === 'GET' && (url.pathname.startsWith('/s/') || url.pathname.startsWith('/badge/'))) {
+      const isBadge = url.pathname.startsWith('/badge/');
+      const rawId = isBadge ? url.pathname.slice(7).replace(/\.svg$/i, '') : url.pathname.slice(3);
+      const srv = store.getServer(decodeURIComponent(rawId).slice(0, 32));
+      if (!srv || !srv.publicBadge) {
+        if (isBadge) { res.writeHead(200, { 'Content-Type': 'image/svg+xml; charset=utf-8', 'Cache-Control': 'no-store' }); return res.end(badgeSvg('desligado')); }
+        return send(res, 404, 'not found');
+      }
+      const st = store.getStatus(srv);
+      const online = store.isServerOnline(srv);
+      const acOn = Boolean(srv.global) && srv.activated !== false;
+      if (isBadge) {
+        res.writeHead(200, { 'Content-Type': 'image/svg+xml; charset=utf-8', 'Cache-Control': 'max-age=60' });
+        return res.end(badgeSvg(stateOf(online, acOn)));
+      }
+      const rep = security ? security.securityReport(store, srv) : { grade: '-', score: null };
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+      return res.end(statusPage({ name: srv.name, id: srv.id, online, acOn, grade: rep.grade, gradeLetter: gradeLetter(rep.score), players: st.players || 0, maxPlayers: st.maxPlayers || 0 }));
     }
 
     if (allowedIps.length && !allowedIps.includes(ip)) return send(res, 403, 'forbidden');
@@ -226,6 +264,9 @@ function startApi({
           detail: (p.get('det') || '-').slice(0, 128),
         };
         store.addDetection(srv, det);
+        if (trust && srv.owners && srv.owners[0]) {
+          try { trust.record(srv.owners[0], det.name, { action: det.action, serverId: srv.id, now: det.time }); } catch (e) { logger.error('[api] trust', e.message); }
+        }
         try {
           onDetection(srv, det);
         } catch (err) {

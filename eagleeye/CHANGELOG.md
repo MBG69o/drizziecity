@@ -1,5 +1,20 @@
 # 🦅 EagleEYE — Changelog
 
+## v2.4.0 — 12/11/2026
+
+### 🖥️ Dashboard web ao vivo
+- Painel no navegador, servido pela mesma API da Discloud, com **todos os seus servidores em tempo real**: online/offline, jogadores, detecções das últimas 24h, nota de segurança e os piores jogadores por reputação. Atualiza sozinho a cada 8s.
+- Acesso por **link pessoal e secreto** gerado no Discord com **`/ac painelweb`** (token de leitura, vale 30 dias; gerar de novo invalida o anterior).
+- Defina `AC_PUBLIC_URL` (ex.: `https://eagleeye.discloud.dev`) para o link já sair com o domínio certo.
+
+### 🏷️ Selo público "Protegido por EagleEYE" + página de status
+- **`/ac selo publico`** liga uma página de status pública e um **selo em imagem (SVG)** para o dono exibir no fórum/site do servidor. **`/ac selo ver`** entrega o código pronto (BBCode e HTML).
+- A página e o selo **não expõem nada sensível**: só nome, online/offline, anti-cheat ligado, nota e nº de jogadores. Desligado por padrão (`/ac selo privado`).
+
+### 🧠 Trust Score (reputação de jogador)
+- Cada jogador ganha uma **nota de confiança de 0 a 100**, por dono e compartilhada entre os servidores dele: cai a cada detecção (aviso −2, kick −8, ban −25) e sobe sozinha com o tempo limpo.
+- Classificação 🟢 confiável / 🟡 observação / 🟠 risco / 🔴 crítico, visível em **`/ac jogador`** e no dashboard (piores reputações).
+
 ## v2.3.0 — 12/11/2026
 
 ### 🛡️ 8 novas proteções (agora 42 no total)

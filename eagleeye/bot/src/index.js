@@ -9,6 +9,9 @@ const { createDiscordBot } = require('./discord');
 const { Guard } = require('./guard');
 const { Licenses } = require('./licenses');
 const { Blacklist } = require('./blacklist');
+const { Dashboard } = require('./dashboard');
+const { Trust } = require('./trust');
+const security = require('./security');
 
 function fail(msg) {
   console.error(`[config] ${msg}`);
@@ -43,6 +46,11 @@ const permissions = new Permissions({ botAdminIds: parseIds(process.env.AC_BOT_A
 const blacklist = new Blacklist(dataDir);
 console.log('[blacklist] lista negra compartilhada carregada.');
 
+// Reputação de jogador (trust score) e dashboard web ao vivo
+const trust = new Trust(dataDir);
+const dashboard = new Dashboard(dataDir);
+console.log('[painel] dashboard web e reputação de jogador prontos.');
+
 const bot = createDiscordBot({
   store,
   permissions,
@@ -52,6 +60,10 @@ const bot = createDiscordBot({
   alertChannelId: (process.env.AC_ALERT_CHANNEL_ID ?? '1569638075166892072').trim() || null,
   licenses,
   blacklist,
+  trust,
+  dashboard,
+  // base pública do painel/selo (ex.: https://eagleeye.discloud.dev)
+  publicBaseUrl: (process.env.AC_PUBLIC_URL || '').trim().replace(/\/+$/, ''),
 });
 
 // AC_API_PORT tem prioridade; PORT é a variável usada por várias hospedagens de sites
@@ -73,6 +85,9 @@ startApi({
   onStatus: (server, status) => bot.notifier.onStatus(server, status),
   licenses,
   requireLicense,
+  dashboard,
+  trust,
+  security,
 });
 
 bot.start().catch((err) => fail(`Não foi possível conectar ao Discord: ${err.message}`));
