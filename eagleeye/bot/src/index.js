@@ -11,6 +11,7 @@ const { Licenses } = require('./licenses');
 const { Blacklist } = require('./blacklist');
 const { Dashboard } = require('./dashboard');
 const { Trust } = require('./trust');
+const { WebAuth } = require('./webauth');
 const security = require('./security');
 
 function fail(msg) {
@@ -49,7 +50,9 @@ console.log('[blacklist] lista negra compartilhada carregada.');
 // Reputação de jogador (trust score) e dashboard web ao vivo
 const trust = new Trust(dataDir);
 const dashboard = new Dashboard(dataDir);
-console.log('[painel] dashboard web e reputação de jogador prontos.');
+// Site de gerenciamento com login em 2 etapas (token -> código de 5 min)
+const webauth = new WebAuth();
+console.log('[painel] dashboard web, site de gerenciamento e reputação prontos.');
 
 const bot = createDiscordBot({
   store,
@@ -88,6 +91,8 @@ startApi({
   dashboard,
   trust,
   security,
+  webauth,
+  onAuthCode: (server, code) => bot.deliverAuthCode(server, code),
 });
 
 bot.start().catch((err) => fail(`Não foi possível conectar ao Discord: ${err.message}`));

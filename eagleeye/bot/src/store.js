@@ -227,6 +227,27 @@ class Store {
     return { server, created: true };
   }
 
+  /**
+   * Valida um token SEM efeito colateral (não cria nem muda posse).
+   * Usado pelo login do site (1ª etapa, antes do código).
+   * @returns {{ok:true, server:object|null, id:string, pending:boolean}|{ok:false, error:'format'|'token'|'notseen', id?:string}}
+   */
+  resolveToken(text) {
+    const tok = normalizeToken(text);
+    if (!tok) return { ok: false, error: 'format' };
+    const id = tokenId(tok);
+    const h = hashToken(tok);
+    const existing = this.getServer(id);
+    if (existing) {
+      const ok = (existing.tokenHash && safeEqualStr(h, existing.tokenHash))
+        || (existing.pendingTokenHash && safeEqualStr(h, existing.pendingTokenHash));
+      return ok ? { ok: true, server: existing, id, pending: false } : { ok: false, error: 'token', id };
+    }
+    const seen = this.getPending(id);
+    if (!seen || !safeEqualStr(h, seen.tokenHash)) return { ok: false, error: 'notseen', id };
+    return { ok: true, server: null, id, pending: true };
+  }
+
   /** Altera a configuração. bump=true faz o servidor do jogo recarregar. */
   updateServer(server, mutator, { bump = true } = {}) {
     mutator(server);

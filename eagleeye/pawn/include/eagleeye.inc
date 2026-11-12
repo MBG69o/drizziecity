@@ -11,7 +11,7 @@
 	#error "[EagleEYE] Em filterscripts use <eagleeye_fs>, nao <eagleeye>."
 #endif
 
-#define EE_VERSION "2.4.0"
+#define EE_VERSION "2.5.0"
 
 #if !defined EE_API_HOST
 	#define EE_API_HOST "127.0.0.1:8090"
@@ -1038,6 +1038,19 @@ static stock EE_RunCommand(id, const type[], const arg[])
 		format(cmd, sizeof cmd, "banip %s", arg);
 		SendRconCommand(cmd);
 		printf("[EagleEYE] IP %s banido via Discord (blacklist).", arg);
+	}
+	else if (!strcmp(type, "authcode"))
+	{
+		new len = strlen(arg);
+		if (len < 4 || len > 8) return;
+		for (new i = 0; i < len; i++) if (!('0' <= arg[i] <= '9')) return;
+		print(" ");
+		print("===================== EagleEYE =====================");
+		printf("  Codigo de acesso ao site (vale 5 min): %s", arg);
+		print("  Use esse codigo para entrar no painel web.");
+		print("  Se voce nao pediu, ignore.");
+		print("====================================================");
+		print(" ");
 	}
 	else if (!strcmp(type, "kickname"))
 	{

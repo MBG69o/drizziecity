@@ -1162,11 +1162,36 @@ function createDiscordBot({
   }
   setInterval(() => { try { checkServers(); } catch (err) { logger.error('[tarefas]', err); } }, 30 * 1000).unref();
 
+  // Entrega o código de acesso do site (login 2 etapas) por DM aos donos.
+  // Retorna true se havia pelo menos um dono para avisar.
+  function deliverAuthCode(server, code) {
+    const owners = server.owners || [];
+    if (!owners.length) return false;
+    const embed = new EmbedBuilder()
+      .setTitle('🔐 Código de acesso ao site EagleEYE')
+      .setColor(COLORS.info)
+      .setDescription([
+        `Alguém pediu acesso ao painel de **${escapeMarkdown(server.name)}** usando o token deste servidor.`,
+        '',
+        `Seu código é: **\`${code}\`**`,
+        'Ele vale **5 minutos** e serve para **um** login.',
+        '',
+        '⚠️ Se não foi você, **ignore** — sem o código ninguém entra. Considere trocar o token com `/ac servidor novachave`.',
+      ].join('\n'))
+      .setFooter({ text: server.id })
+      .setTimestamp();
+    for (const id of owners) {
+      client.users.fetch(id).then((u) => u.send({ embeds: [embed] })).catch(() => {});
+    }
+    return true;
+  }
+
   return {
     client,
     notifier,
     enqueueDetection,
     checkServers,
+    deliverAuthCode,
     start: () => client.login(token),
   };
 }

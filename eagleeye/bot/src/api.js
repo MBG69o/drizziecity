@@ -7,6 +7,7 @@ const { byId } = require('./protections');
 const { Guard } = require('./guard');
 const { buildData, loginPage, dashboardPage, gradeLetter } = require('./dashboard');
 const { badgeSvg, statusPage, stateOf } = require('./badge');
+const { handleWebApp } = require('./webapp');
 
 const MAX_BODY = 4096;
 const MAX_PLAYERS_BODY = 16384;
@@ -27,7 +28,8 @@ const HOME_PAGE = `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"
 <title>EagleEYE API</title><style>body{font-family:system-ui,sans-serif;background:#0f1115;color:#e6e6e6;display:grid;place-items:center;min-height:100vh;margin:0}
 main{max-width:520px;padding:24px;text-align:center}h1{margin:0 0 8px}p{color:#a8b0bd;line-height:1.5}code{background:#1c2029;padding:2px 6px;border-radius:4px}</style></head>
 <body><main><h1>🦅 EagleEYE API</h1><p>API online. Os servidores SA-MP/open.mp se conectam aqui com o token gerado pelo include,
-e os donos fazem <code>/ac login</code> no Discord do projeto.</p></main></body></html>`;
+e os donos fazem <code>/ac login</code> no Discord do projeto.</p>
+<p><a href="/app" style="color:#4aa3ff;font-weight:600">Entrar no gerenciador &rarr;</a></p></main></body></html>`;
 
 function send(res, status, body, headers = {}) {
   if (res.headersSent) return;
@@ -58,6 +60,7 @@ function startApi({
   store, host, port, allowedIps = [], trustProxy = false, onDetection, logger = console,
   guard = new Guard(), maxConnections = 1000, onAuthFail = () => {}, onStatus = () => {},
   licenses = null, requireLicense = false, dashboard = null, trust = null, security = null,
+  webauth = null, onAuthCode = null,
 }) {
   /** Token errado: conta para o bloqueio do IP e avisa o dono se o ID existir. */
   function authFailed(url, ip) {
@@ -172,6 +175,11 @@ function startApi({
       const rep = security ? security.securityReport(store, srv) : { grade: '-', score: null };
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
       return res.end(statusPage({ name: srv.name, id: srv.id, online, acOn, grade: rep.grade, gradeLetter: gradeLetter(rep.score), players: st.players || 0, maxPlayers: st.maxPlayers || 0 }));
+    }
+
+    // ---- site de gerenciamento (login por token + código, gestão de proteções) ----
+    if (webauth && (url.pathname === '/app' || url.pathname.startsWith('/app/'))) {
+      if (handleWebApp(req, res, url, { store, webauth, trust, security, send, readBody, logger, onAuthCode })) return undefined;
     }
 
     if (allowedIps.length && !allowedIps.includes(ip)) return send(res, 403, 'forbidden');

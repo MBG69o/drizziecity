@@ -1,5 +1,12 @@
 # 🦅 EagleEYE — Changelog
 
+## v2.5.0 — 12/11/2026
+
+### 🌐 Site de gerenciamento completo (login em 2 etapas)
+- Um site no navegador (`/app`, servido pela própria API) onde o cliente **ativa/desliga proteções, ajusta ação/tolerância/limite, liga/desliga o anti-cheat, manda aviso no jogo e vê as detecções recentes e a reputação dos jogadores** — tudo sem precisar do Discord.
+- **Login seguro em 2 etapas:** o cliente informa o **token do servidor** e recebe um **código de 6 dígitos válido por 5 minutos**, entregue **no console do servidor** (comando `authcode`) e, se houver dono vinculado, **na DM do Discord**. Só com o código o login é concluído.
+- Código de uso único, no máximo 5 tentativas; sessão deslizante de 2h; escopo restrito aos servidores do próprio cliente (um cliente nunca vê o de outro). As mudanças chegam ao servidor em segundos, como nos comandos do Discord.
+
 ## v2.4.0 — 12/11/2026
 
 ### 🖥️ Dashboard web ao vivo
