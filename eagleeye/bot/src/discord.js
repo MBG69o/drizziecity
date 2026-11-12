@@ -16,6 +16,7 @@ const { PRESETS } = require('./presets');
 const { collectStats, buildPresenceTexts } = require('./presence');
 const { createNotifier } = require('./notifier');
 const { securityReport, CRITICAL } = require('./security');
+const { Lockdown } = require('./lockdown');
 
 const MAX_WHITELIST = 64;
 const LOGIN_MAX_FAILS = 5;
@@ -30,7 +31,7 @@ const OWNER_SUBS = new Set(['servidor/logout', 'servidor/novachave']);
 const TIMEZONE = process.env.AC_TIMEZONE || 'America/Sao_Paulo';
 
 function createDiscordBot({
-  store, permissions, token, projectGuildId, alertChannelId = null, licenses = null, logger = console,
+  store, permissions, token, projectGuildId, alertChannelId = null, licenses = null, blacklist = null, logger = console,
 }) {
   if (!projectGuildId) throw new Error('projectGuildId é obrigatório (o bot só funciona no Discord do projeto).');
   const client = new Client({ intents: [GatewayIntentBits.Guilds] });
@@ -351,7 +352,7 @@ function createDiscordBot({
 
     // quem tem mais de 1 servidor escolhe em qual o comando vai agir
     const picked = interaction.pickedServer || null;
-    const pickable = !NO_SERVER_SUBS.has(full) || full === 'meuservidor';
+    const pickable = (!NO_SERVER_SUBS.has(full) || full === 'meuservidor') && group !== 'blacklist';
     if (pickable && !picked) {
       const mine = store.serversOfUser(interaction.user.id, permissions.isBotAdmin(interaction));
       if (mine.length > 1) return askServer(interaction, full, mine);
@@ -360,6 +361,7 @@ function createDiscordBot({
 
     if (NO_SERVER_SUBS.has(full)) return handleServerCommands(interaction, full);
     if (group === 'licenca') return handleLicense(interaction, sub);
+    if (group === 'blacklist') return handleBlacklist(interaction, sub);
 
     const server = picked || store.activeServerFor(interaction.user.id);
     if (!server) return reply(interaction, '❌ Você não tem nenhum servidor. Use `/ac login token:<TOKEN>` (o token de acesso aparece no console do servidor).');
@@ -762,6 +764,66 @@ function createDiscordBot({
     return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
   }
 
+  // ---------------------------------------------- blacklist (ban cruzado)
+  // A lista é por dono: compartilhada entre TODOS os servidores dele.
+  async function handleBlacklist(interaction, sub) {
+    if (!blacklist) return reply(interaction, '❌ Blacklist indisponível nesta instância.');
+    const mine = store.serversOfUser(interaction.user.id, permissions.isBotAdmin(interaction));
+    if (!mine.length) return reply(interaction, '❌ Você não tem nenhum servidor. Use `/ac login token:<TOKEN>`.');
+    // só donos mexem na blacklist
+    const asOwner = mine.filter((s) => permissions.isOwner(s, interaction));
+    const servers = asOwner.length ? asOwner : mine;
+    const ownerKey = servers[0].owners[0] || interaction.user.id;
+
+    if (sub === 'listar') {
+      const list = blacklist.listFor(ownerKey);
+      if (!list.length) return reply(interaction, 'Sua lista negra está vazia. Adicione com `/ac blacklist adicionar`.');
+      const lines = list.slice(0, 40).map((e) => {
+        const alvo = e.kind === 'ip' ? `IP \`${e.value}\`` : `nick **${escapeMarkdown(e.value)}**`;
+        return `🚫 ${alvo}${e.reason ? ` — ${escapeMarkdown(e.reason)}` : ''} · <t:${Math.floor(e.at / 1000)}:R>`;
+      });
+      const embed = new EmbedBuilder().setTitle('🚫 Lista negra (seus servidores)').setColor(COLORS.ban)
+        .setDescription(lines.join('\n').slice(0, 4000)).setFooter({ text: `${list.length} entrada(s)` });
+      return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
+    }
+
+    const nick = (interaction.options.getString('nick') || '').trim();
+    const ip = (interaction.options.getString('ip') || '').trim();
+    if (!nick && !ip) return reply(interaction, '❌ Informe um **nick** ou um **IP**.');
+    if (ip && !isValidIPv4Pattern(ip)) return reply(interaction, '❌ IP inválido. Use 177.10.20.30 (ou 177.10.*.*).');
+    if (nick && !isValidNick(nick)) return reply(interaction, '❌ Nick inválido (3-24 caracteres: letras, números e _[]().$@=).');
+
+    if (sub === 'remover') {
+      let n = 0;
+      if (ip && blacklist.remove(ownerKey, 'ip', ip)) n++;
+      if (nick && blacklist.remove(ownerKey, 'nome', nick)) n++;
+      if (!n) return reply(interaction, 'Nada foi removido (não estava na lista).');
+      // manda desbanir o IP nos servidores online
+      if (ip) for (const s of servers) store.queueCommand(s, 'unbanip', ip);
+      return reply(interaction, `✅ Removido da lista negra. ${ip ? 'Pedido de desban de IP enviado aos seus servidores.' : ''}`);
+    }
+
+    // adicionar
+    const motivo = (interaction.options.getString('motivo') || '').trim();
+    const added = [];
+    if (ip) { blacklist.add(ownerKey, { kind: 'ip', value: ip, name: nick, reason: motivo, by: interaction.user.id }); added.push(`IP \`${ip}\``); }
+    if (nick) { blacklist.add(ownerKey, { kind: 'nome', value: nick, reason: motivo, by: interaction.user.id }); added.push(`nick **${escapeMarkdown(nick)}**`); }
+
+    // propaga o ban para todos os servidores online do dono
+    let online = 0;
+    for (const s of servers) {
+      if (ip) store.queueCommand(s, 'banip', ip);
+      if (nick) store.queueCommand(s, 'kickname', nick);
+      if (store.isServerOnline(s)) online++;
+    }
+    logger.log(`[blacklist] ${interaction.user.tag} + ${added.join(' / ')} (dono ${ownerKey}, ${servers.length} servidor(es))`);
+    return reply(interaction, [
+      `🚫 Adicionado à sua lista negra: ${added.join(' e ')}.`,
+      `Aplicado em **${servers.length}** servidor(es) seu(s)${online < servers.length ? ` (${online} online agora; os demais aplicam quando voltarem)` : ''}.`,
+      motivo ? `Motivo: ${escapeMarkdown(motivo)}` : '',
+    ].filter(Boolean).join('\n'));
+  }
+
   async function handleOwners(interaction, server, sub) {
     if (sub === 'listar') {
       return reply(interaction, [
@@ -954,8 +1016,63 @@ function createDiscordBot({
   }
 
   const lastOnline = new Map(); // serverId -> boolean (só depois do 1º contato)
+  const lockdowns = new Map();  // serverId -> Lockdown (modo escudo anti-ataque)
+
+  // Modo escudo: liga/renova/reverte o endurecimento temporário das proteções.
+  function runLockdown(server, now) {
+    let ld = lockdowns.get(server.id);
+    if (!ld) { ld = new Lockdown({ durationMs: 10 * 60 * 1000 }); lockdowns.set(server.id, ld); }
+
+    // 1) expirou? reverte as proteções endurecidas
+    if (ld.expired(now)) {
+      const codes = ld.clear();
+      if (codes.length && ld.savedProt.size) {
+        store.updateServer(server, (s) => {
+          for (const c of codes) {
+            const key = byId.get(c)?.key; const orig = ld.savedProt.get(c);
+            if (key && orig) s.protections[key] = { ...orig };
+          }
+        });
+        ld.savedProt.clear();
+        const emb = new EmbedBuilder().setTitle('🛡️ Modo escudo encerrado').setColor(COLORS.ok)
+          .setDescription(`O ataque passou em **${escapeMarkdown(server.name)}**. As proteções endurecidas voltaram ao que você tinha configurado.`)
+          .setFooter({ text: server.id }).setTimestamp();
+        if (server.alerts) sendToServer(server, [emb]);
+        sendAlert(emb);
+      }
+    }
+
+    // 2) ataque em curso? endurece as proteções abusadas (ban imediato)
+    if (server.global && server.activated !== false && store.isServerOnline(server)) {
+      const since = now - 5 * 60 * 1000;
+      const recent = store.getHistory(server).filter((d) => d.time >= since);
+      const r = ld.evaluate(recent, now, { minUnique: 4, minTotal: 15, minHits: 4 });
+      if (r.changed && r.codes.length) {
+        store.updateServer(server, (s) => {
+          for (const c of r.codes) {
+            const key = byId.get(c)?.key; if (!key) continue;
+            if (!ld.savedProt.has(c)) ld.savedProt.set(c, { ...s.protections[key] });
+            s.protections[key] = { ...s.protections[key], enabled: true, action: 2, tolerance: 1 };
+          }
+        });
+        if (r.entered) {
+          const names = r.codes.map((c) => byId.get(c)?.name ?? c).join(', ');
+          const emb = new EmbedBuilder().setTitle('🛡️ Modo escudo ativado').setColor(COLORS.ban)
+            .setDescription([
+              `🚨 Ataque detectado em **${escapeMarkdown(server.name)}**.`,
+              `O EagleEYE endureceu temporariamente (ban imediato): **${names}**.`,
+              'Volta ao que você configurou sozinho em ~10 min. Se for falso positivo, ajuste a proteção.',
+            ].join('\n')).setFooter({ text: server.id }).setTimestamp();
+          if (server.alerts) sendToServer(server, [emb]);
+          sendAlert(emb);
+        }
+      }
+    }
+  }
+
   function checkServers() {
     for (const server of store.servers.values()) {
+      try { runLockdown(server, Date.now()); } catch (e) { logger.error('[escudo]', e.message); }
       // queda / retorno do servidor
       if (store.getStatus(server).lastSeen) {
         const online = store.isServerOnline(server);

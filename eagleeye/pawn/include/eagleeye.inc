@@ -11,7 +11,7 @@
 	#error "[EagleEYE] Em filterscripts use <eagleeye_fs>, nao <eagleeye>."
 #endif
 
-#define EE_VERSION "2.2.0"
+#define EE_VERSION "2.3.0"
 
 #if !defined EE_API_HOST
 	#define EE_API_HOST "127.0.0.1:8090"
@@ -111,7 +111,15 @@
 #define EE_FAKENPC        (31)
 #define EE_RECONNECT      (32)
 #define EE_AIMBOT         (33)
-#define EE_MAX            (34)
+#define EE_NICKNAME       (34)
+#define EE_ANIMCRASH      (35)
+#define EE_SKINHACK       (36)
+#define EE_OBJSPAM        (37)
+#define EE_PMFLOOD        (38)
+#define EE_HORNSPAM       (39)
+#define EE_WORLDJUMP      (40)
+#define EE_FREEZEBYPASS   (41)
+#define EE_MAX            (42)
 
 #define EE_ACTION_WARN    (0)
 #define EE_ACTION_KICK    (1)
@@ -191,7 +199,18 @@ enum E_EE_PLAYER
 	Float:acRCPX,
 	Float:acRCPY,
 	Float:acRCPZ,
-	Float:acRCPSize
+	Float:acRCPSize,
+
+	acObjTick,
+	acObjCount,
+	acPmTick,
+	acPmCount,
+	acHornTick,
+	acHornCount,
+	bool:acFrozen,
+	acInterior,
+	acVWorld,
+	acWorldImmuneUntil
 }
 
 enum E_EE_PICKUP
@@ -210,7 +229,9 @@ static stock const gEE_Names[EE_MAX][] =
 	"Conexoes por IP", "Tuning invalido", "Dialog falso", "Godmode", "Alcance de tiro",
 	"Dano hack", "Municao", "Crasher", "Spawn falso", "Divulgacao", "Spam de veiculo",
 	"Pickup falso", "Checkpoint falso", "C-Bug", "RCON brute force", "NPC falso",
-	"Flood de reconexao", "Aimbot"
+	"Flood de reconexao", "Aimbot", "Nick invalido", "Animacao crasher",
+	"Skin invalido", "Spam de objeto", "Flood de PM", "Spam de buzina",
+	"Troca de interior", "Anti-freeze"
 };
 
 static stock const gEE_ActPast[2][8]   = {"kickado", "banido"};
@@ -254,7 +275,15 @@ static stock const gEE_Defaults[EE_MAX][E_EE_PROT] =
 	{true,  EE_ACTION_KICK, 1,  3},
 	{true,  EE_ACTION_KICK, 1,  0},
 	{true,  EE_ACTION_KICK, 1,  5},
-	{true,  EE_ACTION_WARN, 2,  92}
+	{true,  EE_ACTION_WARN, 2,  92},
+	{true,  EE_ACTION_KICK, 1,  0},
+	{true,  EE_ACTION_KICK, 1,  0},
+	{true,  EE_ACTION_KICK, 1,  0},
+	{true,  EE_ACTION_KICK, 2,  8},
+	{true,  EE_ACTION_KICK, 3,  5},
+	{false, EE_ACTION_WARN, 3,  10},
+	{true,  EE_ACTION_KICK, 2,  0},
+	{true,  EE_ACTION_KICK, 2,  0}
 };
 
 static stock
@@ -591,6 +620,16 @@ static stock EE_ResetPlayer(playerid)
 	gEE_P[playerid][acGodHits] = 0;
 	gEE_P[playerid][acCP] = false;
 	gEE_P[playerid][acRCP] = false;
+	gEE_P[playerid][acObjTick] = 0;
+	gEE_P[playerid][acObjCount] = 0;
+	gEE_P[playerid][acPmTick] = 0;
+	gEE_P[playerid][acPmCount] = 0;
+	gEE_P[playerid][acHornTick] = 0;
+	gEE_P[playerid][acHornCount] = 0;
+	gEE_P[playerid][acFrozen] = false;
+	gEE_P[playerid][acInterior] = 0;
+	gEE_P[playerid][acVWorld] = 0;
+	gEE_P[playerid][acWorldImmuneUntil] = tick + 5000;
 	for (new c = 0; c < EE_MAX; c++)
 	{
 		gEE_Hits[playerid][c] = 0;
@@ -983,6 +1022,35 @@ static stock EE_RunCommand(id, const type[], const arg[])
 		{
 			SendClientMessage(pid, EE_COLOR, "Voce foi kickado por um administrador (Discord).");
 			SetTimerEx("EE_DoPunish", 400, false, "iiii", pid, gEE_P[pid][acSerial], EE_ACTION_KICK, 0);
+		}
+	}
+	else if (!strcmp(type, "banip"))
+	{
+		new len = strlen(arg);
+		if (len < 7 || len > 15) return;
+		for (new i = 0; i < len; i++)
+			if (!(('0' <= arg[i] <= '9') || arg[i] == '.' || arg[i] == '*')) return;
+		for (new i = 0, j = GetPlayerPoolSize(); i <= j; i++)
+			if (EE_ValidPlayer(i) && !strcmp(gEE_P[i][acIp], arg))
+				SetTimerEx("EE_DoPunish", 400, false, "iiii", i, gEE_P[i][acSerial], EE_ACTION_KICK, 0);
+		BlockIpAddress(arg, 0);
+		new cmd[32];
+		format(cmd, sizeof cmd, "banip %s", arg);
+		SendRconCommand(cmd);
+		printf("[EagleEYE] IP %s banido via Discord (blacklist).", arg);
+	}
+	else if (!strcmp(type, "kickname"))
+	{
+		for (new i = 0, j = GetPlayerPoolSize(); i <= j; i++)
+		{
+			if (!EE_ValidPlayer(i)) continue;
+			new nm[MAX_PLAYER_NAME + 1];
+			GetPlayerName(i, nm, sizeof nm);
+			if (!strcmp(nm, arg, true))
+			{
+				SendClientMessage(i, EE_COLOR, "Voce foi banido (blacklist via Discord).");
+				SetTimerEx("EE_DoPunish", 400, false, "iiii", i, gEE_P[i][acSerial], EE_ACTION_KICK, 0);
+			}
 		}
 	}
 	else if (!strcmp(type, "pm"))
@@ -1680,6 +1748,7 @@ public OnPlayerConnect(playerid)
 {
 	EE_ResetPlayer(playerid);
 	EE_RefreshWhitelist(playerid);
+	EE_CheckNickname(playerid);
 	new tick = GetTickCount();
 
 	if (gEE_P[playerid][acNPC] && EE_IsEnabled(EE_FAKENPC))
@@ -1770,6 +1839,7 @@ public OnPlayerDisconnect(playerid, reason)
 public OnPlayerUpdate(playerid)
 {
 	gEE_P[playerid][acLastUpdate] = GetTickCount();
+	EE_CheckExtraUpdate(playerid);
 	#if defined EE_OnPlayerUpdate
 		return EE_OnPlayerUpdate(playerid);
 	#else
@@ -1844,6 +1914,8 @@ public OnPlayerSpawn(playerid)
 		}
 	}
 	gEE_P[playerid][acSpawnAllowed] = false;
+
+	EE_CheckSkin(playerid);
 
 	gEE_P[playerid][acSpawnTick] = tick;
 	gEE_P[playerid][acHealth] = 100.0;
@@ -2750,6 +2822,193 @@ stock EE_T_BOOL:EE_ResetPlayerWeapons(playerid)
 	#define _ALS_ResetPlayerWeapons
 #endif
 #define ResetPlayerWeapons EE_ResetPlayerWeapons
+
+// ======================================================================
+//  Categoria EXTRA (v2.3.0): interior/VW, freeze, skin, animacao, nick,
+//  spam de objeto/PM/buzina. Os wrappers abaixo fazem o EagleEYE conhecer
+//  as mudancas legitimas do servidor, para nao gerar falso positivo.
+// ======================================================================
+
+stock EE_T_BOOL:EE_SetPlayerInterior(playerid, interiorid)
+{
+	if (0 <= playerid < MAX_PLAYERS)
+	{
+		gEE_P[playerid][acInterior] = interiorid;
+		gEE_P[playerid][acWorldImmuneUntil] = GetTickCount() + 2000;
+	}
+	return SetPlayerInterior(playerid, interiorid);
+}
+#if defined _ALS_SetPlayerInterior
+	#undef SetPlayerInterior
+#else
+	#define _ALS_SetPlayerInterior
+#endif
+#define SetPlayerInterior EE_SetPlayerInterior
+
+stock EE_T_BOOL:EE_SetPlayerVirtualWorld(playerid, worldid)
+{
+	if (0 <= playerid < MAX_PLAYERS)
+	{
+		gEE_P[playerid][acVWorld] = worldid;
+		gEE_P[playerid][acWorldImmuneUntil] = GetTickCount() + 2000;
+	}
+	return SetPlayerVirtualWorld(playerid, worldid);
+}
+#if defined _ALS_SetPlayerVirtualWorld
+	#undef SetPlayerVirtualWorld
+#else
+	#define _ALS_SetPlayerVirtualWorld
+#endif
+#define SetPlayerVirtualWorld EE_SetPlayerVirtualWorld
+
+stock EE_T_BOOL:EE_TogglePlayerControllable(playerid, EE_T_BOOL:toggle)
+{
+	if (0 <= playerid < MAX_PLAYERS)
+	{
+		gEE_P[playerid][acFrozen] = (toggle == EE_T_BOOL:0) ? true : false;
+		gEE_P[playerid][acPosImmuneUntil] = GetTickCount() + 2000;
+	}
+	return TogglePlayerControllable(playerid, toggle);
+}
+#if defined _ALS_TogglePlayerControllable
+	#undef TogglePlayerControllable
+#else
+	#define _ALS_TogglePlayerControllable
+#endif
+#define TogglePlayerControllable EE_TogglePlayerControllable
+
+// Checa nick invalido/spoof. Chamado automaticamente em OnPlayerConnect.
+static stock EE_CheckNickname(playerid)
+{
+	if (!EE_ValidPlayer(playerid) || gEE_P[playerid][acNPC] || !EE_IsEnabled(EE_NICKNAME)) return;
+	new name[MAX_PLAYER_NAME + 1];
+	GetPlayerName(playerid, name, sizeof name);
+	new len = strlen(name);
+	new bool:bad = (len < 3 || len > 24);
+	for (new i = 0; !bad && i < len; i++)
+	{
+		new c = name[i];
+		if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
+		      c == '[' || c == ']' || c == '(' || c == ')' ||
+		      c == '$' || c == '@' || c == '.' || c == '_' || c == '='))
+			bad = true;
+	}
+	if (bad)
+	{
+		new det[64];
+		format(det, sizeof det, "nick invalido: %.40s", name);
+		EE_Detect(playerid, EE_NICKNAME, det);
+	}
+}
+
+// Checa skin invalido. Chamado automaticamente em OnPlayerSpawn.
+static stock EE_CheckSkin(playerid)
+{
+	if (!EE_ValidPlayer(playerid) || EE_IsPlayerImmune(playerid) || !EE_IsEnabled(EE_SKINHACK)) return;
+	new skin = GetPlayerSkin(playerid);
+	if (skin < 0 || skin > 311 || skin == 74)
+	{
+		new det[48];
+		format(det, sizeof det, "skin invalido %d", skin);
+		EE_Detect(playerid, EE_SKINHACK, det);
+	}
+}
+
+// Checa animacao crasher, troca de interior/VW e freeze bypass.
+// Chamado automaticamente em OnPlayerUpdate.
+static stock EE_CheckExtraUpdate(playerid)
+{
+	if (!EE_ValidPlayer(playerid) || gEE_P[playerid][acNPC] || EE_IsPlayerImmune(playerid)) return;
+	new tick = GetTickCount();
+
+	if (EE_IsEnabled(EE_ANIMCRASH))
+	{
+		new idx = GetPlayerAnimationIndex(playerid);
+		if (idx < 0 || idx > 1702)
+		{
+			new det[48];
+			format(det, sizeof det, "animacao %d fora da faixa", idx);
+			EE_Detect(playerid, EE_ANIMCRASH, det);
+		}
+	}
+
+	if (EE_IsEnabled(EE_WORLDJUMP) && tick >= gEE_P[playerid][acWorldImmuneUntil])
+	{
+		new ci = GetPlayerInterior(playerid), cw = GetPlayerVirtualWorld(playerid);
+		if (ci != gEE_P[playerid][acInterior])
+		{
+			new det[72];
+			format(det, sizeof det, "mudou interior %d->%d sem o servidor", gEE_P[playerid][acInterior], ci);
+			EE_Detect(playerid, EE_WORLDJUMP, det);
+			gEE_P[playerid][acInterior] = ci;
+		}
+		else if (cw != gEE_P[playerid][acVWorld])
+		{
+			new det[72];
+			format(det, sizeof det, "mudou VW %d->%d sem o servidor", gEE_P[playerid][acVWorld], cw);
+			EE_Detect(playerid, EE_WORLDJUMP, det);
+			gEE_P[playerid][acVWorld] = cw;
+		}
+	}
+
+	if (EE_IsEnabled(EE_FREEZEBYPASS) && gEE_P[playerid][acFrozen] &&
+	    EE_RawState(playerid) == PLAYER_STATE_ONFOOT && tick >= gEE_P[playerid][acPosImmuneUntil])
+	{
+		new Float:x, Float:y, Float:z;
+		GetPlayerPos(playerid, x, y, z);
+		new Float:dx = x - gEE_P[playerid][acLastX], Float:dy = y - gEE_P[playerid][acLastY], Float:dz = z - gEE_P[playerid][acLastZ];
+		if ((dx * dx + dy * dy + dz * dz) > 9.0)   // moveu mais de 3 unidades estando congelado
+		{
+			EE_Detect(playerid, EE_FREEZEBYPASS, "moveu-se congelado pelo servidor");
+			gEE_P[playerid][acPosImmuneUntil] = tick + 2000;
+		}
+	}
+}
+
+// Helper opt-in: chame em CreateObject/AttachObjectToPlayer do gamemode.
+// Retorna true se o jogador estourou o limite (spam de objeto).
+stock bool:EE_ObjectSpamCheck(playerid)
+{
+	if (!EE_ValidPlayer(playerid) || gEE_P[playerid][acNPC] || EE_IsPlayerImmune(playerid) || !EE_IsEnabled(EE_OBJSPAM)) return false;
+	new tick = GetTickCount();
+	if (tick - gEE_P[playerid][acObjTick] > 5000) { gEE_P[playerid][acObjTick] = tick; gEE_P[playerid][acObjCount] = 0; }
+	if (++gEE_P[playerid][acObjCount] > gEE_Prot[EE_OBJSPAM][dpValue])
+	{
+		gEE_P[playerid][acObjCount] = 0;
+		return EE_Detect(playerid, EE_OBJSPAM, "criou objetos em excesso") ? true : false;
+	}
+	return false;
+}
+
+// Helper opt-in: chame no comando de mensagem privada (PM) do gamemode.
+// Retorna true se o jogador estourou o limite (flood de PM).
+stock bool:EE_PMFloodCheck(playerid)
+{
+	if (!EE_ValidPlayer(playerid) || gEE_P[playerid][acNPC] || EE_IsPlayerImmune(playerid) || !EE_IsEnabled(EE_PMFLOOD)) return false;
+	new tick = GetTickCount();
+	if (tick - gEE_P[playerid][acPmTick] > 5000) { gEE_P[playerid][acPmTick] = tick; gEE_P[playerid][acPmCount] = 0; }
+	if (++gEE_P[playerid][acPmCount] > gEE_Prot[EE_PMFLOOD][dpValue])
+	{
+		gEE_P[playerid][acPmCount] = 0;
+		return EE_Detect(playerid, EE_PMFLOOD, "mensagens privadas em excesso") ? true : false;
+	}
+	return false;
+}
+
+// Helper opt-in: chame quando detectar a buzina (ex.: tecla no vehicle).
+// Retorna true se o jogador estourou o limite (spam de buzina).
+stock bool:EE_HornCheck(playerid)
+{
+	if (!EE_ValidPlayer(playerid) || gEE_P[playerid][acNPC] || EE_IsPlayerImmune(playerid) || !EE_IsEnabled(EE_HORNSPAM)) return false;
+	new tick = GetTickCount();
+	if (tick - gEE_P[playerid][acHornTick] > 3000) { gEE_P[playerid][acHornTick] = tick; gEE_P[playerid][acHornCount] = 0; }
+	if (++gEE_P[playerid][acHornCount] > gEE_Prot[EE_HORNSPAM][dpValue])
+	{
+		gEE_P[playerid][acHornCount] = 0;
+		return EE_Detect(playerid, EE_HORNSPAM, "buzina em excesso") ? true : false;
+	}
+	return false;
+}
 
 stock EE_T_BOOL:EE_SetSpawnInfo(playerid, team, skin, Float:x, Float:y, Float:z, Float:rotation,
 	EE_T_WEAPON:weapon1 = EE_T_WEAPON:0, weapon1_ammo = 0,

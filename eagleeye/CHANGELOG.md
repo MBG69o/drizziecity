@@ -1,5 +1,27 @@
 # 🦅 EagleEYE — Changelog
 
+## v2.3.0 — 12/11/2026
+
+### 🛡️ 8 novas proteções (agora 42 no total)
+- **Nick inválido** — nome com caracteres impossíveis ou trocado no cliente (spoof). Checado automaticamente na conexão.
+- **Animação crasher** — animação fora da faixa válida usada para travar os outros jogadores. Checada no `OnPlayerUpdate`.
+- **Skin inválido** — modelo de skin fora da faixa válida (crasher/skin hack). Checado no spawn.
+- **Spam de objeto** — criação/anexo de objetos em excesso. Helper `EE_ObjectSpamCheck(playerid)`.
+- **Flood de PM** — mensagens privadas entre jogadores em excesso. Helper `EE_PMFloodCheck(playerid)`.
+- **Spam de buzina** — buzina/sirene em excesso. Helper `EE_HornCheck(playerid)`.
+- **Troca de interior** — mudança de interior/virtual world sem o servidor. Sem falso positivo: o include embrulha `SetPlayerInterior`/`SetPlayerVirtualWorld`.
+- **Anti-freeze** — mover-se enquanto congelado pelo servidor. O include embrulha `TogglePlayerControllable`.
+- Todas configuráveis pelo Discord (ativar, ação, tolerância, limite) e portadas para o plugin em C++ (`ee_cat_extra`, com testes).
+
+### 🚫 Sistema de blacklist global (ban cruzado)
+- Lista negra **por dono, compartilhada entre todos os seus servidores**. `/ac blacklist adicionar | remover | listar` (por nick ou IP).
+- Ao adicionar, o EagleEYE **bane na hora em todos os seus servidores online** e bloqueia novas conexões do IP (novos comandos `banip` e `kickname` no include).
+- A lista **não vaza entre clientes**: cada dono só vê e usa a própria.
+
+### 🛡️ Modo escudo (lockdown automático)
+- Quando um servidor sofre uma **rajada de detecções** (muitos jogadores ou muito volume em 5 min), o EagleEYE **endurece sozinho** as proteções abusadas (ban imediato, tolerância 1) por ~10 min e avisa no canal.
+- **Reverte automaticamente** para a sua configuração quando o ataque passa.
+
 ## v2.2.0 — 10/11/2026
 
 ### 🔑 Login com token de acesso

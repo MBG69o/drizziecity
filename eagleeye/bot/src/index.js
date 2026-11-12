@@ -8,6 +8,7 @@ const { Permissions, parseIds } = require('./permissions');
 const { createDiscordBot } = require('./discord');
 const { Guard } = require('./guard');
 const { Licenses } = require('./licenses');
+const { Blacklist } = require('./blacklist');
 
 function fail(msg) {
   console.error(`[config] ${msg}`);
@@ -38,6 +39,10 @@ const requireLicense = /^(1|true|sim)$/i.test(process.env.AC_REQUIRE_LICENSE || 
 
 const permissions = new Permissions({ botAdminIds: parseIds(process.env.AC_BOT_ADMIN_IDS) });
 
+// Sistema de blacklist global (ban cruzado entre os servidores de um mesmo dono)
+const blacklist = new Blacklist(dataDir);
+console.log('[blacklist] lista negra compartilhada carregada.');
+
 const bot = createDiscordBot({
   store,
   permissions,
@@ -46,6 +51,7 @@ const bot = createDiscordBot({
   // canal da equipe que recebe os alertas de todos os servidores
   alertChannelId: (process.env.AC_ALERT_CHANNEL_ID ?? '1569638075166892072').trim() || null,
   licenses,
+  blacklist,
 });
 
 // AC_API_PORT tem prioridade; PORT é a variável usada por várias hospedagens de sites

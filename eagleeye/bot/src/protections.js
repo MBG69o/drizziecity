@@ -55,6 +55,15 @@ const PROTECTIONS = [
   p(31, 'npc_falso',        'rede',      'NPC falso',             'Conexão externa se passando por NPC.',                               null,                       true,  1, 1, 0),
   p(32, 'reconexao',        'rede',      'Flood de reconexão',    'Muitas conexões do mesmo IP em 30s (bots).',                         'conexões em 30s',          true,  1, 1, 5),
   p(33, 'aimbot',           'armas',     'Aimbot',                'Taxa de acerto em jogadores suspeita (janela de 40 tiros).',         '% de acerto',              true,  0, 2, 92),
+  // --- categoria EXTRA (v2.3.0) ---
+  p(34, 'nickname',         'rede',      'Nick inválido',         'Nome com caracteres impossíveis ou trocado no cliente (spoof).',     null,                       true,  1, 1, 0),
+  p(35, 'anim_crasher',     'rede',      'Animação crasher',      'Animação fora da faixa válida usada para travar os outros jogadores.',null,                      true,  1, 1, 0),
+  p(36, 'skin_invalido',    'jogador',   'Skin inválido',         'Modelo de skin fora da faixa válida (crasher/skin hack).',           null,                       true,  1, 1, 0),
+  p(37, 'spam_objeto',      'rede',      'Spam de objeto',        'Criação/anexo de objetos em excesso (crasher/lag).',                 'objetos em 5s',            true,  1, 2, 8),
+  p(38, 'flood_pm',         'rede',      'Flood de PM',           'Mensagens privadas entre jogadores em excesso.',                     'PMs em 5s',                true,  1, 3, 5),
+  p(39, 'buzina',           'veiculos',  'Spam de buzina',        'Buzina/sirene acionada em excesso (lag/troll).',                     'buzinas em 3s',            false, 0, 3, 10),
+  p(40, 'troca_interior',   'movimento', 'Troca de interior',     'Mudança de interior/virtual world sem o servidor (teleporte).',      null,                       true,  1, 2, 0),
+  p(41, 'anti_freeze',      'movimento', 'Anti-freeze',           'Mover-se enquanto congelado pelo servidor.',                         null,                       true,  1, 2, 0),
 ];
 
 const ACTIONS = ['aviso', 'kick', 'ban'];

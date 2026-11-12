@@ -24,9 +24,9 @@ O **núcleo de segurança** está implementado e com testes que rodam (inclusive
 - Segredos (host, pepper, chaves) **ofuscados** no binário via `tools/obfuscate.py`. *(confirmado: não aparecem em texto)*
 - Sistema de licenças no **bot**: `/ac licenca criar | listar | revogar | reativar | info` (só admin), endpoint `/plugin/license` assinado e revogação em tempo real.
 
-## Detecções portadas (34/34, testadas)
+## Detecções portadas (42/42, testadas)
 
-Toda a lógica das 34 proteções já está em C++, dividida por categoria e com testes que rodam (64 bits, sem o SDK):
+Toda a lógica das 42 proteções já está em C++, dividida por categoria e com testes que rodam (64 bits, sem o SDK):
 
 | Arquivo | Categoria | Proteções |
 |---|---|---|
@@ -36,6 +36,7 @@ Toda a lógica das 34 proteções já está em C++, dividida por categoria e com
 | `ee_cat_movement.cpp` | movimento | velocidade a pé, teleporte, airbreak, pickup/checkpoint falso (+ velocidade em veículo e posição-crasher) |
 | `ee_cat_vehicles.cpp` | veículos | reparo, car warp, veículo troll, tuning, spam, assento inválido |
 | `ee_cat_network.cpp` | rede | flood, divulgação, dialog, ping, conexões por IP, reconexão, RCON, NPC falso |
+| `ee_cat_extra.cpp` | extra | nick inválido, animação crasher, skin inválido, spam de objeto, flood de PM, spam de buzina, troca de interior, anti-freeze |
 
 As detecções são **funções puras**: recebem os valores já lidos do jogo e devolvem a detecção + a correção. Rode `bash test/run.sh` para ver todos os testes.
 

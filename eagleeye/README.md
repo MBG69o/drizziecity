@@ -1,6 +1,6 @@
 # 🦅 EagleEYE Anti-Cheat
 
-Anti-cheat **server-side** para **SA-MP 0.3.7 / 0.3.DL** e **open.mp** com **34 proteções**, configurado pelo **Discord** com comandos `/ac`.
+Anti-cheat **server-side** para **SA-MP 0.3.7 / 0.3.DL** e **open.mp** com **42 proteções**, configurado pelo **Discord** com comandos `/ac`.
 
 **Vários servidores, um bot.** Na primeira vez que o servidor liga, o próprio include **gera um token de acesso** (ex.: `EE-7K2QMX-ABCD-EFGH-JKLM-NPQR`) e mostra no console. O dono faz `/ac login token:...` no Discord, o bot passa a reconhecer aquele servidor e salva o token dele. O servidor do jogo e o bot **podem estar em máquinas diferentes**. Um mesmo bot pode atender quantos servidores você quiser, cada um com a sua configuração, seus donos e seu canal de logs.
 
