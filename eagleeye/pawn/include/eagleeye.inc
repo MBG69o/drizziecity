@@ -11,7 +11,7 @@
 	#error "[EagleEYE] Em filterscripts use <eagleeye_fs>, nao <eagleeye>."
 #endif
 
-#define EE_VERSION "2.6.0"
+#define EE_VERSION "2.7.0"
 
 #if !defined EE_API_HOST
 	#define EE_API_HOST "127.0.0.1:8090"
@@ -27,6 +27,11 @@
 #endif
 #if !defined EE_ID_FILE
 	#define EE_ID_FILE "eagleeye_servidor.cfg"
+#endif
+// Banner opcional mostrado ao jogador no spawn (deterrencia + marketing).
+// Deixe vazio para nao mostrar nada. Ex.: "Este servidor e protegido pelo EagleEYE."
+#if !defined EE_WELCOME_BANNER
+	#define EE_WELCOME_BANNER ""
 #endif
 
 #if !defined _INC_open_mp
@@ -248,6 +253,7 @@ static stock const gEE_ActShort[2][5]  = {"kick", "ban"};
 static stock const gEE_OnOff[2][11]    = {"DESATIVADO", "ATIVO"};
 static stock const gEE_MoveMode[2][8]  = {"a pe", "veiculo"};
 static stock const gEE_BotState[2][8]  = {"online", "OFFLINE"};
+static stock const gEE_Banner[]        = EE_WELCOME_BANNER;
 
 static stock const gEE_Defaults[EE_MAX][E_EE_PROT] =
 {
@@ -1938,6 +1944,13 @@ public OnPlayerSpawn(playerid)
 	gEE_P[playerid][acSpawnAllowed] = false;
 
 	EE_CheckSkin(playerid);
+
+	if (gEE_Banner[0] != EOS && !gEE_P[playerid][acNPC])
+	{
+		new bmsg[176];
+		format(bmsg, sizeof bmsg, "[EagleEYE] %s", gEE_Banner);
+		SendClientMessage(playerid, EE_COLOR, bmsg);
+	}
 
 	gEE_P[playerid][acSpawnTick] = tick;
 	gEE_P[playerid][acHealth] = 100.0;

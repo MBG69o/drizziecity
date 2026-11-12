@@ -15,6 +15,8 @@
 const { PROTECTIONS, CATEGORIES, ACTIONS, byKey } = require('./protections');
 const { gradeLetter } = require('./dashboard');
 const { sanitizeGameText, isValidNick, isValidIPv4Pattern } = require('./config-format');
+const { serverStats } = require('./stats');
+const achievements = require('./achievements');
 
 function jsonBody(res, send, status, obj) {
   send(res, status, JSON.stringify(obj), { 'Content-Type': 'application/json; charset=utf-8' });
@@ -49,6 +51,7 @@ function serverView(store, security, trust, s) {
     players: online ? (st.players || 0) : 0, maxPlayers: st.maxPlayers || 0, version: st.version || '?',
     grade: rep.grade, gradeLetter: gradeLetter(rep.score), score: rep.score,
     publicBadge: !!s.publicBadge, lastSeen: st.lastSeen || 0, protections: prot,
+    achievements: achievements.compute(s, st, store.getHistory(s)).earned,
   };
 }
 
@@ -234,6 +237,16 @@ function handleWebApp(req, res, url, ctx) {
     return true;
   }
 
+  // --- estatísticas visuais de um servidor (auth) ---
+  if (req.method === 'GET' && path === '/app/api/stats') {
+    const sess = session();
+    if (!sess) return jsonBody(res, send, 401, { error: 'sessão expirada' }), true;
+    const server = store.getServer(String(url.searchParams.get('serverId') || ''));
+    if (!server || !scopedServers(store, sess).some((s) => s.id === server.id)) return jsonBody(res, send, 403, { error: 'servidor fora do seu acesso' }), true;
+    jsonBody(res, send, 200, { ok: true, stats: serverStats(store, server) });
+    return true;
+  }
+
   // --- blacklist: listar (auth) ---
   if (req.method === 'GET' && path === '/app/api/blacklist') {
     const sess = session();
@@ -356,6 +369,17 @@ th{color:var(--mut);font-size:12px;text-transform:uppercase;letter-spacing:.04em
 .a0{color:var(--warn)}.a1{color:var(--orange)}.a2{color:var(--bad);font-weight:600}
 .scroll{overflow-x:auto}.when{color:var(--mut);font-size:12.5px}
 .foot{color:var(--mut);font-size:12px;text-align:center;padding:20px 0}
+.achv{display:flex;gap:10px;flex-wrap:wrap}
+.achv .empty{color:var(--mut);font-size:13px}
+.badge2{display:flex;align-items:center;gap:8px;background:var(--panel2);border:1px solid var(--line);border-radius:999px;padding:6px 12px;font-size:13px}
+.badge2 .em{font-size:16px}.badge2 small{color:var(--mut)}
+.tops{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));margin-top:14px}
+.tops h3{margin:0 0 8px;font-size:12px;color:var(--mut);text-transform:uppercase;letter-spacing:.04em}
+.bar2{display:flex;align-items:center;gap:8px;margin:5px 0;font-size:13px}
+.bar2 .lbl{width:92px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bar2 .track{flex:1;height:7px;background:#243141;border-radius:5px;overflow:hidden}
+.bar2 .fill{height:100%;background:var(--accent);border-radius:5px}
+.bar2 .n{width:26px;text-align:right;font-variant-numeric:tabular-nums;color:var(--mut)}
 .hide{display:none!important}
 .toast{position:fixed;left:50%;bottom:calc(16px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:#0e151d;border:1px solid var(--line);border-radius:10px;padding:10px 16px;z-index:30;opacity:0;transition:.2s}
 .toast.show{opacity:1}
@@ -401,6 +425,17 @@ th{color:var(--mut);font-size:12px;text-transform:uppercase;letter-spacing:.04em
     <label class="row" style="gap:8px"><span id="globlbl" class="mut">—</span><span class="sw"><input type="checkbox" id="glob"><span></span></span></label>
    </div>
    <div id="actinfo" class="mut" style="font-size:13px;margin-top:6px"></div>
+  </div>
+
+  <div class="card">
+   <h2>Conquistas</h2>
+   <div id="achv" class="achv"></div>
+  </div>
+
+  <div class="card">
+   <h2>Estatísticas — detecções por hora (24h)</h2>
+   <canvas id="chart" height="150" style="width:100%;display:block"></canvas>
+   <div id="tops" class="tops"></div>
   </div>
 
   <div class="card">
@@ -510,8 +545,9 @@ function renderAll(){var s=curServer();if(!s){$('kpis').innerHTML='<div class="k
  ].map(function(k){return '<div class="kpi"><b>'+k[0]+'</b><span>'+k[1]+'</span></div>'}).join('');
  $('glob').checked=!!s.global;$('globlbl').textContent=s.global?'ligado':'desligado';
  $('actinfo').textContent=s.activated?'':'⏳ Ative o servidor no Discord (/ac meuservidor) antes de ligar o anti-cheat.';
- renderTabs();renderProts();renderRecent();renderWorst();
+ renderAchv();renderTabs();renderProts();renderRecent();renderWorst();loadStats();
 }
+window.addEventListener('resize',function(){if(S.data)loadStats()});
 function renderTabs(){$('tabs').innerHTML=CAT.categories.map(function(c){return '<button class="tab'+(c.key===S.cat?' active':'')+'" data-k="'+c.key+'">'+c.emoji+' '+esc(c.name)+'</button>'}).join('');
  Array.prototype.forEach.call($('tabs').children,function(b){b.onclick=function(){S.cat=b.getAttribute('data-k');renderTabs();renderProts()}})}
 function renderProts(){var s=curServer();if(!s)return;
@@ -599,6 +635,40 @@ $('btn-bl').onclick=function(){
   $('bl-nick').value='';$('bl-ip').value='';$('bl-reason').value='';
   renderBlacklist(r.j.entries||[]);toast('🚫 adicionado em '+r.j.applied+' servidor(es)')})
 };
+
+/* ---- conquistas ---- */
+function renderAchv(){var s=curServer();var el=$('achv');if(!s){el.innerHTML='';return}
+ var a=s.achievements||[];
+ el.innerHTML=a.length?a.map(function(x){return '<span class="badge2"><span class="em">'+x.emoji+'</span> '+esc(x.title)+' <small>'+esc(x.detail||'')+'</small></span>'}).join(''):'<span class="empty">Ainda sem conquistas — elas aparecem com o tempo protegido e cheaters barrados.</span>'}
+
+/* ---- estatísticas + gráfico ---- */
+function cssv(n){return getComputedStyle(document.documentElement).getPropertyValue(n).trim()||'#888'}
+function loadStats(){var s=curServer();if(!s)return;
+ api('/app/api/stats?serverId='+encodeURIComponent(S.cur)).then(function(r){if(r.status===200){drawChart(r.j.stats.hourly);renderTops(r.j.stats)}})}
+function drawChart(buckets){
+ var cv=$('chart');if(!cv||!buckets)return;
+ var dpr=window.devicePixelRatio||1;var W=cv.clientWidth||600,H=150;
+ cv.width=W*dpr;cv.height=H*dpr;var g=cv.getContext('2d');g.setTransform(dpr,0,0,dpr,0,0);g.clearRect(0,0,W,H);
+ var pad={l:26,r:6,t:8,b:16};var cw=W-pad.l-pad.r,ch=H-pad.t-pad.b;
+ var max=1;buckets.forEach(function(b){if(b.count>max)max=b.count});
+ var grid=cssv('--line'),mut=cssv('--mut');
+ g.strokeStyle=grid;g.fillStyle=mut;g.font='10px system-ui';g.lineWidth=1;
+ // linhas de grade + rótulos do eixo Y (0, meio, max)
+ [0,0.5,1].forEach(function(f){var y=pad.t+ch-ch*f;g.globalAlpha=.5;g.beginPath();g.moveTo(pad.l,y);g.lineTo(W-pad.r,y);g.stroke();g.globalAlpha=1;g.fillText(String(Math.round(max*f)),2,y+3)});
+ var n=buckets.length,bw=cw/n,gap=Math.min(3,bw*0.2);
+ var cw_=cssv('--warn'),ck=cssv('--orange'),cb=cssv('--bad');
+ for(var i=0;i<n;i++){var b=buckets[i];var x=pad.l+i*bw+gap/2,w=bw-gap;var y=pad.t+ch;
+  [[b.warn,cw_],[b.kick,ck],[b.ban,cb]].forEach(function(seg){if(seg[0]<=0)return;var h=ch*(seg[0]/max);y-=h;g.fillStyle=seg[1];g.fillRect(x,y,w,h)})}
+ // rótulos de hora (a cada 6)
+ g.fillStyle=mut;for(var j=0;j<n;j+=6){var d=new Date(buckets[j].t);g.fillText((d.getHours()<10?'0':'')+d.getHours()+'h',pad.l+j*bw,H-4)}
+}
+function renderTops(st){
+ function rows(list,max,fmt){max=max||1;return list.map(function(x){var v=fmt(x);return '<div class="bar2"><span class="lbl">'+esc(v.l)+'</span><span class="track"><span class="fill" style="width:'+Math.round(100*v.n/max)+'%"></span></span><span class="n">'+v.n+'</span></div>'}).join('')||'<span class="mut" style="font-size:13px">—</span>'}
+ var mp=(st.topProtections[0]||{}).count||1, mo=(st.topOffenders[0]||{}).count||1;
+ $('tops').innerHTML=
+  '<div><h3>Proteções que mais agiram</h3>'+rows(st.topProtections,mp,function(p){return {l:p.name,n:p.count}})+'</div>'+
+  '<div><h3>Jogadores mais detectados</h3>'+rows(st.topOffenders,mo,function(o){return {l:o.name,n:o.count}})+'</div>';
+}
 
 /* boot */
 if(S.session){showApp()}else{showLogin()}

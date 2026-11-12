@@ -9,6 +9,7 @@ const { Guard } = require('./guard');
 const { buildData, loginPage, dashboardPage, gradeLetter } = require('./dashboard');
 const { badgeSvg, statusPage, stateOf } = require('./badge');
 const { handleWebApp } = require('./webapp');
+const achievements = require('./achievements');
 
 const MAX_BODY = 4096;
 const MAX_PLAYERS_BODY = 16384;
@@ -197,8 +198,9 @@ function startApi({
         return res.end(badgeSvg(stateOf(online, acOn)));
       }
       const rep = security ? security.securityReport(store, srv) : { grade: '-', score: null };
+      const achv = achievements.compute(srv, st, store.getHistory(srv)).earned;
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
-      return res.end(statusPage({ name: srv.name, id: srv.id, online, acOn, grade: rep.grade, gradeLetter: gradeLetter(rep.score), players: st.players || 0, maxPlayers: st.maxPlayers || 0 }));
+      return res.end(statusPage({ name: srv.name, id: srv.id, online, acOn, grade: rep.grade, gradeLetter: gradeLetter(rep.score), players: st.players || 0, maxPlayers: st.maxPlayers || 0, achievements: achv }));
     }
 
     // ---- site de gerenciamento (login por token + código, gestão de proteções) ----

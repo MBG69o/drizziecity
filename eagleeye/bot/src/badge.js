@@ -50,9 +50,12 @@ function stateOf(online, acOn) {
 }
 
 /** Página pública de status (sem dados sensíveis). */
-function statusPage({ name, id, online, acOn, grade, gradeLetter = 'F', players, maxPlayers }) {
+function statusPage({ name, id, online, acOn, grade, gradeLetter = 'F', players, maxPlayers, achievements = [] }) {
   const state = stateOf(online, acOn);
   const label = { protegido: '🟢 Protegido e online', offline: '🔴 Offline', desligado: '🟡 Anti-cheat desligado' }[state];
+  const achvHtml = (achievements || []).length
+    ? `<div class="achv">${achievements.map((a) => `<span class="b"><span>${esc(a.emoji)}</span> ${esc(a.title)}</span>`).join('')}</div>`
+    : '';
   return `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(name)} — Status EagleEYE</title>
 <style>
@@ -62,6 +65,8 @@ body{margin:0;background:#0b0f14;color:#e6edf3;font:16px/1.6 system-ui,Segoe UI,
 .state{font-size:20px;font-weight:700;margin:14px 0}
 .row{display:flex;justify-content:space-between;border-top:1px solid #1f2a37;padding:10px 2px}
 .g{font-weight:700}.g-A{color:#2ecc71}.g-B{color:#a3e635}.g-C{color:#f1c40f}.g-D{color:#e67e22}.g-F{color:#e74c3c}
+.achv{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin-top:16px}
+.achv .b{display:flex;align-items:center;gap:6px;background:#0e151d;border:1px solid #1f2a37;border-radius:999px;padding:5px 11px;font-size:12.5px}
 .foot{color:#8b98a5;font-size:12px;margin-top:16px}
 </style></head><body><div class="card">
 <div class="logo">🦅 ${esc(name)}</div>
@@ -70,6 +75,7 @@ body{margin:0;background:#0b0f14;color:#e6edf3;font:16px/1.6 system-ui,Segoe UI,
 <div class="row"><span class="mut">Anti-cheat</span><span>${acOn ? 'ligado' : 'desligado'}</span></div>
 <div class="row"><span class="mut">Nota de segurança</span><span class="g g-${esc(gradeLetter)}">${esc(grade)}</span></div>
 <div class="row"><span class="mut">Jogadores</span><span>${online ? `${players}/${maxPlayers}` : '—'}</span></div>
+${achvHtml}
 <div class="foot">Protegido por <b>EagleEYE Anti-Cheat</b></div>
 </div></body></html>`;
 }

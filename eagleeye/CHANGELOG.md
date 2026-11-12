@@ -1,5 +1,18 @@
 # 🦅 EagleEYE — Changelog
 
+## v2.7.0 — 12/11/2026
+
+### 📊 Estatísticas visuais no site
+- Novo card **"Detecções por hora (24h)"** com **gráfico** (barras empilhadas por gravidade: aviso/kick/ban), mais os rankings de **proteções que mais agiram** e **jogadores mais detectados**. Atualiza sozinho.
+- No Discord, `/ac estatisticas` agora mostra uma **sparkline** das últimas 24h e as conquistas do servidor.
+
+### 🏅 Conquistas / selos do servidor
+- O servidor ganha marcos pelo uso: **dias protegido** (1, 7, 30, 90, 365), **cheaters barrados** (10, 50, 100, 500, 1000), **dias sem trapaça** (24h, 3d, 7d) e **Escudo total** (todas as proteções ligadas).
+- Aparecem no site, e também na **página de status pública** — marketing que se espalha no fórum/site do servidor.
+
+### 🦅 Banner no jogo (include)
+- Novo `EE_WELCOME_BANNER` (opcional): mostra uma mensagem ao jogador no spawn, ex.: *"Este servidor é protegido pelo EagleEYE."* — deterrência contra cheaters e divulgação. Vazio = desligado.
+
 ## v2.6.0 — 12/11/2026
 
 ### 🕵️ Endpoints da API ocultos e protegidos

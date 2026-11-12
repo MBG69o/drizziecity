@@ -17,6 +17,14 @@ const { collectStats, buildPresenceTexts } = require('./presence');
 const { createNotifier } = require('./notifier');
 const { securityReport, CRITICAL } = require('./security');
 const { Lockdown } = require('./lockdown');
+const { hourlyBuckets } = require('./stats');
+const achievements = require('./achievements');
+
+const SPARK = '▁▂▃▄▅▆▇█';
+function sparkline(values) {
+  const max = Math.max(1, ...values);
+  return values.map((v) => SPARK[Math.min(7, Math.round((v / max) * 7))]).join('');
+}
 
 const MAX_WHITELIST = 64;
 const LOGIN_MAX_FAILS = 5;
@@ -126,6 +134,10 @@ function createDiscordBot({
         { name: 'Jogadores mais detectados', value: st.topPlayers.map(([nick, n], i) => `${i + 1}. ${escapeMarkdown(nick)} — **${n}**`).join('\n').slice(0, 1024), inline: true },
       );
     }
+    const spark = sparkline(hourlyBuckets(store.getHistory(server), Date.now(), 24).map((b) => b.count));
+    embed.addFields({ name: 'Detecções por hora (24h)', value: `\`${spark}\`` });
+    const achv = achievements.compute(server, store.getStatus(server), store.getHistory(server)).earned;
+    if (achv.length) embed.addFields({ name: 'Conquistas', value: achv.map((a) => `${a.emoji} ${a.title}`).join(' · ').slice(0, 1024) });
     return embed;
   }
 
