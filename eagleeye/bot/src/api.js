@@ -60,7 +60,7 @@ function startApi({
   store, host, port, allowedIps = [], trustProxy = false, onDetection, logger = console,
   guard = new Guard(), maxConnections = 1000, onAuthFail = () => {}, onStatus = () => {},
   licenses = null, requireLicense = false, dashboard = null, trust = null, security = null,
-  webauth = null, onAuthCode = null,
+  webauth = null, onAuthCode = null, blacklist = null,
 }) {
   /** Token errado: conta para o bloqueio do IP e avisa o dono se o ID existir. */
   function authFailed(url, ip) {
@@ -179,7 +179,7 @@ function startApi({
 
     // ---- site de gerenciamento (login por token + código, gestão de proteções) ----
     if (webauth && (url.pathname === '/app' || url.pathname.startsWith('/app/'))) {
-      if (handleWebApp(req, res, url, { store, webauth, trust, security, send, readBody, logger, onAuthCode })) return undefined;
+      if (handleWebApp(req, res, url, { store, webauth, trust, security, send, readBody, logger, onAuthCode, blacklist })) return undefined;
     }
 
     if (allowedIps.length && !allowedIps.includes(ip)) return send(res, 403, 'forbidden');

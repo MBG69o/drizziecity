@@ -92,6 +92,7 @@ startApi({
   trust,
   security,
   webauth,
+  blacklist,
   onAuthCode: (server, code) => bot.deliverAuthCode(server, code),
 });
 

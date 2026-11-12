@@ -14,7 +14,7 @@
 
 const { PROTECTIONS, CATEGORIES, ACTIONS, byKey } = require('./protections');
 const { gradeLetter } = require('./dashboard');
-const { sanitizeGameText } = require('./config-format');
+const { sanitizeGameText, isValidNick, isValidIPv4Pattern } = require('./config-format');
 
 function jsonBody(res, send, status, obj) {
   send(res, status, JSON.stringify(obj), { 'Content-Type': 'application/json; charset=utf-8' });
@@ -57,7 +57,7 @@ function serverView(store, security, trust, s) {
  * Retorna true se tratou a rota.
  */
 function handleWebApp(req, res, url, ctx) {
-  const { store, webauth, trust, security, send, readBody, logger, onAuthCode } = ctx;
+  const { store, webauth, trust, security, send, readBody, logger, onAuthCode, blacklist } = ctx;
   const path = url.pathname;
   if (path !== '/app' && !path.startsWith('/app/')) return false;
 
@@ -220,6 +220,73 @@ function handleWebApp(req, res, url, ctx) {
     return true;
   }
 
+  // --- histórico / ficha de um jogador (auth) ---
+  if (req.method === 'GET' && path === '/app/api/player') {
+    const sess = session();
+    if (!sess) return jsonBody(res, send, 401, { error: 'sessão expirada' }), true;
+    const server = store.getServer(String(url.searchParams.get('serverId') || ''));
+    if (!server || !scopedServers(store, sess).some((s) => s.id === server.id)) return jsonBody(res, send, 403, { error: 'servidor fora do seu acesso' }), true;
+    const nick = String(url.searchParams.get('nick') || '').trim();
+    if (!nick) return jsonBody(res, send, 400, { error: 'informe o nick' }), true;
+    const info = store.playerInfo(server, nick);
+    const rep = trust && server.owners[0] ? trust.get(server.owners[0], nick) : null;
+    jsonBody(res, send, 200, { ok: true, nick, info, rep });
+    return true;
+  }
+
+  // --- blacklist: listar (auth) ---
+  if (req.method === 'GET' && path === '/app/api/blacklist') {
+    const sess = session();
+    if (!sess) return jsonBody(res, send, 401, { error: 'sessão expirada' }), true;
+    const entries = blacklist ? blacklist.listFor(sess.ownerKey) : [];
+    jsonBody(res, send, 200, { ok: true, entries });
+    return true;
+  }
+
+  // --- blacklist: adicionar (auth) ---
+  if (req.method === 'POST' && path === '/app/api/blacklist') {
+    readBody(req, res, 1024, (body) => {
+      const sess = session();
+      if (!sess) return jsonBody(res, send, 401, { error: 'sessão expirada' });
+      if (!blacklist) return jsonBody(res, send, 404, { error: 'blacklist indisponível' });
+      let j = {};
+      try { j = JSON.parse(body); } catch { return jsonBody(res, send, 400, { error: 'json inválido' }); }
+      const nick = String(j.nick || '').trim();
+      const ip = String(j.ip || '').trim();
+      const reason = String(j.reason || '').trim();
+      if (!nick && !ip) return jsonBody(res, send, 400, { error: 'informe um nick ou um IP' });
+      if (ip && !isValidIPv4Pattern(ip)) return jsonBody(res, send, 400, { error: 'IP inválido (ex.: 177.10.20.30)' });
+      if (nick && !isValidNick(nick)) return jsonBody(res, send, 400, { error: 'nick inválido (3-24 caracteres)' });
+      const servers = scopedServers(store, sess);
+      if (ip) blacklist.add(sess.ownerKey, { kind: 'ip', value: ip, name: nick, reason, by: sess.ownerKey });
+      if (nick) blacklist.add(sess.ownerKey, { kind: 'nome', value: nick, reason, by: sess.ownerKey });
+      for (const s of servers) {
+        if (ip) store.queueCommand(s, 'banip', ip);
+        if (nick) store.queueCommand(s, 'kickname', nick);
+      }
+      logger.log(`[webapp] blacklist + ${nick || ip} (dono ${sess.ownerKey})`);
+      return jsonBody(res, send, 200, { ok: true, entries: blacklist.listFor(sess.ownerKey), applied: servers.length });
+    });
+    return true;
+  }
+
+  // --- blacklist: remover (auth) ---
+  if (req.method === 'POST' && path === '/app/api/blacklist/remove') {
+    readBody(req, res, 512, (body) => {
+      const sess = session();
+      if (!sess) return jsonBody(res, send, 401, { error: 'sessão expirada' });
+      if (!blacklist) return jsonBody(res, send, 404, { error: 'blacklist indisponível' });
+      let j = {};
+      try { j = JSON.parse(body); } catch { return jsonBody(res, send, 400, { error: 'json inválido' }); }
+      const kind = String(j.kind || '');
+      const value = String(j.value || '');
+      const removed = blacklist.remove(sess.ownerKey, kind, value);
+      if (removed && kind === 'ip') for (const s of scopedServers(store, sess)) store.queueCommand(s, 'unbanip', value);
+      return jsonBody(res, send, removed ? 200 : 404, { ok: removed, entries: blacklist.listFor(sess.ownerKey) });
+    });
+    return true;
+  }
+
   // --- selo público (auth) ---
   if (req.method === 'POST' && path === '/app/api/badge') {
     readBody(req, res, 512, (body) => {
@@ -348,6 +415,24 @@ th{color:var(--mut);font-size:12px;text-transform:uppercase;letter-spacing:.04em
   </div>
 
   <div class="card">
+   <h2>Histórico de jogador</h2>
+   <div class="row"><input id="pq" placeholder="nick exato do jogo" style="flex:1" maxlength="24"><button class="btn sm" id="btn-pq">Buscar</button></div>
+   <div id="pres" style="margin-top:12px"></div>
+  </div>
+
+  <div class="card">
+   <h2>Blacklist — ban cruzado nos seus servidores</h2>
+   <div class="row">
+    <input id="bl-nick" placeholder="nick" style="flex:1;min-width:110px" maxlength="24">
+    <input id="bl-ip" placeholder="IP (opcional)" style="flex:1;min-width:110px" maxlength="15">
+    <input id="bl-reason" placeholder="motivo (opcional)" style="flex:2;min-width:130px" maxlength="100">
+    <button class="btn sm" id="btn-bl">Adicionar</button>
+   </div>
+   <div class="mut" style="font-size:12.5px;margin-top:6px">Quem entra aqui é banido em <b>todos os seus servidores</b> (por IP) e expulso ao conectar (por nick).</div>
+   <div id="bllist" style="margin-top:12px"></div>
+  </div>
+
+  <div class="card">
    <h2>Detecções recentes (24h)</h2>
    <div class="scroll"><table id="recent"><tbody></tbody></table></div>
   </div>
@@ -372,7 +457,7 @@ function api(path,opts){opts=opts||{};opts.headers=opts.headers||{};if(S.session
 
 /* ---- login ---- */
 function showLogin(){$('screen-app').classList.add('hide');$('screen-login').classList.remove('hide')}
-function showApp(){$('screen-login').classList.add('hide');$('screen-app').classList.remove('hide');load()}
+function showApp(){$('screen-login').classList.add('hide');$('screen-app').classList.remove('hide');load();loadBlacklist()}
 $('btn-start').onclick=function(){
  var tok=$('token').value.trim();if(!tok){return}
  $('btn-start').disabled=true;$('m1').innerHTML='';
@@ -464,6 +549,56 @@ function renderWorst(){var rows=S.data.worst||[];
  $('worst').querySelector('tbody').innerHTML=rows.length?('<tr><th>Jogador</th><th>Reputação</th><th>Situação</th><th>Det.</th><th>Bans</th></tr>'+rows.map(function(w){
   return '<tr><td>'+esc(w.name)+'</td><td>'+w.emoji+' '+w.score+'/100</td><td>'+esc(w.label)+'</td><td>'+w.dets+'</td><td>'+w.bans+'</td></tr>'}).join('')):'<tr><td class="mut" style="padding:16px">Sem histórico ainda.</td></tr>'}
 function ago(ms){if(!ms)return'—';var s=Math.floor((Date.now()-ms)/1000);if(s<60)return s+'s';var m=Math.floor(s/60);if(m<60)return m+'min';var h=Math.floor(m/60);if(h<24)return h+'h';return Math.floor(h/24)+'d'}
+
+/* nome da proteção por key/código */
+var PKEY={},PID={};CAT.protections.forEach(function(p){PKEY[p.key]=p.name;PID[p.id]=p.name});
+function protName(key,code){return PKEY[key]||PID[code]||key||code}
+function tfull(ms){if(!ms)return'—';try{return new Date(ms).toLocaleString()}catch(e){return ago(ms)}}
+
+/* ---- histórico de jogador ---- */
+$('btn-pq').onclick=function(){
+ var nick=$('pq').value.trim();if(!nick||!S.cur)return;
+ $('pres').innerHTML='<span class="mut">buscando…</span>';
+ api('/app/api/player?serverId='+encodeURIComponent(S.cur)+'&nick='+encodeURIComponent(nick)).then(function(r){
+  if(r.status!==200){$('pres').innerHTML='<div class="msg err">'+esc(r.j.error||'erro')+'</div>';return}
+  var i=r.j.info,rep=r.j.rep;
+  if(!i.total&&!(i.bans&&i.bans.length)&&!(rep&&rep.known)){$('pres').innerHTML='<div class="mut">Nenhum registro para <b>'+esc(nick)+'</b>.</div>';return}
+  var byp=(i.byProtection||[]).map(function(x){return esc(protName(null,x[0]))+': <b>'+x[1]+'</b>'}).join(' · ')||'—';
+  var ips=(i.ips||[]).length?i.ips.map(function(x){return '<code>'+esc(x)+'</code>'}).join(' '):'—';
+  var bans=(i.bans||[]).length?i.bans.map(function(b){return '#'+b.id+' '+esc(protName(null,b.code))+' '+ago(b.time)+(b.unbannedAt?' (desfeito)':'')}).join('<br>'):'nenhum';
+  var rec=(i.recent||[]).map(function(d){return '<tr><td class="when">'+ago(d.time)+'</td><td>'+esc(protName(d.key,d.code))+'</td><td class="a'+d.action+'">'+(ACT[d.action]||'?')+'</td><td class="when">'+esc(d.detail||'-')+'</td></tr>'}).join('');
+  $('pres').innerHTML=
+   '<div style="font-weight:600;font-size:16px;margin-bottom:8px">🧍 '+esc(nick)+'</div>'+
+   (rep?'<div class="row" style="margin-bottom:10px"><span class="pill" style="color:inherit">'+rep.emoji+' reputação '+rep.score+'/100 — '+esc(rep.label)+'</span></div>':'')+
+   '<div class="mut" style="font-size:13px">Detecções: <b>'+i.total+'</b> · primeira '+tfull(i.first)+' · última '+tfull(i.last)+'</div>'+
+   '<div style="margin:8px 0;font-size:13px"><b>Por proteção:</b> '+byp+'</div>'+
+   '<div style="margin:8px 0;font-size:13px"><b>IPs:</b> '+ips+'</div>'+
+   '<div style="margin:8px 0;font-size:13px"><b>Bans:</b> '+bans+'</div>'+
+   (rec?'<div class="scroll" style="margin-top:8px"><table><tr><th>Quando</th><th>Proteção</th><th>Ação</th><th>Detalhe</th></tr>'+rec+'</table></div>':'');
+ }).catch(function(){$('pres').innerHTML='<div class="msg err">Falha de conexão.</div>'})
+};
+$('pq').addEventListener('keydown',function(e){if(e.key==='Enter')$('btn-pq').click()});
+
+/* ---- blacklist ---- */
+function loadBlacklist(){api('/app/api/blacklist').then(function(r){if(r.status===200)renderBlacklist(r.j.entries||[])})}
+function renderBlacklist(list){
+ if(!list.length){$('bllist').innerHTML='<div class="mut">Sua lista negra está vazia.</div>';return}
+ $('bllist').innerHTML='<div class="scroll"><table><tbody>'+list.map(function(e){
+  var alvo=e.kind==='ip'?('IP <code>'+esc(e.value)+'</code>'):('nick <b>'+esc(e.value)+'</b>');
+  return '<tr><td>🚫 '+alvo+'</td><td class="when">'+esc(e.reason||'')+'</td><td class="when">'+ago(e.at)+'</td>'+
+   '<td><button class="btn ghost sm bl-rm" data-k="'+esc(e.kind)+'" data-v="'+esc(e.value)+'">remover</button></td></tr>'}).join('')+'</tbody></table></div>';
+ Array.prototype.forEach.call($('bllist').querySelectorAll('.bl-rm'),function(b){b.onclick=function(){
+  api('/app/api/blacklist/remove',{method:'POST',body:JSON.stringify({kind:b.getAttribute('data-k'),value:b.getAttribute('data-v')})}).then(function(r){
+   if(r.status===200){renderBlacklist(r.j.entries||[]);toast('✅ removido')}else toast('⚠️ '+(r.j.error||'erro'))})}})
+}
+$('btn-bl').onclick=function(){
+ var nick=$('bl-nick').value.trim(),ip=$('bl-ip').value.trim(),reason=$('bl-reason').value.trim();
+ if(!nick&&!ip){toast('informe nick ou IP');return}
+ api('/app/api/blacklist',{method:'POST',body:JSON.stringify({nick:nick,ip:ip,reason:reason})}).then(function(r){
+  if(r.status!==200){toast('⚠️ '+(r.j.error||'erro'));return}
+  $('bl-nick').value='';$('bl-ip').value='';$('bl-reason').value='';
+  renderBlacklist(r.j.entries||[]);toast('🚫 adicionado em '+r.j.applied+' servidor(es)')})
+};
 
 /* boot */
 if(S.session){showApp()}else{showLogin()}
