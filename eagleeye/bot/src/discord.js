@@ -35,7 +35,7 @@ const MAX_IMPORT_BYTES = 64 * 1024;
 const PERIODS = { '24h': 24 * 3600e3, '7d': 7 * 24 * 3600e3, '30d': 30 * 24 * 3600e3 };
 const PERIOD_LABEL = { '24h': 'últimas 24 horas', '7d': 'últimos 7 dias', '30d': 'últimos 30 dias' };
 // comandos que funcionam sem servidor ativo
-const NO_SERVER_SUBS = new Set(['login', 'meuservidor', 'servidor/lista', 'servidor/usar', 'painelweb']);
+const NO_SERVER_SUBS = new Set(['login', 'meuservidor', 'servidor/lista', 'servidor/usar', 'painelweb', 'painelstatus']);
 // comandos que exigem ser dono do servidor
 const OWNER_SUBS = new Set(['servidor/logout', 'servidor/novachave']);
 const TIMEZONE = process.env.AC_TIMEZONE || 'America/Sao_Paulo';
@@ -132,16 +132,17 @@ function createDiscordBot({
   let statusMsg = null;          // mensagem que o painel edita
   let statusLookedUp = false;    // já procurou uma mensagem existente?
   async function updateStatusPanel() {
-    if (!statusChannelId || !client.isReady()) return;
+    if (!statusChannelId) return { ok: false, error: 'AC_STATUS_CHANNEL_ID não definido' };
+    if (!client.isReady()) return { ok: false, error: 'bot ainda não conectou' };
     let licensedCount = null;
     if (licenses) {
       try { licensedCount = [...store.servers.values()].filter((s) => licenses.activeForServer(s.id)).length; } catch { /* */ }
     }
     let embed;
-    try { embed = buildPanelEmbed(store, { licensedCount }); } catch (err) { logger.error('[status] embed', err.message); return; }
+    try { embed = buildPanelEmbed(store, { licensedCount }); } catch (err) { logger.error('[status] embed', err.message); return { ok: false, error: err.message }; }
     try {
       const channel = await client.channels.fetch(statusChannelId);
-      if (!channel || !channel.isTextBased()) return;
+      if (!channel || !channel.isTextBased()) return { ok: false, error: 'canal não encontrado ou não é de texto' };
       // na primeira vez, reaproveita um painel já postado pelo bot (sobrevive a restart)
       if (!statusMsg && !statusLookedUp) {
         statusLookedUp = true;
@@ -152,15 +153,22 @@ function createDiscordBot({
         } catch { /* sem permissão de ler histórico: cria uma nova */ }
       }
       if (statusMsg) await statusMsg.edit({ embeds: [embed] });
-      else statusMsg = await channel.send({ embeds: [embed] });
+      else { statusMsg = await channel.send({ embeds: [embed] }); logger.log(`[status] painel publicado no canal ${statusChannelId}`); }
+      return { ok: true };
     } catch (err) {
       logger.error(`[status] canal ${statusChannelId}:`, err.message);
       if (err.code === 10008) statusMsg = null; // mensagem apagada: recria na próxima
+      if (err.code === 50001 || err.code === 50013) return { ok: false, error: 'o bot não tem permissão (Ver canal / Enviar mensagens / Inserir links) nesse canal' };
+      if (err.code === 10003) return { ok: false, error: 'canal não existe (confira o AC_STATUS_CHANNEL_ID)' };
+      return { ok: false, error: err.message };
     }
   }
   if (statusChannelId) {
-    client.once('ready', () => { updateStatusPanel(); });
+    client.once('ready', () => { updateStatusPanel().catch(() => {}); });
     setInterval(() => { updateStatusPanel().catch(() => {}); }, 60 * 1000).unref();
+    logger.log(`[status] painel de status ativo no canal ${statusChannelId} (atualiza a cada 60s).`);
+  } else {
+    logger.log('[status] painel de status desligado (AC_STATUS_CHANNEL_ID vazio).');
   }
 
   // ------------------------------------------------------------- helpers
@@ -352,6 +360,15 @@ function createDiscordBot({
         '⚠️ Esse link é **pessoal e secreto** (dá acesso de leitura aos seus dados). Não compartilhe. Gerar de novo invalida o anterior; vale 30 dias.',
         publicBaseUrl ? '' : '_Obs.: defina `AC_PUBLIC_URL` no bot para o link já sair com o domínio certo._',
       ].filter(Boolean).join('\n'));
+    }
+
+    if (sub === 'painelstatus') {
+      if (!permissions.isBotAdmin(interaction)) return reply(interaction, '⛔ Só administradores do bot usam esse comando.');
+      if (!statusChannelId) return reply(interaction, '❌ `AC_STATUS_CHANNEL_ID` não está definido no bot.');
+      const r = await updateStatusPanel();
+      return reply(interaction, r.ok
+        ? `✅ Painel de status publicado/atualizado em <#${statusChannelId}>.`
+        : `❌ Não consegui: ${r.error}`);
     }
 
     if (sub === 'servidor/lista') {

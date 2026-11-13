@@ -23,6 +23,7 @@ const acCommand = new SlashCommandBuilder()
   // ------------------------------------------------------------ atalhos
   .addSubcommand((s) => s.setName('painel').setDescription('Painel interativo para ativar/desativar proteções'))
   .addSubcommand((s) => s.setName('painelweb').setDescription('Gera o link do painel web ao vivo (dashboard no navegador)'))
+  .addSubcommand((s) => s.setName('painelstatus').setDescription('Publica/atualiza o painel de status no canal (admin do bot)'))
   .addSubcommand((s) => s.setName('status').setDescription('Status do anti-cheat e do servidor'))
   .addSubcommand((s) => s.setName('global').setDescription('Liga/desliga o anti-cheat inteiro')
     .addBooleanOption((o) => o.setName('ativo').setDescription('true = ligado').setRequired(true)))
