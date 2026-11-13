@@ -1,49 +1,42 @@
 cmake_minimum_required(VERSION 3.10)
 project(eagleeye CXX)
 
-# Plugins SA-MP/open.mp sao 32-bit.
+# Plugins SA-MP/open.mp sao 32-bit. Veja tambem build.sh (mingw p/ Windows).
 set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-option(EE_HAVE_SDK "Compilar com o SDK de plugin do SA-MP + sampgdk" ON)
-
+# Plugin COMPLETO: ponte (natives) + nucleo + Detector + SDK (amxplugin).
+# Quem fala com o jogo e a include; o plugin so expoe natives (sem sampgdk).
 set(EE_SOURCES
+    src/ee_bridge.cpp        # ponte: estado + worker de rede + natives + ciclo de vida
     src/ee_crypto.cpp
     src/ee_store.cpp
     src/ee_license.cpp
     src/ee_http.cpp
-    src/ee_detect.cpp        # motor: config + tolerancia + relatorios
-    src/ee_cat_player.cpp    # categoria JOGADOR
-    src/ee_cat_weapons.cpp   # categoria ARMAS E COMBATE
-    src/ee_cat_movement.cpp  # categoria MOVIMENTO (+ vel. veiculo, crasher pos.)
-    src/ee_cat_vehicles.cpp  # categoria VEICULOS
-    src/ee_cat_network.cpp   # categoria REDE, CHAT E SERVIDOR
-    src/ee_cat_extra.cpp     # categoria EXTRA (nick, anim, skin, flood, interior)
-    src/ee_plugin.cpp
-    # src/ee_detections.cpp   # cola sampgdk (hooks de natives + callbacks)
+    src/ee_detect.cpp        # motor: parse da config do bot + tolerancia
+    sdk/amxplugin.cpp        # cola do SDK: amx_Register/amx_GetString/... via pAMXFunctions
 )
 
 add_library(eagleeye SHARED ${EE_SOURCES})
 set_target_properties(eagleeye PROPERTIES PREFIX "" OUTPUT_NAME "eagleeye")
 
+target_include_directories(eagleeye PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/sdk
+    ${CMAKE_SOURCE_DIR}/sdk/amx
+)
+
 # 32-bit
 target_compile_options(eagleeye PRIVATE -m32)
 target_link_options(eagleeye PRIVATE -m32)
 
-if(EE_HAVE_SDK)
-    target_compile_definitions(eagleeye PRIVATE EE_HAVE_SDK)
-    # ajuste os caminhos do SDK e da sampgdk:
-    target_include_directories(eagleeye PRIVATE
-        ${CMAKE_SOURCE_DIR}/sdk          # amx/ e plugincommon.h
-        ${CMAKE_SOURCE_DIR}/sampgdk      # sampgdk.h
-    )
-    # a amalgamation da sampgdk entra como fonte:
-    # target_sources(eagleeye PRIVATE ${CMAKE_SOURCE_DIR}/sampgdk/sampgdk.c)
-endif()
-
 if(WIN32)
+    target_compile_definitions(eagleeye PRIVATE HAVE_STDINT_H)
     target_link_libraries(eagleeye PRIVATE ws2_32)
+    # exporta Supports/Load/Unload/AmxLoad sem a decoracao @N do __stdcall
+    target_link_options(eagleeye PRIVATE -Wl,--kill-at)
 else()
+    target_compile_definitions(eagleeye PRIVATE LINUX)
     target_link_libraries(eagleeye PRIVATE pthread)
 endif()

@@ -11,7 +11,7 @@
 	#error "[EagleEYE] Em filterscripts use <eagleeye_fs>, nao <eagleeye>."
 #endif
 
-#define EE_VERSION "2.8.0"
+#define EE_VERSION "2.9.0"
 
 #if !defined EE_API_HOST
 	#define EE_API_HOST "127.0.0.1:8090"
@@ -32,6 +32,36 @@
 // Deixe vazio para nao mostrar nada. Ex.: "Este servidor e protegido pelo EagleEYE."
 #if !defined EE_WELCOME_BANNER
 	#define EE_WELCOME_BANNER ""
+#endif
+
+// ======================================================================
+//  MODO PLUGIN (EE_USE_PLUGIN)
+//  Com EE_USE_PLUGIN definido, a include NAO fala com a API: ela so LE do
+//  plugin (natives abaixo). O plugin (binario) guarda o host/caminho/chave
+//  da API e o token OCULTOS, faz toda a rede com o bot e entrega para a
+//  include so o que ela precisa para agir. Sem EE_USE_PLUGIN, a include
+//  funciona sozinha (modo standalone), como sempre.
+// ======================================================================
+#if defined EE_USE_PLUGIN
+	native EE_Plugin_Ready();
+	native EE_Plugin_Token(dest[], len = sizeof dest);
+	native EE_Plugin_ServerId(dest[], len = sizeof dest);
+	native EE_Plugin_Licensed();
+	native EE_Plugin_Online();
+	native EE_Plugin_Global();
+	native EE_Plugin_ConfigSeq();
+	native EE_Plugin_PollSeconds();
+	native EE_Plugin_Enabled(code);
+	native EE_Plugin_Action(code);
+	native EE_Plugin_Tolerance(code);
+	native EE_Plugin_Value(code);
+	native EE_Plugin_WhitelistCount();
+	native EE_Plugin_WhitelistGet(index, dest[], len = sizeof dest);
+	native EE_Plugin_Report(playerid, const name[], const ip[], code, action, hits, tol, const detail[]);
+	native EE_Plugin_Heartbeat(players, maxPlayers, port, const host[], rconWeak);
+	native EE_Plugin_Players(const data[]);
+	native EE_Plugin_PullCommand(&id, type[], tlen = sizeof type, arg[], alen = sizeof arg);
+	native EE_Plugin_NewToken(dest[], len = sizeof dest);
 #endif
 
 #if !defined _INC_open_mp
@@ -311,6 +341,7 @@ static stock
 	gEE_PollSentTick = 0,
 	bool:gEE_Offline = false,
 	gEE_LastCmd = 0,
+	gEE_PluginSeq = -1,
 	gEE_ServerId[24],
 	gEE_Token[72],
 	bool:gEE_Linked = false,
@@ -826,6 +857,9 @@ static stock EE_SaveIdentity()
 
 static stock EE_ReportRaw(playerid, const name[], const ip[], code, action, hits, const detail[])
 {
+#if defined EE_USE_PLUGIN
+	EE_Plugin_Report(playerid, name, ip, code, action, hits, gEE_Prot[code][dpTolerance], detail);
+#else
 	if (gEE_ServerId[0] == EOS) return;
 	new ename[MAX_PLAYER_NAME * 3 + 1], edetail[200], body[400], url[352];
 	EE_UrlEncode(name, ename);
@@ -834,6 +868,7 @@ static stock EE_ReportRaw(playerid, const name[], const ip[], code, action, hits
 		playerid, ename, ip, code, action, hits, gEE_Prot[code][dpTolerance], edetail);
 	format(url, sizeof url, "%s%s/ac/report?id=%s&token=%s&k=%s", EE_API_HOST, EE_API_PATH, gEE_ServerId, gEE_Token, EE_API_KEY);
 	HTTP(2, HTTP_POST, url, body, "EE_OnReport");
+#endif
 }
 
 static stock EE_Report(playerid, code, action, hits, const detail[])
@@ -845,6 +880,20 @@ static stock EE_Report(playerid, code, action, hits, const detail[])
 
 static stock EE_SendPlayerList()
 {
+#if defined EE_USE_PLUGIN
+	new name[MAX_PLAYER_NAME + 1], ename[MAX_PLAYER_NAME * 3 + 1], entry[96], count = 0;
+	gEE_PListBody[0] = EOS;
+	for (new i = 0, j = GetPlayerPoolSize(); i <= j && count < 80; i++)
+	{
+		if (!IsPlayerConnected(i) || IsPlayerNPC(i)) continue;
+		GetPlayerName(i, name, sizeof name);
+		EE_UrlEncode(name, ename);
+		format(entry, sizeof entry, "%d%%2C%s%%2C%d%%2C%d%%3B", i, ename, GetPlayerPing(i), GetPlayerScore(i));
+		strcat(gEE_PListBody, entry);
+		count++;
+	}
+	EE_Plugin_Players(gEE_PListBody);
+#else
 	if (gEE_ServerId[0] == EOS) return;
 	new name[MAX_PLAYER_NAME + 1], ename[MAX_PLAYER_NAME * 3 + 1], entry[96], url[352], count = 0;
 	gEE_PListBody = "p=";
@@ -859,6 +908,7 @@ static stock EE_SendPlayerList()
 	}
 	format(url, sizeof url, "%s%s/ac/players?id=%s&token=%s&k=%s", EE_API_HOST, EE_API_PATH, gEE_ServerId, gEE_Token, EE_API_KEY);
 	HTTP(3, HTTP_POST, url, gEE_PListBody, "EE_OnReport");
+#endif
 }
 
 public EE_OnReport(index, response_code, data[])
@@ -985,8 +1035,76 @@ static stock bool:EE_IsRconWeak()
 	return false;
 }
 
+#if defined EE_USE_PLUGIN
+// Le a configuracao do plugin para o array local (so quando muda).
+static stock EE_PluginRefreshConfig()
+{
+	gEE_Global = EE_Plugin_Global() ? true : false;
+	for (new c = 0; c < EE_MAX; c++)
+	{
+		gEE_Prot[c][dpEnabled]   = EE_Plugin_Enabled(c) ? true : false;
+		gEE_Prot[c][dpAction]    = EE_Plugin_Action(c);
+		gEE_Prot[c][dpTolerance] = EE_Plugin_Tolerance(c);
+		gEE_Prot[c][dpValue]     = EE_Plugin_Value(c);
+	}
+	new n = EE_Plugin_WhitelistCount();
+	if (n > EE_MAX_WHITELIST) n = EE_MAX_WHITELIST;
+	gEE_WhitelistCount = 0;
+	for (new i = 0; i < n; i++)
+	{
+		if (EE_Plugin_WhitelistGet(i, gEE_Whitelist[gEE_WhitelistCount], MAX_PLAYER_NAME + 1))
+			gEE_WhitelistCount++;
+	}
+	if (!gEE_Linked)
+	{
+		gEE_Linked = true;
+		print("[EagleEYE] Servidor vinculado! Configuracao recebida pelo plugin.");
+	}
+	gEE_ConfigLoaded = true;
+	for (new i = 0, j = GetPlayerPoolSize(); i <= j; i++)
+		if (IsPlayerConnected(i)) EE_RefreshWhitelist(i);
+}
+#endif
+
 static stock EE_Poll()
 {
+#if defined EE_USE_PLUGIN
+	// 1) heartbeat: valores que o plugin usa na proxima consulta ao bot
+	new players = 0;
+	for (new i = 0, j = GetPlayerPoolSize(); i <= j; i++)
+		if (IsPlayerConnected(i) && !IsPlayerNPC(i)) players++;
+	new host[64];
+	GetConsoleVarAsString(EE_CVAR_NAME, host, sizeof host);
+	EE_Plugin_Heartbeat(players, GetMaxPlayers(), GetConsoleVarAsInt(EE_CVAR_PORT), host, EE_IsRconWeak() ? 1 : 0);
+
+	// 2) estado online/offline
+	new bool:wasOffline = gEE_Offline;
+	gEE_Offline = EE_Plugin_Online() ? false : true;
+	if (wasOffline && !gEE_Offline) print("[EagleEYE] Conexao com o bot restabelecida (plugin).");
+
+	// 2b) sem licenca valida, o anti-cheat NAO age (o plugin manda)
+	gEE_Global = (EE_Plugin_Licensed() == 1 && EE_Plugin_Global()) ? true : false;
+
+	// 3) configuracao nova? re-le do plugin
+	if (EE_Plugin_ConfigSeq() != gEE_PluginSeq)
+	{
+		gEE_PluginSeq = EE_Plugin_ConfigSeq();
+		EE_PluginRefreshConfig();
+	}
+
+	// 4) token trocado pelo bot
+	new nt[72];
+	if (EE_Plugin_NewToken(nt, sizeof nt) && EE_ValidToken(nt))
+	{
+		EE_SetToken(nt);
+		EE_PrintLogin();
+	}
+
+	// 5) comandos pendentes (kick, ban, aviso, freeze, ...)
+	new cid, ctype[20], carg[160], g = 0;
+	while (EE_Plugin_PullCommand(cid, ctype, sizeof ctype, carg, sizeof carg) && g++ < 30)
+		EE_RunCommand(cid, ctype, carg);
+#else
 	if (gEE_ServerId[0] == EOS) return;
 	new tick = GetTickCount();
 	if (gEE_PollPending && tick - gEE_PollSentTick < 30000) return;
@@ -1005,6 +1123,7 @@ static stock EE_Poll()
 	gEE_PollPending = true;
 	gEE_PollSentTick = tick;
 	HTTP(0, HTTP_GET, url, "", "EE_OnConfig");
+#endif
 }
 
 static stock EE_RunCommand(id, const type[], const arg[])
@@ -1634,6 +1753,19 @@ public OnGameModeInit()
 	#else
 		new ret = 1;
 	#endif
+#if defined EE_USE_PLUGIN
+	if (!EE_Plugin_Ready())
+	{
+		print("[EagleEYE] ERRO: o plugin eagleeye nao esta carregado! Confira 'plugins' no server.cfg.");
+	}
+	else
+	{
+		new token[72];
+		EE_Plugin_Token(token, sizeof token);
+		if (EE_ValidToken(token)) EE_SetToken(token);
+		printf("[EagleEYE] ID do servidor: %s (o plugin guarda o token; digite 'eagleeye' no console)", gEE_ServerId);
+	}
+#else
 	if (EE_LoadIdentity())
 	{
 		printf("[EagleEYE] ID do servidor: %s (digite 'eagleeye' no console para ver o token de acesso)", gEE_ServerId);
@@ -1648,6 +1780,7 @@ public OnGameModeInit()
 		print("[EagleEYE] Primeira inicializacao: token de acesso gerado.");
 		EE_PrintLogin();
 	}
+#endif
 	EE_Poll();
 	return ret;
 }

@@ -3,6 +3,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert');
 const { panelData, buildPanelEmbed } = require('../src/statuspanel');
+const { LATEST_INCLUDE } = require('../src/security');
 
 const now = 1_000_000_000_000;
 
@@ -10,7 +11,7 @@ function mkStore() {
   const srvA = { id: 'EE-AAA', name: 'Drizzie City Roleplay', owners: ['dono1'], activated: true, bans: [{ id: 1, time: now - 1000 }] };
   const srvB = { id: 'EE-BBB', name: 'Vice Legacy', owners: [], activated: true, bans: [] };
   const status = new Map([
-    ['EE-AAA', { players: 120, maxPlayers: 300, version: '2.8.0', lastSeen: now }],
+    ['EE-AAA', { players: 120, maxPlayers: 300, version: LATEST_INCLUDE, lastSeen: now }],
     ['EE-BBB', { players: 0, maxPlayers: 100, version: '2.3.0', lastSeen: 0 }],
   ]);
   const hist = new Map([

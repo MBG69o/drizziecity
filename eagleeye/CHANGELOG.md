@@ -2,6 +2,12 @@
 
 ## v2.9.0 — 13/11/2026
 
+### 🧩 Plugin 100% funcional + include "falando" com o plugin
+- O **plugin** (eagleeye.dll / eagleeye.so) virou o **cérebro**: guarda o **host/caminho/chave da API** e o **token** de forma **oculta/cifrada** no binário, faz **toda a rede** com o bot (licença, config, relatórios) numa thread própria e **expõe natives**. A **include** passou a ser o **corpo**: em `EE_USE_PLUGIN`, ela **só lê** do plugin (config, comandos, token), reporta pelo plugin e **não contém nenhum dado da API**.
+- Compila para **Windows (.dll)** e **Linux (.so)** 32 bits com o SDK oficial do SA-MP (sem sampgdk, pois quem fala com o jogo é a include). `./build.sh` gera os dois.
+- Segurança: sem licença válida, o anti-cheat **não age**; o token nunca sai do plugin; os segredos ficam ofuscados no binário.
+- Uso: `#include <eagleeye_plugin>` no gamemode (em vez de `<eagleeye>`).
+
 ### 📊 Painel de status no Discord
 - Uma **mensagem fixa que se atualiza sozinha** (a cada minuto) num canal dedicado (`AC_STATUS_CHANNEL_ID`), com a visão geral de **todos** os servidores:
   - total de servidores, **online/offline** e **jogadores** agora;

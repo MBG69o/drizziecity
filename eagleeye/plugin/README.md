@@ -1,6 +1,22 @@
 # 🦅 EagleEYE — versão em plugin (.dll / .so)
 
-Versão do EagleEYE empacotada como **plugin nativo**, para vender/alugar sem entregar o código-fonte e com **licença revogável**. O cliente recebe só o binário, o include "casca" e uma chave de licença.
+Versão do EagleEYE empacotada como **plugin nativo**, para vender/alugar sem entregar o código-fonte e com **licença revogável**. O cliente recebe só o binário, o include e uma chave de licença.
+
+## Arquitetura (plugin ↔ include)
+
+O **plugin é o cérebro** e a **include é o corpo**:
+
+| | Plugin (`eagleeye.dll`/`.so`) | Include (`eagleeye_plugin.inc`) |
+|---|---|---|
+| Host/caminho/chave da API | **guardados ocultos** (ofuscados) | não tem |
+| Token do servidor | **gera e guarda cifrado** | só lê para mostrar |
+| Rede com o bot (licença, config, relatórios) | **faz tudo** (thread própria) | não faz nada |
+| Configuração das proteções | recebe do bot e **expõe por natives** | **lê** pelos natives |
+| Detecção (lê o estado do jogo) | — | faz, e **reporta pelo plugin** |
+
+Assim o cliente nunca vê o endereço da API, nem a chave, nem o token — eles vivem **só dentro do binário**. A include compilada (modo `EE_USE_PLUGIN`) só conversa com o plugin por natives (`EE_Plugin_*`).
+
+No gamemode, em vez de `#include <eagleeye>`, use **`#include <eagleeye_plugin>`**.
 
 ## Por que plugin
 
@@ -42,8 +58,12 @@ As detecções são **funções puras**: recebem os valores já lidos do jogo e 
 
 ## Build
 
-- **Núcleo (pronto, compila agora):** `./build.sh` gera `eagleeye.dll` (Windows 32 bits) e `eagleeye.so` (Linux 32 bits). Esse plugin **carrega no servidor**, gera/lê o token cifrado, mostra no console e roda o loop de licença/config com o bot. A `.dll` exporta `Supports`/`Load`/`Unload` e importa só `KERNEL32`/`msvcrt`/`WS2_32`. Veja `BUILD.md`.
-- **Falta para o anti-cheat completo — a cola sampgdk** (`ee_detections.cpp`): ligar os callbacks do servidor e os hooks dos natives (GivePlayerMoney, SetPlayerHealth...) às funções já portadas. É código de ligação, não de lógica, e precisa ser **testado num servidor real** antes de distribuir (requer o SDK do SA-MP + sampgdk).
+`./build.sh` gera **`eagleeye.dll`** (Windows 32 bits) e **`eagleeye.so`** (Linux 32 bits) — o plugin **completo**: ponte com os natives (`ee_bridge`), núcleo seguro, motor de config (`ee_detect`) e o SDK oficial do SA-MP (`sdk/amxplugin.cpp`). **Não usa a sampgdk** — quem fala com o jogo é a include, então o plugin só precisa *expor* natives.
+
+- A `.dll` exporta `Supports`/`Load`/`Unload`/`AmxLoad`/`AmxUnload` e importa só `KERNEL32`/`msvcrt`/`WS2_32`; a `.so`, só a glibc padrão.
+- Pré-requisitos e geração dos segredos: veja `BUILD.md`.
+
+> ⚠️ **Validação final num servidor real:** o build e o registro de natives estão comprovados aqui, mas o ambiente de montagem não roda um servidor SA-MP/open.mp. Teste o par plugin+include (`eagleeye_plugin.inc`) num servidor de teste antes de distribuir.
 
 ## Como o cliente instala
 
