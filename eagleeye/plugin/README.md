@@ -40,10 +40,10 @@ Toda a lógica das 42 proteções já está em C++, dividida por categoria e com
 
 As detecções são **funções puras**: recebem os valores já lidos do jogo e devolvem a detecção + a correção. Rode `bash test/run.sh` para ver todos os testes.
 
-## O que falta para o binário final
+## Build
 
-- **Baixar o SDK do SA-MP + sampgdk** e compilar o `.dll`/`.so` (veja `BUILD.md`). O proxy do ambiente onde isto foi montado bloqueia o download.
-- **A cola sampgdk** (`ee_detections.cpp`): ligar os callbacks do servidor e os hooks dos natives (GivePlayerMoney, SetPlayerHealth...) às funções já portadas. É código de ligação, não de lógica, e precisa ser **testado num servidor real** antes de distribuir.
+- **Núcleo (pronto, compila agora):** `./build.sh` gera `eagleeye.dll` (Windows 32 bits) e `eagleeye.so` (Linux 32 bits). Esse plugin **carrega no servidor**, gera/lê o token cifrado, mostra no console e roda o loop de licença/config com o bot. A `.dll` exporta `Supports`/`Load`/`Unload` e importa só `KERNEL32`/`msvcrt`/`WS2_32`. Veja `BUILD.md`.
+- **Falta para o anti-cheat completo — a cola sampgdk** (`ee_detections.cpp`): ligar os callbacks do servidor e os hooks dos natives (GivePlayerMoney, SetPlayerHealth...) às funções já portadas. É código de ligação, não de lógica, e precisa ser **testado num servidor real** antes de distribuir (requer o SDK do SA-MP + sampgdk).
 
 ## Como o cliente instala
 

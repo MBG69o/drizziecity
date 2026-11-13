@@ -2,6 +2,23 @@
 
 Plugins SA-MP/open.mp são **32 bits**. Compile num ambiente 32 bits (ou com toolchain cruzada) e nunca distribua o `ee_secrets.h` nem o `secrets.json`.
 
+## ⚡ Jeito rápido: só o núcleo (`.dll` + `.so`), sem a sampgdk
+
+Já vem um script que compila o **núcleo** (crypto, store, licença, http + entry-point) para os dois sistemas. O plugin resultante **carrega no servidor**, gera/lê o token cifrado, mostra no console e roda o loop de licença/config com o bot. Ele ainda **não engancha as detecções** (isso é a parte 1–5 abaixo, com a sampgdk), mas serve para empacotar, assinar e validar o binário.
+
+```bash
+# toolchains (Debian/Ubuntu):
+sudo apt-get install -y g++-mingw-w64-i686 g++-multilib
+# segredos (para testar, copie o exemplo; para produção, use o obfuscate.py — ver parte 2):
+cp src/ee_secrets.example.h src/ee_secrets.h
+./build.sh
+# saída: eagleeye.dll (Windows) e eagleeye.so (Linux), ambos 32 bits
+```
+
+O `build.sh` usa `i686-w64-mingw32-g++-posix` (preciso para `std::thread`) e `-Wl,--kill-at` (exporta `Supports`/`Load`/`Unload` sem a decoração `@N` do `__stdcall`). A `.dll` importa só `KERNEL32`, `msvcrt` e `WS2_32`; a `.so` só a glibc padrão — nada extra no servidor.
+
+Para o anti-cheat **completo** (com detecção), siga as partes abaixo, que adicionam o SDK do SA-MP + a sampgdk e a cola `ee_detections.cpp`.
+
 ## 1. Dependências (você baixa uma vez)
 
 - **SDK de plugin do SA-MP** (headers `amx/` e `plugincommon.h`): https://github.com/Zeex/samp-plugin-sdk → copie para `plugin/sdk/`.
