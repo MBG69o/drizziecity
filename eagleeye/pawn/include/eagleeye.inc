@@ -11,7 +11,7 @@
 	#error "[EagleEYE] Em filterscripts use <eagleeye_fs>, nao <eagleeye>."
 #endif
 
-#define EE_VERSION "2.9.0"
+#define EE_VERSION "2.10.0"
 
 #if !defined EE_API_HOST
 	#define EE_API_HOST "127.0.0.1:8090"
@@ -163,7 +163,12 @@
 #define EE_HORNSPAM       (39)
 #define EE_WORLDJUMP      (40)
 #define EE_FREEZEBYPASS   (41)
-#define EE_MAX            (42)
+#define EE_ACTIONHACK     (42)
+#define EE_WEAPONSWITCH   (43)
+#define EE_CHATCRASH      (44)
+#define EE_ATTACHHACK     (45)
+#define EE_CROUCHSPAM     (46)
+#define EE_MAX            (47)
 
 #define EE_ACTION_WARN    (0)
 #define EE_ACTION_KICK    (1)
@@ -254,7 +259,13 @@ enum E_EE_PLAYER
 	bool:acFrozen,
 	acInterior,
 	acVWorld,
-	acWorldImmuneUntil
+	acWorldImmuneUntil,
+
+	acLastWeapon,
+	acWSwitchTick,
+	acWSwitchStrikes,
+	acCrouchTick,
+	acCrouchCount
 }
 
 enum E_EE_PICKUP
@@ -275,7 +286,8 @@ static stock const gEE_Names[EE_MAX][] =
 	"Pickup falso", "Checkpoint falso", "C-Bug", "RCON brute force", "NPC falso",
 	"Flood de reconexao", "Aimbot", "Nick invalido", "Animacao crasher",
 	"Skin invalido", "Spam de objeto", "Flood de PM", "Spam de buzina",
-	"Troca de interior", "Anti-freeze"
+	"Troca de interior", "Anti-freeze", "Acao invalida", "Troca de arma",
+	"Chat crasher", "Anexo invalido", "Spam de agachar"
 };
 
 static stock const gEE_ActPast[2][8]   = {"kickado", "banido"};
@@ -328,7 +340,12 @@ static stock const gEE_Defaults[EE_MAX][E_EE_PROT] =
 	{true,  EE_ACTION_KICK, 3,  5},
 	{false, EE_ACTION_WARN, 3,  10},
 	{true,  EE_ACTION_KICK, 2,  0},
-	{true,  EE_ACTION_KICK, 2,  0}
+	{true,  EE_ACTION_KICK, 2,  0},
+	{true,  EE_ACTION_KICK, 1,  0},
+	{true,  EE_ACTION_KICK, 3,  150},
+	{true,  EE_ACTION_KICK, 1,  0},
+	{true,  EE_ACTION_KICK, 1,  0},
+	{false, EE_ACTION_WARN, 3,  10}
 };
 
 static stock
@@ -676,6 +693,11 @@ static stock EE_ResetPlayer(playerid)
 	gEE_P[playerid][acInterior] = 0;
 	gEE_P[playerid][acVWorld] = 0;
 	gEE_P[playerid][acWorldImmuneUntil] = tick + 5000;
+	gEE_P[playerid][acLastWeapon] = -1;
+	gEE_P[playerid][acWSwitchTick] = 0;
+	gEE_P[playerid][acWSwitchStrikes] = 0;
+	gEE_P[playerid][acCrouchTick] = 0;
+	gEE_P[playerid][acCrouchCount] = 0;
 	for (new c = 0; c < EE_MAX; c++)
 	{
 		gEE_Hits[playerid][c] = 0;
@@ -2333,9 +2355,31 @@ static stock bool:EE_AdvertCheck(playerid, const text[])
 	return false;
 }
 
+// Texto que trava os outros clientes: caracteres de controle ou cores demais.
+static stock bool:EE_ChatCrashCheck(playerid, const text[])
+{
+	if (!EE_ValidPlayer(playerid) || !EE_IsEnabled(EE_CHATCRASH) || EE_IsPlayerImmune(playerid)) return false;
+	new len = strlen(text), colors = 0, controls = 0;
+	for (new i = 0; i < len; i++)
+	{
+		new c = text[i];
+		if (c < 32 && c != '\t') controls++;
+		if (c == '~') colors++;
+		if (c == '{' && i + 7 < len && text[i + 7] == '}') colors++;
+	}
+	if (controls == 0 && colors <= 12 && len <= 200) return false;
+	if (EE_Detect(playerid, EE_CHATCRASH, "texto com caracteres/cores que travam o cliente"))
+	{
+		SendClientMessage(playerid, EE_COLOR, "[EagleEYE] Mensagem bloqueada.");
+		return true;
+	}
+	return false;
+}
+
 public OnPlayerText(playerid, text[])
 {
 	if (EE_FloodCheck(playerid)) return 0;
+	if (EE_ChatCrashCheck(playerid, text)) return 0;
 	if (EE_AdvertCheck(playerid, text)) return 0;
 	#if defined EE_OnPlayerText
 		return EE_OnPlayerText(playerid, text);
@@ -2562,6 +2606,18 @@ public OnPlayerKeyStateChange(playerid, EE_T_KEY:newkeys, EE_T_KEY:oldkeys)
 		format(det, sizeof det, "agachou %d ms apos atirar", GetTickCount() - gEE_P[playerid][acCbugTick]);
 		gEE_P[playerid][acCbugTick] = 0;
 		EE_Detect(playerid, EE_CBUG, det);
+	}
+
+	if ((_:newkeys & 2) && !(_:oldkeys & 2) && EE_ValidPlayer(playerid) && !gEE_P[playerid][acNPC]
+		&& EE_IsEnabled(EE_CROUCHSPAM) && !EE_IsPlayerImmune(playerid))
+	{
+		new ct = GetTickCount();
+		if (ct - gEE_P[playerid][acCrouchTick] > 3000) { gEE_P[playerid][acCrouchTick] = ct; gEE_P[playerid][acCrouchCount] = 0; }
+		if (++gEE_P[playerid][acCrouchCount] > gEE_Prot[EE_CROUCHSPAM][dpValue])
+		{
+			gEE_P[playerid][acCrouchCount] = 0;
+			EE_Detect(playerid, EE_CROUCHSPAM, "agachou/levantou em excesso");
+		}
 	}
 	#if defined EE_OnPlayerKeyStateChange
 		return EE_OnPlayerKeyStateChange(playerid, newkeys, oldkeys);
@@ -3013,6 +3069,26 @@ stock EE_T_BOOL:EE_SetPlayerInterior(playerid, interiorid)
 #endif
 #define SetPlayerInterior EE_SetPlayerInterior
 
+// Bloqueia anexos invalidos (slot 0-9, modelo > 0, bone 1-18): previne o
+// "attach crasher" que travaria todos os clientes. Proteca "Anexo invalido".
+stock EE_T_BOOL:EE_SetPlayerAttachedObject(playerid, index, modelid, bone,
+	Float:fX = 0.0, Float:fY = 0.0, Float:fZ = 0.0, Float:fRotX = 0.0, Float:fRotY = 0.0, Float:fRotZ = 0.0,
+	Float:fScaleX = 1.0, Float:fScaleY = 1.0, Float:fScaleZ = 1.0, materialcolor1 = 0, materialcolor2 = 0)
+{
+	if (EE_IsEnabled(EE_ATTACHHACK) && (index < 0 || index > 9 || modelid <= 0 || bone < 1 || bone > 18))
+	{
+		printf("[EagleEYE] Anexo invalido bloqueado (jogador %d, slot %d, modelo %d, bone %d) - evita crasher.", playerid, index, modelid, bone);
+		return EE_T_BOOL:0;
+	}
+	return SetPlayerAttachedObject(playerid, index, modelid, bone, fX, fY, fZ, fRotX, fRotY, fRotZ, fScaleX, fScaleY, fScaleZ, materialcolor1, materialcolor2);
+}
+#if defined _ALS_SetPlayerAttachedObject
+	#undef SetPlayerAttachedObject
+#else
+	#define _ALS_SetPlayerAttachedObject
+#endif
+#define SetPlayerAttachedObject EE_SetPlayerAttachedObject
+
 stock EE_T_BOOL:EE_SetPlayerVirtualWorld(playerid, worldid)
 {
 	if (0 <= playerid < MAX_PLAYERS)
@@ -3129,6 +3205,44 @@ static stock EE_CheckExtraUpdate(playerid)
 		{
 			EE_Detect(playerid, EE_FREEZEBYPASS, "moveu-se congelado pelo servidor");
 			gEE_P[playerid][acPosImmuneUntil] = tick + 2000;
+		}
+	}
+
+	if (EE_IsEnabled(EE_ACTIONHACK))
+	{
+		new sa = EE_RawSpecialAction(playerid);
+		if (!((0 <= sa <= 13) || (20 <= sa <= 25) || sa == 68))
+		{
+			new det[48];
+			format(det, sizeof det, "acao especial invalida: %d", sa);
+			EE_Detect(playerid, EE_ACTIONHACK, det);
+		}
+	}
+
+	if (EE_IsEnabled(EE_WEAPONSWITCH))
+	{
+		new w = GetPlayerWeapon(playerid), minMs = gEE_Prot[EE_WEAPONSWITCH][dpValue];
+		if (minMs < 1) minMs = 150;
+		if (w != gEE_P[playerid][acLastWeapon])
+		{
+			new dt = tick - gEE_P[playerid][acWSwitchTick];
+			new prev = gEE_P[playerid][acLastWeapon];
+			gEE_P[playerid][acLastWeapon] = w;
+			gEE_P[playerid][acWSwitchTick] = tick;
+			if (prev != -1)
+			{
+				if (dt >= 0 && dt < minMs)
+				{
+					if (++gEE_P[playerid][acWSwitchStrikes] >= 4)
+					{
+						gEE_P[playerid][acWSwitchStrikes] = 0;
+						new det[64];
+						format(det, sizeof det, "trocou de arma em %d ms (limite %d)", dt, minMs);
+						EE_Detect(playerid, EE_WEAPONSWITCH, det);
+					}
+				}
+				else if (gEE_P[playerid][acWSwitchStrikes] > 0) gEE_P[playerid][acWSwitchStrikes]--;
+			}
 		}
 	}
 }

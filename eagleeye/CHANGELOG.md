@@ -1,5 +1,15 @@
 # 🦅 EagleEYE — Changelog
 
+## v2.10.0 — 13/11/2026
+
+### 🛡️ 5 novas proteções (agora 47 no total)
+- **Ação especial inválida** — special action fora da faixa válida (crasher/action hack). Automática no `OnPlayerUpdate`.
+- **Troca de arma rápida** — alternar armas rápido demais, impossível no jogo normal. Limite em ms configurável.
+- **Chat crasher** — texto com caracteres de controle/cores que travam os outros jogadores; a mensagem é bloqueada.
+- **Objeto anexado inválido** — bloqueia `SetPlayerAttachedObject` com slot/modelo/bone inválido (previne attach crasher).
+- **Spam de agachar** — agachar/levantar em excesso (crasher/lag).
+- Todas configuráveis pelo Discord e pelo site, e portadas para o plugin em C++ (`ee_cat_extra2`, com testes).
+
 ## v2.9.0 — 13/11/2026
 
 ### 🧩 Plugin 100% funcional + include "falando" com o plugin

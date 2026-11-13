@@ -64,6 +64,12 @@ const PROTECTIONS = [
   p(39, 'buzina',           'veiculos',  'Spam de buzina',        'Buzina/sirene acionada em excesso (lag/troll).',                     'buzinas em 3s',            false, 0, 3, 10),
   p(40, 'troca_interior',   'movimento', 'Troca de interior',     'Mudança de interior/virtual world sem o servidor (teleporte).',      null,                       true,  1, 2, 0),
   p(41, 'anti_freeze',      'movimento', 'Anti-freeze',           'Mover-se enquanto congelado pelo servidor.',                         null,                       true,  1, 2, 0),
+  // --- categoria EXTRA 2 (v2.10.0) ---
+  p(42, 'acao_invalida',    'jogador',   'Ação especial inválida','Special action fora da faixa válida (crasher/action hack).',         null,                       true,  1, 1, 0),
+  p(43, 'troca_arma',       'armas',     'Troca de arma rápida',  'Alternar armas rápido demais, impossível no jogo normal.',           'ms mínimo entre trocas',   true,  1, 3, 150),
+  p(44, 'chat_crasher',     'rede',      'Chat crasher',          'Texto com caracteres/cores que travam os outros jogadores.',         null,                       true,  1, 1, 0),
+  p(45, 'anexo_invalido',   'rede',      'Objeto anexado inválido','Objeto anexado ao jogador com slot/modelo/bone inválido (crasher).', null,                       true,  1, 1, 0),
+  p(46, 'spam_agachar',     'movimento', 'Spam de agachar',       'Agachar/levantar em excesso (crasher/lag).',                         'em 3s',                    false, 0, 3, 10),
 ];
 
 const ACTIONS = ['aviso', 'kick', 'ban'];

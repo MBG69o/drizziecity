@@ -12,4 +12,5 @@ $CXX test/test_movement.cpp src/ee_cat_movement.cpp src/ee_cat_player.cpp src/ee
 $CXX test/test_vehicles.cpp src/ee_cat_vehicles.cpp src/ee_cat_player.cpp src/ee_detect.cpp -o /tmp/ee_t7 && /tmp/ee_t7
 $CXX test/test_network.cpp src/ee_cat_network.cpp src/ee_cat_player.cpp src/ee_detect.cpp -o /tmp/ee_t8 && /tmp/ee_t8
 $CXX test/test_extra.cpp src/ee_cat_extra.cpp src/ee_cat_player.cpp src/ee_detect.cpp -o /tmp/ee_t9 && /tmp/ee_t9
+$CXX test/test_extra2.cpp src/ee_cat_extra2.cpp src/ee_cat_extra.cpp src/ee_cat_player.cpp src/ee_detect.cpp -o /tmp/ee_t10 && /tmp/ee_t10
 echo "plugin: TODOS OS TESTES OK"
