@@ -70,6 +70,11 @@ const PROTECTIONS = [
   p(44, 'chat_crasher',     'rede',      'Chat crasher',          'Texto com caracteres/cores que travam os outros jogadores.',         null,                       true,  1, 1, 0),
   p(45, 'anexo_invalido',   'rede',      'Objeto anexado inválido','Objeto anexado ao jogador com slot/modelo/bone inválido (crasher).', null,                       true,  1, 1, 0),
   p(46, 'spam_agachar',     'movimento', 'Spam de agachar',       'Agachar/levantar em excesso (crasher/lag).',                         'em 3s',                    false, 0, 3, 10),
+  // --- categoria EXTRA 3 (v2.11.0) ---
+  p(47, 'driveby_ilegal',   'armas',     'Driveby ilegal',        'Motorista disparando arma (só passageiro faz driveby).',             null,                       true,  1, 2, 0),
+  p(48, 'veiculo_invalido', 'veiculos',  'Veículo inválido',      'Veículo de modelo fora da faixa 400-611 (crasher).',                 null,                       true,  1, 1, 0),
+  p(49, 'espectador',       'jogador',   'Bypass de espectador',  'Mover-se/agir enquanto o servidor colocou em modo espectador.',      null,                       true,  1, 2, 0),
+  p(50, 'troca_skin',       'jogador',   'Troca de skin',         'Trocar de skin sem o servidor (skin diferente da que foi dada).',    null,                       true,  1, 2, 0),
 ];
 
 const ACTIONS = ['aviso', 'kick', 'ban'];

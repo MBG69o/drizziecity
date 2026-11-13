@@ -11,7 +11,7 @@
 	#error "[EagleEYE] Em filterscripts use <eagleeye_fs>, nao <eagleeye>."
 #endif
 
-#define EE_VERSION "2.10.0"
+#define EE_VERSION "2.11.0"
 
 #if !defined EE_API_HOST
 	#define EE_API_HOST "127.0.0.1:8090"
@@ -168,7 +168,11 @@
 #define EE_CHATCRASH      (44)
 #define EE_ATTACHHACK     (45)
 #define EE_CROUCHSPAM     (46)
-#define EE_MAX            (47)
+#define EE_DRIVEBY        (47)
+#define EE_VEHMODEL       (48)
+#define EE_SPECTATE       (49)
+#define EE_SKINCHANGE     (50)
+#define EE_MAX            (51)
 
 #define EE_ACTION_WARN    (0)
 #define EE_ACTION_KICK    (1)
@@ -265,7 +269,10 @@ enum E_EE_PLAYER
 	acWSwitchTick,
 	acWSwitchStrikes,
 	acCrouchTick,
-	acCrouchCount
+	acCrouchCount,
+	bool:acSpectating,
+	acServerSkin,
+	acSkinImmuneUntil
 }
 
 enum E_EE_PICKUP
@@ -287,7 +294,8 @@ static stock const gEE_Names[EE_MAX][] =
 	"Flood de reconexao", "Aimbot", "Nick invalido", "Animacao crasher",
 	"Skin invalido", "Spam de objeto", "Flood de PM", "Spam de buzina",
 	"Troca de interior", "Anti-freeze", "Acao invalida", "Troca de arma",
-	"Chat crasher", "Anexo invalido", "Spam de agachar"
+	"Chat crasher", "Anexo invalido", "Spam de agachar", "Driveby ilegal",
+	"Veiculo invalido", "Bypass espectador", "Troca de skin"
 };
 
 static stock const gEE_ActPast[2][8]   = {"kickado", "banido"};
@@ -345,7 +353,11 @@ static stock const gEE_Defaults[EE_MAX][E_EE_PROT] =
 	{true,  EE_ACTION_KICK, 3,  150},
 	{true,  EE_ACTION_KICK, 1,  0},
 	{true,  EE_ACTION_KICK, 1,  0},
-	{false, EE_ACTION_WARN, 3,  10}
+	{false, EE_ACTION_WARN, 3,  10},
+	{true,  EE_ACTION_KICK, 2,  0},
+	{true,  EE_ACTION_KICK, 1,  0},
+	{true,  EE_ACTION_KICK, 2,  0},
+	{true,  EE_ACTION_KICK, 2,  0}
 };
 
 static stock
@@ -698,6 +710,9 @@ static stock EE_ResetPlayer(playerid)
 	gEE_P[playerid][acWSwitchStrikes] = 0;
 	gEE_P[playerid][acCrouchTick] = 0;
 	gEE_P[playerid][acCrouchCount] = 0;
+	gEE_P[playerid][acSpectating] = false;
+	gEE_P[playerid][acServerSkin] = -1;
+	gEE_P[playerid][acSkinImmuneUntil] = 0;
 	for (new c = 0; c < EE_MAX; c++)
 	{
 		gEE_Hits[playerid][c] = 0;
@@ -2283,6 +2298,17 @@ public OnPlayerStateChange(playerid, EE_T_PSTATE:newstate, EE_T_PSTATE:oldstate)
 			}
 		}
 
+		if (EE_ValidPlayer(playerid) && EE_IsEnabled(EE_VEHMODEL) && vehicleid)
+		{
+			new model = GetVehicleModel(vehicleid);
+			if (model < 400 || model > 611)
+			{
+				new det[48];
+				format(det, sizeof det, "modelo de veiculo invalido: %d", model);
+				if (EE_Detect(playerid, EE_VEHMODEL, det)) EE_RawRemoveFromVehicle(playerid);
+			}
+		}
+
 		if (_:oldstate == 1 && EE_ValidPlayer(playerid) && EE_IsEnabled(EE_CARWARP)
 			&& tick >= gEE_P[playerid][acPosImmuneUntil] && gEE_P[playerid][acLastPosTick] && tick - gEE_P[playerid][acLastPosTick] < 2000
 			&& vehicleid)
@@ -2427,6 +2453,13 @@ stock bool:EE_CommandFloodCheck(playerid, const cmdtext[] = "")
 public OnPlayerWeaponShot(playerid, EE_T_WEAPON:weaponid, EE_T_BULLET:hittype, hitid, Float:fX, Float:fY, Float:fZ)
 {
 	new w = _:weaponid, ht = _:hittype;
+	if (EE_IsEnabled(EE_DRIVEBY) && EE_ValidPlayer(playerid) && !EE_IsPlayerImmune(playerid)
+		&& EE_RawState(playerid) == 2 && w >= 1 && w <= 46)   // 2 = DRIVER
+	{
+		new ddet[48];
+		format(ddet, sizeof ddet, "motorista disparando arma %d", w);
+		EE_Detect(playerid, EE_DRIVEBY, ddet);
+	}
 	if (EE_ValidPlayer(playerid) && !EE_IsPlayerImmune(playerid))
 	{
 		new tick = GetTickCount(), det[64];
@@ -3089,6 +3122,24 @@ stock EE_T_BOOL:EE_SetPlayerAttachedObject(playerid, index, modelid, bone,
 #endif
 #define SetPlayerAttachedObject EE_SetPlayerAttachedObject
 
+// O servidor registra a skin que deu, para a protecao "Troca de skin" so
+// detectar quando o CLIENTE muda sozinho.
+stock EE_T_BOOL:EE_SetPlayerSkin(playerid, skinid)
+{
+	if (0 <= playerid < MAX_PLAYERS)
+	{
+		gEE_P[playerid][acServerSkin] = skinid;
+		gEE_P[playerid][acSkinImmuneUntil] = GetTickCount() + 3000;
+	}
+	return SetPlayerSkin(playerid, skinid);
+}
+#if defined _ALS_SetPlayerSkin
+	#undef SetPlayerSkin
+#else
+	#define _ALS_SetPlayerSkin
+#endif
+#define SetPlayerSkin EE_SetPlayerSkin
+
 stock EE_T_BOOL:EE_SetPlayerVirtualWorld(playerid, worldid)
 {
 	if (0 <= playerid < MAX_PLAYERS)
@@ -3243,6 +3294,25 @@ static stock EE_CheckExtraUpdate(playerid)
 				}
 				else if (gEE_P[playerid][acWSwitchStrikes] > 0) gEE_P[playerid][acWSwitchStrikes]--;
 			}
+		}
+	}
+
+	if (EE_IsEnabled(EE_SPECTATE) && gEE_P[playerid][acSpectating]
+		&& tick >= gEE_P[playerid][acPosImmuneUntil] && EE_RawState(playerid) != 9)
+	{
+		EE_Detect(playerid, EE_SPECTATE, "saiu do modo espectador sem o servidor");
+	}
+
+	if (EE_IsEnabled(EE_SKINCHANGE) && gEE_P[playerid][acServerSkin] >= 0
+		&& tick >= gEE_P[playerid][acSkinImmuneUntil])
+	{
+		new sk = GetPlayerSkin(playerid);
+		if (sk != gEE_P[playerid][acServerSkin])
+		{
+			new det[56];
+			format(det, sizeof det, "skin %d (servidor deu %d)", sk, gEE_P[playerid][acServerSkin]);
+			EE_Detect(playerid, EE_SKINCHANGE, det);
+			gEE_P[playerid][acServerSkin] = sk;   // evita repetir
 		}
 	}
 }
@@ -3420,6 +3490,7 @@ stock EE_T_BOOL:EE_TogglePlayerSpectating(playerid, EE_T_BOOL:toggle)
 	if (0 <= playerid < MAX_PLAYERS)
 	{
 		gEE_P[playerid][acSpawnTick] = GetTickCount();
+		gEE_P[playerid][acSpectating] = (toggle != EE_T_BOOL:0) ? true : false;
 		if (!toggle) gEE_P[playerid][acSpawnAllowed] = true;
 	}
 	return TogglePlayerSpectating(playerid, toggle);

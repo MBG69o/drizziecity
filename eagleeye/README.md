@@ -1,6 +1,6 @@
 # 🦅 EagleEYE Anti-Cheat
 
-Anti-cheat **server-side** para **SA-MP 0.3.7 / 0.3.DL** e **open.mp** com **47 proteções**, configurado pelo **Discord** (comandos `/ac`) **ou pelo site de gerenciamento** (`/app`).
+Anti-cheat **server-side** para **SA-MP 0.3.7 / 0.3.DL** e **open.mp** com **51 proteções**, configurado pelo **Discord** (comandos `/ac`) **ou pelo site de gerenciamento** (`/app`).
 
 **Site de gerenciamento.** O cliente abre `/app` no navegador, faz login com o **token do servidor** e um **código de 6 dígitos válido por 5 minutos** (recebido no console do servidor e/ou na DM do Discord) e então ativa/desliga proteções, ajusta limites, liga/desliga o anti-cheat, manda avisos no jogo e vê as detecções e a reputação dos jogadores — tudo em tempo real.
 

@@ -1,5 +1,14 @@
 # 🦅 EagleEYE — Changelog
 
+## v2.11.0 — 13/11/2026
+
+### 🛡️ 4 novas proteções (agora 51 no total)
+- **Driveby ilegal** — o **motorista** disparando arma (só passageiro faz driveby). No `OnPlayerWeaponShot`.
+- **Veículo inválido** — entrar em veículo de modelo fora de 400-611 (crasher); remove do veículo.
+- **Bypass de espectador** — sair do modo espectador sem o servidor (o servidor avisa via `TogglePlayerSpectating`).
+- **Troca de skin** — trocar de skin sem o servidor (compara com a skin dada por `SetPlayerSkin`).
+- Portadas para o plugin em C++ (`ee_cat_extra3`, com testes).
+
 ## v2.10.0 — 13/11/2026
 
 ### 🛡️ 5 novas proteções (agora 47 no total)
