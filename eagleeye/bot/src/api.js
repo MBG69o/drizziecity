@@ -15,6 +15,35 @@ const MAX_BODY = 4096;
 const MAX_PLAYERS_BODY = 16384;
 const MAX_URL = 2048;
 
+// Cabeçalhos de segurança aplicados a TODA resposta.
+const SECURITY_HEADERS = {
+  'X-Content-Type-Options': 'nosniff',
+  'X-Frame-Options': 'DENY',
+  'Referrer-Policy': 'no-referrer',
+  'Cross-Origin-Opener-Policy': 'same-origin',
+  'Cross-Origin-Resource-Policy': 'same-origin',
+  'Permissions-Policy': 'geolocation=(), microphone=(), camera=(), interest-cohort=()',
+  'Strict-Transport-Security': 'max-age=31536000; includeSubDomains',
+};
+// CSP para as páginas HTML (o app usa estilos inline e as fontes do Google).
+const HTML_CSP =
+  "default-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'; " +
+  "object-src 'none'; img-src 'self' data:; " +
+  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
+  "font-src 'self' https://fonts.gstatic.com; " +
+  "script-src 'self' 'unsafe-inline'; connect-src 'self'";
+
+/** Escreve cabeçalhos de uma página HTML já com CSP e cabeçalhos de segurança. */
+function htmlHead(res, status = 200, extra = {}) {
+  res.writeHead(status, {
+    'Content-Type': 'text/html; charset=utf-8',
+    'Cache-Control': 'no-store',
+    'Content-Security-Policy': HTML_CSP,
+    ...SECURITY_HEADERS,
+    ...extra,
+  });
+}
+
 function clientIp(req, trustProxy) {
   // atrás de proxy (Cloudflare/Discloud) o IP real vem nos cabeçalhos do proxy
   if (trustProxy) {
@@ -35,7 +64,7 @@ e os donos fazem <code>/ac login</code> no Discord do projeto.</p>
 
 function send(res, status, body, headers = {}) {
   if (res.headersSent) return;
-  res.writeHead(status, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store', ...headers });
+  res.writeHead(status, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store', ...SECURITY_HEADERS, ...headers });
   res.end(body);
 }
 
@@ -162,7 +191,7 @@ function startApi({
       if (url.pathname === '/health') return send(res, 200, 'OK');
       // com caminho secreto, a raiz não revela nada sobre o EagleEYE
       if (PFX) return send(res, 200, 'OK');
-      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+      htmlHead(res);
       return res.end(HOME_PAGE);
     }
 
@@ -170,14 +199,14 @@ function startApi({
     if (dashboard && req.method === 'GET' && url.pathname === '/painel') {
       const t = (url.searchParams.get('t') || '').trim().slice(0, 64);
       const owner = t ? dashboard.resolve(t) : null;
-      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+      htmlHead(res);
       return res.end(owner ? dashboardPage(t) : loginPage(t ? 'Token inválido ou expirado. Gere um novo com /ac painel.' : ''));
     }
     if (dashboard && req.method === 'GET' && url.pathname === '/painel/dados') {
       const owner = dashboard.resolve((url.searchParams.get('t') || '').trim().slice(0, 64));
       if (!owner) return send(res, 401, 'unauthorized');
       const data = buildData(store, trust, security, owner);
-      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', ...SECURITY_HEADERS });
       return res.end(JSON.stringify(data));
     }
 
@@ -187,19 +216,19 @@ function startApi({
       const rawId = isBadge ? url.pathname.slice(7).replace(/\.svg$/i, '') : url.pathname.slice(3);
       const srv = store.getServer(decodeURIComponent(rawId).slice(0, 32));
       if (!srv || !srv.publicBadge) {
-        if (isBadge) { res.writeHead(200, { 'Content-Type': 'image/svg+xml; charset=utf-8', 'Cache-Control': 'no-store' }); return res.end(badgeSvg('desligado')); }
+        if (isBadge) { res.writeHead(200, { 'Content-Type': 'image/svg+xml; charset=utf-8', 'Cache-Control': 'no-store', ...SECURITY_HEADERS }); return res.end(badgeSvg('desligado')); }
         return send(res, 404, 'not found');
       }
       const st = store.getStatus(srv);
       const online = store.isServerOnline(srv);
       const acOn = Boolean(srv.global) && srv.activated !== false;
       if (isBadge) {
-        res.writeHead(200, { 'Content-Type': 'image/svg+xml; charset=utf-8', 'Cache-Control': 'max-age=60' });
+        res.writeHead(200, { 'Content-Type': 'image/svg+xml; charset=utf-8', 'Cache-Control': 'max-age=60', ...SECURITY_HEADERS });
         return res.end(badgeSvg(stateOf(online, acOn)));
       }
       const rep = security ? security.securityReport(store, srv) : { grade: '-', score: null };
       const achv = achievements.compute(srv, st, store.getHistory(srv)).earned;
-      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+      htmlHead(res);
       return res.end(statusPage({ name: srv.name, id: srv.id, online, acOn, grade: rep.grade, gradeLetter: gradeLetter(rep.score), players: st.players || 0, maxPlayers: st.maxPlayers || 0, achievements: achv }));
     }
 

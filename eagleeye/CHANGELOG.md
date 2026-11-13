@@ -1,5 +1,21 @@
 # 🦅 EagleEYE — Changelog
 
+## v2.12.0 — 13/11/2026
+
+### 🔒 Endurecimento de segurança (bot + site)
+Correções a partir da lista de vulnerabilidades — sem mudança no include (continua 2.11.0).
+
+- **Login do site em 2 etapas, bem mais resistente a ataque:**
+  - **Limite de códigos por token** numa janela de 10 min (anti-spam / anti-brute force) — pedir código demais retorna *"muitas tentativas"*.
+  - **Trava do token** por 15 min depois de muitas falhas de código seguidas, mesmo trocando de desafio.
+  - **Prazo absoluto da sessão** (12 h) além do prazo deslizante (2 h): nenhuma sessão vive para sempre.
+  - **"Sair de tudo"** — botão novo no painel que encerra a sessão em **todos os dispositivos** do dono (`revokeOwner`).
+- **Cabeçalhos de segurança em todas as respostas HTTP** (API e site):
+  - `Content-Security-Policy` restritiva nas páginas (bloqueia scripts/externos indevidos).
+  - `X-Frame-Options: DENY` + `frame-ancestors 'none'` (anti-clickjacking), `X-Content-Type-Options: nosniff`.
+  - `Referrer-Policy: no-referrer` (não vaza o token que vai na URL do painel), `Strict-Transport-Security`, `Permissions-Policy` e políticas de origem cruzada.
+- Comparações continuam **tempo-constante**; webhooks seguem **restritos ao Discord** (anti-SSRF).
+
 ## v2.11.0 — 13/11/2026
 
 ### 🛡️ 4 novas proteções (agora 51 no total)

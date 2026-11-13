@@ -69,7 +69,22 @@ function handleWebApp(req, res, url, ctx) {
 
   // --- página (shell) ---
   if (req.method === 'GET' && (path === '/app' || path === '/app/')) {
-    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+    res.writeHead(200, {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Cache-Control': 'no-store',
+      'Content-Security-Policy':
+        "default-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'; " +
+        "object-src 'none'; img-src 'self' data:; " +
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
+        "font-src 'self' https://fonts.gstatic.com; " +
+        "script-src 'self' 'unsafe-inline'; connect-src 'self'",
+      'X-Content-Type-Options': 'nosniff',
+      'X-Frame-Options': 'DENY',
+      'Referrer-Policy': 'no-referrer',
+      'Cross-Origin-Opener-Policy': 'same-origin',
+      'Permissions-Policy': 'geolocation=(), microphone=(), camera=()',
+      'Strict-Transport-Security': 'max-age=31536000; includeSubDomains',
+    });
     res.end(APP_PAGE);
     return true;
   }
@@ -97,11 +112,12 @@ function handleWebApp(req, res, url, ctx) {
       const server = r.server;
       const ownerKey = server.owners[0] || server.id;
       const scope = scopedServers(store, { ownerKey, scope: [server.id] }).map((s) => s.id);
-      const { challengeId, expiresAt } = webauth.startChallenge({
+      const ch = webauth.startChallenge({
         serverId: server.id, ownerKey, scope: scope.length ? scope : [server.id], name: server.name,
       });
-      const challenge = webauth.challenges.get(challengeId);
-      const code = challenge.code;
+      if (ch.error === 'locked') return jsonBody(res, send, 429, { error: 'Muitas tentativas. Tente novamente em alguns minutos.' });
+      if (ch.error === 'rate') return jsonBody(res, send, 429, { error: 'Você pediu códigos demais. Aguarde alguns minutos e tente de novo.' });
+      const { challengeId, expiresAt, code } = ch;
       // entrega o código: console do servidor (sempre) + DM no Discord (se houver dono)
       try { store.queueCommand(server, 'authcode', code); } catch (e) { logger.error('[webapp] queue authcode', e.message); }
       let dmed = false;
@@ -129,6 +145,7 @@ function handleWebApp(req, res, url, ctx) {
         const msg = {
           expired: 'Código expirado. Peça um novo.',
           blocked: 'Tentativas demais. Peça um novo código.',
+          locked: 'Acesso bloqueado por tentativas demais. Aguarde alguns minutos.',
           code: `Código incorreto. ${r.attemptsLeft ? `${r.attemptsLeft} tentativa(s) restante(s).` : 'Peça um novo código.'}`,
         }[r.error] || 'Código inválido.';
         return jsonBody(res, send, 401, { error: msg });
@@ -139,11 +156,22 @@ function handleWebApp(req, res, url, ctx) {
     return true;
   }
 
-  // --- logout ---
+  // --- logout (opcionalmente de TODAS as sessões do dono) ---
   if (req.method === 'POST' && path === '/app/logout') {
     const h = String(req.headers['authorization'] || '').replace(/^Bearer\s+/i, '') || String(req.headers['x-ee-session'] || '');
-    webauth.destroySession(h.trim());
-    return jsonBody(res, send, 200, { ok: true }), true;
+    const token = h.trim();
+    readBody(req, res, 256, (body) => {
+      let all = false;
+      try { all = !!JSON.parse(body || '{}').all; } catch { all = false; }
+      let revoked = 0;
+      if (all) {
+        const sess = webauth.resolveSession(token);
+        if (sess && typeof webauth.revokeOwner === 'function') revoked = webauth.revokeOwner(sess.ownerKey);
+      }
+      webauth.destroySession(token);
+      jsonBody(res, send, 200, { ok: true, revoked });
+    });
+    return true;
   }
 
   // --- estado completo (auth) ---
@@ -482,6 +510,7 @@ th{color:var(--mut);font-size:12px;text-transform:uppercase;letter-spacing:.04em
    <div class="right">
     <select id="srvsel" style="width:auto"></select>
     <button class="btn ghost sm" id="btn-logout">Sair</button>
+    <button class="btn ghost sm" id="btn-logout-all" title="Encerra a sessão em todos os dispositivos">Sair de tudo</button>
    </div>
   </header>
 
@@ -619,7 +648,9 @@ function startTtl(ms){var end=Date.now()+ms;clearInterval(S.ttlTimer);S.ttlTimer
 },500)}
 
 /* ---- logout ---- */
-$('btn-logout').onclick=function(){api('/app/logout',{method:'POST'});S.session='';try{localStorage.removeItem('ee_sess')}catch(e){}showLogin();location.hash=''};
+function doLogout(all){api('/app/logout',{method:'POST',body:JSON.stringify({all:!!all})});S.session='';try{localStorage.removeItem('ee_sess')}catch(e){}showLogin();location.hash=''}
+$('btn-logout').onclick=function(){doLogout(false)};
+$('btn-logout-all').onclick=function(){if(confirm('Encerrar a sessão em TODOS os dispositivos?'))doLogout(true)};
 
 /* ---- app ---- */
 function load(){api('/app/api/state').then(function(r){
