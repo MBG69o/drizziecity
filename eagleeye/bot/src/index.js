@@ -64,6 +64,8 @@ const bot = createDiscordBot({
   projectGuildId,
   // canal da equipe que recebe os alertas de todos os servidores
   alertChannelId: (process.env.AC_ALERT_CHANNEL_ID ?? '1569638075166892072').trim() || null,
+  // canal do painel de status (mensagem fixa, atualiza sozinha)
+  statusChannelId: (process.env.AC_STATUS_CHANNEL_ID ?? '1569637290819723334').trim() || null,
   licenses,
   blacklist,
   trust,

@@ -20,6 +20,7 @@ const { Lockdown } = require('./lockdown');
 const { hourlyBuckets } = require('./stats');
 const achievements = require('./achievements');
 const webhooks = require('./webhooks');
+const { buildPanelEmbed } = require('./statuspanel');
 
 const SPARK = '▁▂▃▄▅▆▇█';
 function sparkline(values) {
@@ -41,7 +42,7 @@ const TIMEZONE = process.env.AC_TIMEZONE || 'America/Sao_Paulo';
 
 function createDiscordBot({
   store, permissions, token, projectGuildId, alertChannelId = null, licenses = null, blacklist = null,
-  trust = null, dashboard = null, watchlist = null, publicBaseUrl = '', logger = console,
+  trust = null, dashboard = null, watchlist = null, publicBaseUrl = '', statusChannelId = null, logger = console,
 }) {
   if (!projectGuildId) throw new Error('projectGuildId é obrigatório (o bot só funciona no Discord do projeto).');
   const client = new Client({ intents: [GatewayIntentBits.Guilds] });
@@ -126,6 +127,41 @@ function createDiscordBot({
     }
   }
   setInterval(flushLogs, 2500).unref();
+
+  // ------------------------------------------- painel de status (canal fixo)
+  let statusMsg = null;          // mensagem que o painel edita
+  let statusLookedUp = false;    // já procurou uma mensagem existente?
+  async function updateStatusPanel() {
+    if (!statusChannelId || !client.isReady()) return;
+    let licensedCount = null;
+    if (licenses) {
+      try { licensedCount = [...store.servers.values()].filter((s) => licenses.activeForServer(s.id)).length; } catch { /* */ }
+    }
+    let embed;
+    try { embed = buildPanelEmbed(store, { licensedCount }); } catch (err) { logger.error('[status] embed', err.message); return; }
+    try {
+      const channel = await client.channels.fetch(statusChannelId);
+      if (!channel || !channel.isTextBased()) return;
+      // na primeira vez, reaproveita um painel já postado pelo bot (sobrevive a restart)
+      if (!statusMsg && !statusLookedUp) {
+        statusLookedUp = true;
+        try {
+          const recent = await channel.messages.fetch({ limit: 20 });
+          statusMsg = recent.find((m) => m.author.id === client.user.id
+            && m.embeds[0] && /EagleEYE — Status/.test(m.embeds[0].title || '')) || null;
+        } catch { /* sem permissão de ler histórico: cria uma nova */ }
+      }
+      if (statusMsg) await statusMsg.edit({ embeds: [embed] });
+      else statusMsg = await channel.send({ embeds: [embed] });
+    } catch (err) {
+      logger.error(`[status] canal ${statusChannelId}:`, err.message);
+      if (err.code === 10008) statusMsg = null; // mensagem apagada: recria na próxima
+    }
+  }
+  if (statusChannelId) {
+    client.once('ready', () => { updateStatusPanel(); });
+    setInterval(() => { updateStatusPanel().catch(() => {}); }, 60 * 1000).unref();
+  }
 
   // ------------------------------------------------------------- helpers
   const reply = (interaction, content, extra = {}) => interaction.reply({

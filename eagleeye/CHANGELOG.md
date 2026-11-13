@@ -1,5 +1,15 @@
 # 🦅 EagleEYE — Changelog
 
+## v2.9.0 — 13/11/2026
+
+### 📊 Painel de status no Discord
+- Uma **mensagem fixa que se atualiza sozinha** (a cada minuto) num canal dedicado (`AC_STATUS_CHANNEL_ID`), com a visão geral de **todos** os servidores:
+  - total de servidores, **online/offline** e **jogadores** agora;
+  - **últimos jogadores detectados** com o servidor — ``` `Nardyn` — **Drizzie City Roleplay** ``` · proteção · ação · quando;
+  - **quantidade de servidores com include/plugin desatualizado** (vs. a versão atual);
+  - detecções 24h, bans (24h/30d), servidores aguardando `/ac login`, licenciados e nº de proteções.
+- Sobrevive a reinício do bot (reaproveita a mensagem já postada).
+
 ## v2.8.0 — 12/11/2026
 
 ### 🔔 Webhook de saída (integração)
