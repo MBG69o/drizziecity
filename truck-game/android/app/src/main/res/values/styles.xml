@@ -1,0 +1,8 @@
+<resources>
+    <style name="GameTheme" parent="android:Theme.Material.NoActionBar.Fullscreen">
+        <item name="android:windowBackground">#0d1117</item>
+        <item name="android:statusBarColor">#0d1117</item>
+        <item name="android:navigationBarColor">#0d1117</item>
+        <item name="android:windowFullscreen">true</item>
+    </style>
+</resources>

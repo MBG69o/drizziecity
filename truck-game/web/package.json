@@ -1,0 +1,17 @@
+{
+  "name": "drizzie-truck-web",
+  "version": "1.0.0",
+  "description": "Drizzie Truck - jogo de caminhão (web core para o APK Android)",
+  "scripts": {
+    "build": "node build.mjs",
+    "dev": "node build.mjs dist && npx --yes http-server dist -p 8080"
+  },
+  "author": "",
+  "license": "ISC",
+  "private": true,
+  "type": "module",
+  "devDependencies": {
+    "esbuild": "0.24.0",
+    "three": "0.162.0"
+  }
+}

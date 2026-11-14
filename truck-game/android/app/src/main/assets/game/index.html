@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0d1117">
+<title>Drizzie Truck</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<canvas id="gl"></canvas>
+
+<div id="loading">
+  <div class="logo"><span>DRIZZIE</span> TRUCK</div>
+  <div class="sub">Rotas &amp; Cargas</div>
+  <div class="bar"><i id="loadbar"></i></div>
+  <div id="loadmsg">Carregando…</div>
+</div>
+
+<div id="hud" class="hidden">
+  <div id="profile" class="glass">
+    <div class="lvl"><b id="lvl">1</b><small>NÍVEL</small></div>
+    <div class="pinfo">
+      <div id="money">R$ 0</div>
+      <div class="xpbar"><i id="xpbar"></i></div>
+      <small id="xptext">0 / 200 XP</small>
+    </div>
+  </div>
+
+  <div id="jobpanel" class="glass">
+    <div id="jobtitle">Sem frete ativo</div>
+    <div id="jobsub">Abra a Central de Fretes 📋</div>
+  </div>
+
+  <div id="mapwrap"><canvas id="minimap" width="300" height="300"></canvas><div id="dist"></div></div>
+  <div id="topbtns">
+    <button class="rb" data-act="jobs" title="Fretes">📋</button>
+    <button class="rb" data-act="garage" title="Garagem">🚚</button>
+    <button class="rb" data-act="camera" title="Câmera">🎥</button>
+    <button class="rb" data-act="menu" title="Menu">☰</button>
+  </div>
+
+  <div id="steer">
+    <button id="left" class="pad arrow">◀</button>
+    <button id="right" class="pad arrow">▶</button>
+  </div>
+  <div id="pedals">
+    <button id="horn" class="rb small">📯</button>
+    <button id="brake" class="pad pedal brake"><span>FREIO<br><small>segure p/ ré</small></span></button>
+    <button id="gas" class="pad pedal gas"><span>ACELERAR</span></button>
+  </div>
+
+  <div id="dash" class="glass">
+    <svg viewBox="0 0 200 120" id="gauge">
+      <path d="M20 110 A80 80 0 0 1 180 110" class="track"/>
+      <path d="M20 110 A80 80 0 0 1 180 110" class="rpm" id="rpmarc"/>
+    </svg>
+    <div id="speed">0</div>
+    <div class="unit">km/h</div>
+    <div id="gear">N</div>
+    <div id="load"></div>
+  </div>
+  <div id="damage" class="glass hidden"><small>AVARIA</small><b id="dmg">0%</b></div>
+
+  <div id="progress" class="hidden"><svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="42" class="bg"/><circle cx="50" cy="50" r="42" id="progarc"/></svg><span id="progtext">Carregando</span></div>
+  <div id="toast"></div>
+  <div id="fps" class="hidden"></div>
+</div>
+
+<div id="modal" class="hidden">
+  <div class="sheet glass">
+    <div class="tabs">
+      <button data-tab="jobs">📋 Fretes</button>
+      <button data-tab="garage">🚚 Garagem</button>
+      <button data-tab="profile">👤 Perfil</button>
+      <button data-tab="settings">⚙️ Ajustes</button>
+      <button class="close" data-act="close">✕</button>
+    </div>
+    <div id="tabbody"></div>
+  </div>
+</div>
+
+<div id="title" class="hidden">
+  <div class="logo big"><span>DRIZZIE</span> TRUCK</div>
+  <div class="sub">Rotas &amp; Cargas</div>
+  <div id="titlestats"></div>
+  <button id="play" class="cta">JOGAR</button>
+  <div class="hint">Faça entregas pela cidade, suba de nível e libere cargas de até 85 toneladas.</div>
+</div>
+
+<div id="popup" class="hidden"><div class="card glass" id="popcard"></div></div>
+<div id="bigmap" class="hidden"><canvas id="bigmapc"></canvas><button class="rb close2" data-act="closemap">✕</button></div>
+
+<script src="game.js"></script>
+</body>
+</html>

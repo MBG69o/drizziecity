@@ -1,0 +1,52 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.drizzie.truck'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'com.drizzie.truck'
+        minSdk 23          // Android 6.0 Marshmallow
+        targetSdk 35       // Android 15
+        versionCode 1
+        versionName '1.0.0'
+    }
+
+    signingConfigs {
+        // Assinatura de release opcional via variáveis de ambiente (CI).
+        release {
+            def ks = System.getenv('KEYSTORE_FILE')
+            if (ks) {
+                storeFile file(ks)
+                storePassword System.getenv('KEYSTORE_PASSWORD')
+                keyAlias System.getenv('KEY_ALIAS')
+                keyPassword System.getenv('KEY_PASSWORD')
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            signingConfig System.getenv('KEYSTORE_FILE') ? signingConfigs.release : signingConfigs.debug
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+
+    androidResources {
+        // não comprimir os assets do jogo deixa o carregamento mais rápido
+        noCompress += ['js', 'html', 'css']
+    }
+}
+
+dependencies {
+    implementation 'androidx.webkit:webkit:1.12.1'
+}
