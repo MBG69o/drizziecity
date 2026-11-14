@@ -8,16 +8,27 @@ const LATEST_INCLUDE = '2.11.0';
 /** Proteções essenciais: se desligadas, o servidor fica muito exposto. */
 const CRITICAL = ['dinheiro', 'armas', 'jetpack', 'crasher', 'rcon', 'fakekill', 'airbreak', 'velocidade_pe', 'velocidade_veic', 'godmode'];
 
+/**
+ * Extrai o "X.Y.Z" de uma string de versão, ignorando prefixos como
+ * "plugin-" ou "plugin-win-". Assim `plugin-2.11.0` vira `2.11.0`.
+ */
+function numericVersion(v) {
+  const m = String(v || '').match(/(\d+)(?:\.(\d+))?(?:\.(\d+))?/);
+  if (!m) return '0';
+  return `${m[1] || 0}.${m[2] || 0}.${m[3] || 0}`;
+}
+
 function compareVersions(a, b) {
-  const pa = String(a || '0').split('.').map((n) => Number.parseInt(n, 10) || 0);
-  const pb = String(b || '0').split('.').map((n) => Number.parseInt(n, 10) || 0);
+  const pa = numericVersion(a).split('.').map((n) => Number.parseInt(n, 10) || 0);
+  const pb = numericVersion(b).split('.').map((n) => Number.parseInt(n, 10) || 0);
   for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
     if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) - (pb[i] || 0);
   }
   return 0;
 }
 
-const isOutdated = (version) => compareVersions(version, LATEST_INCLUDE) < 0;
+// Só considera "desatualizado" quando há uma versão legível (número presente).
+const isOutdated = (version) => /\d/.test(String(version || '')) && compareVersions(version, LATEST_INCLUDE) < 0;
 
 /**
  * Checklist de segurança do servidor (0 a 100 pontos).

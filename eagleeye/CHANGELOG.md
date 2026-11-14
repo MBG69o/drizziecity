@@ -1,5 +1,14 @@
 # 🦅 EagleEYE — Changelog
 
+## v2.12.1 — 14/11/2026
+
+### 🐛 Correção: servidor aparecendo como versão antiga (ex.: 2.5.0)
+- **Causa principal (lado do cliente):** a versão é gravada no `.amx` **na hora de compilar** (`ver=EE_VERSION`). Se o gamemode foi compilado com um `eagleeye.inc` antigo — ou se o `pawncc` acha outra cópia antiga no `include/` —, o servidor continua relatando a versão velha por mais que o arquivo no disco esteja atualizado. **Solução:** recompilar o gamemode com o include 2.11.0 e garantir que só exista **uma** cópia de `eagleeye.inc` no caminho de include. O console imprime `EagleEYE Anti-Cheat v<versão> carregado` no load — é o jeito definitivo de conferir o que está realmente compilado.
+- **Correções no código:**
+  - O **plugin** agora reporta a própria versão: enviava só `ver=plugin` (sem número) e o painel o marcava como "desatualizado" mesmo atual. Passa a enviar `ver=plugin-2.11.0` (`EE_PLUGIN_VERSION`, sincronizado com o include).
+  - O **bot** passou a **normalizar** a versão antes de comparar: `plugin-2.11.0`/`plugin-win-2.11.0` agora são lidos como `2.11.0` (antes viravam `0.11.0` e caíam como desatualizados). Versão sem número nenhum não dispara mais o alerta de "desatualizado".
+  - Removidos os arquivos de plugin **mortos** `ee_plugin.cpp` (continha `ver=plugin-2.5.0` fixo) e `ee_win_plugin.cpp` — não entravam no build, mas confundiam e carregavam versões velhas.
+
 ## v2.12.0 — 13/11/2026
 
 ### 🔒 Endurecimento de segurança (bot + site)

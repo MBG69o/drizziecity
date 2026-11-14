@@ -35,6 +35,11 @@
 
 extern void* pAMXFunctions;
 
+// Versao do plugin reportada ao bot. DEVE acompanhar EE_VERSION da include
+// (pawn/include/eagleeye.inc) para o painel de status nao marcar como
+// "desatualizado" um plugin que esta, na verdade, na versao mais recente.
+#define EE_PLUGIN_VERSION "2.11.0"
+
 namespace {
 
 typedef void (*logprintf_t)(const char* fmt, ...);
@@ -133,9 +138,9 @@ void doFetchConfig() {
     { std::lock_guard<std::mutex> lk(g_mtx); hb = g_hb; id = g_identity.serverId; token = g_identity.token; }
     char q[512];
     std::snprintf(q, sizeof q,
-        "%s/ac/config?id=%s&token=%s&v=%d&players=%d&ack=%d&max=%d&port=%d&ver=plugin&rcw=%d&k=%s&host=%s",
+        "%s/ac/config?id=%s&token=%s&v=%d&players=%d&ack=%d&max=%d&port=%d&ver=plugin-%s&rcw=%d&k=%s&host=%s",
         g_apiPath.c_str(), urlenc(id).c_str(), urlenc(token).c_str(), g_cfg.version,
-        hb.players, g_ackCmd, hb.maxPlayers, hb.port, hb.rconWeak, urlenc(g_apiKey).c_str(),
+        hb.players, g_ackCmd, hb.maxPlayers, hb.port, EE_PLUGIN_VERSION, hb.rconWeak, urlenc(g_apiKey).c_str(),
         urlenc(hb.host).c_str());
     ee::HttpResult r = ee::httpGet(g_apiHost, q);
     g_online.store(r.status == 200);

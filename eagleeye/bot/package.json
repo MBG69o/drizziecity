@@ -1,6 +1,6 @@
 {
   "name": "eagleeye-bot",
-  "version": "2.12.0",
+  "version": "2.12.1",
   "private": true,
   "description": "Bot do Discord que configura o EagleEYE Anti-Cheat (SA-MP/open.mp) e recebe os logs de detecção.",
   "main": "src/index.js",

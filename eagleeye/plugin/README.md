@@ -78,9 +78,10 @@ As detecções são **funções puras**: recebem os valores já lidos do jogo e 
 
 ```
 plugin/
-  src/        núcleo seguro (crypto, store, license, http) + ee_plugin.cpp
-              ee_detections.cpp  <- portar as proteções aqui
-  pawn/       eagleeye.inc (casca, sem lógica)
+  src/        núcleo seguro (crypto, store, license, http)
+              ee_bridge.cpp      <- ponte: estado + rede + natives + ciclo de vida
+              ee_detect.cpp + ee_cat_*.cpp  <- motor e proteções portadas
+  pawn/       eagleeye_plugin.inc (casca: #define EE_USE_PLUGIN + <eagleeye>)
   tools/      obfuscate.py (gera os segredos ofuscados)
   CMakeLists.txt, BUILD.md
 ```
