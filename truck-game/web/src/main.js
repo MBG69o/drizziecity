@@ -71,7 +71,7 @@ let route = null, routeT = 0, nextWp = null;
 let marker, navArrow;
 let zoneTimer = 0;
 const obstacles = [];
-const ctl = { gas: false, brake: false, left: false, right: false, tilt: 0, wheel: 0, wheelHeld: false, gear: 'D', hand: false };
+const ctl = { gas: false, brake: false, left: false, right: false, tilt: 0, wheel: 0, wheelHeld: false, gear: 'D', hand: false, blink: 0, blinkArm: false };
 const input = { throttle: 0, brake: 0, steer: 0, gear: 'D', handbrake: false };
 let lightsManual = null;
 const cam = { yaw: 0, orbit: 0, orbitT: 0, mode: S.settings.camera || 0, pos: new THREE.Vector3(), look: new THREE.Vector3() };
@@ -317,7 +317,7 @@ function buildMarkers() {
   const sh = new THREE.Shape();
   sh.moveTo(0, 1.6); sh.lineTo(1.3, -0.6); sh.lineTo(0, 0); sh.lineTo(-1.3, -0.6); sh.closePath();
   const ag = new THREE.ShapeGeometry(sh);
-  ag.rotateX(-Math.PI / 2);
+  ag.rotateX(Math.PI / 2); // ponta da seta para +z (frente)
   navArrow = new THREE.Mesh(ag, new THREE.MeshBasicMaterial({ color: 0x3ee07a, transparent: true, opacity: 0.9, side: THREE.DoubleSide, depthTest: false }));
   navArrow.renderOrder = 10;
   navArrow.visible = false;
@@ -537,6 +537,11 @@ function setupInput() {
 
   // câmbio
   document.querySelectorAll('#gearsel button').forEach((b) => b.addEventListener('pointerdown', (e) => { e.preventDefault(); setGear(b.dataset.g); }));
+  const setBlink = (d) => { ctl.blink = ctl.blink === d ? 0 : d; ctl.blinkArm = false; blinkT = 0; audio.init(); audio.beep(1500, 0.03, 'square', 0.06); };
+  $('blinkL').addEventListener('pointerdown', (e) => { e.preventDefault(); setBlink(-1); });
+  $('blinkR').addEventListener('pointerdown', (e) => { e.preventDefault(); setBlink(1); });
+  $('ic-haz').addEventListener('pointerdown', (e) => { e.preventDefault(); setBlink(2); });
+  window.__setBlink = setBlink;
   $('ic-hand').addEventListener('pointerdown', (e) => { e.preventDefault(); ctl.hand = !ctl.hand; audio.airBrake(); });
   $('lightsbtn').addEventListener('pointerdown', (e) => { e.preventDefault(); lightsManual = !rig.lightsOn; rig.setLights(lightsManual); audio.beep(1400, 0.04, 'square', 0.08); });
   $('enginebtn').addEventListener('click', startEngine);
@@ -551,6 +556,8 @@ function setupInput() {
     if (e.code === 'KeyE' && !e.repeat) startEngine();
     if (e.code === 'KeyL' && !e.repeat) { lightsManual = !rig.lightsOn; rig.setLights(lightsManual); }
     if (e.code === 'KeyP' && !e.repeat) ctl.hand = !ctl.hand;
+    if (e.code === 'KeyZ' && !e.repeat) window.__setBlink(-1);
+    if (e.code === 'KeyX' && !e.repeat) window.__setBlink(1);
     if (e.code === 'KeyC' && !e.repeat) cycleCamera();
     if (e.code === 'KeyM' && !e.repeat) openMap();
     if (e.code === 'Escape') onBack();
@@ -606,7 +613,7 @@ function setGear(g) {
   audio.beep(g === 'R' ? 500 : 700, 0.05, 'square', 0.06);
 }
 
-let engineT = 0;
+let engineT = 0, blinkT = 0;
 function startEngine() {
   if (rig.engineOn || engineT > 0) return;
   audio.init();
@@ -637,6 +644,28 @@ function readInput(dt) {
   input.steer = S.settings.steer === 'wheel' && ctl.wheelHeld ? st : ramp(input.steer, st, 2.4, 4);
   if (Math.abs(input.steer) < 0.01 && st === 0) input.steer = 0;
   $('wheel').style.transform = `rotate(${(-input.steer * 150).toFixed(1)}deg)`;
+  // pisca-pisca: pisca a cada 0,4 s e desliga sozinho depois da curva
+  if (ctl.blink === -1 || ctl.blink === 1) {
+    const turning = input.steer * -ctl.blink;
+    if (turning > 0.3) ctl.blinkArm = true;
+    else if (ctl.blinkArm && Math.abs(input.steer) < 0.06) { ctl.blink = 0; ctl.blinkArm = false; }
+  }
+  if (ctl.blink) {
+    const was = blinkT % 0.8 < 0.4;
+    blinkT += dt;
+    const on = blinkT % 0.8 < 0.4;
+    if (on !== was) audio.beep(on ? 1300 : 900, 0.025, 'square', 0.05);
+    rig.setBlink(ctl.blink, on);
+    $('blinkL').classList.toggle('on', on && (ctl.blink === -1 || ctl.blink === 2));
+    $('blinkR').classList.toggle('on', on && (ctl.blink === 1 || ctl.blink === 2));
+    $('ic-bl').classList.toggle('on', on && (ctl.blink === -1 || ctl.blink === 2));
+    $('ic-br').classList.toggle('on', on && (ctl.blink === 1 || ctl.blink === 2));
+    $('ic-haz').classList.toggle('on', ctl.blink === 2);
+  } else if (blinkT !== 0) {
+    blinkT = 0;
+    rig.setBlink(0, false);
+    for (const id of ['blinkL', 'blinkR', 'ic-bl', 'ic-br', 'ic-haz']) $(id).classList.remove('on');
+  }
 }
 
 function cycleCamera() {
@@ -1044,7 +1073,7 @@ function settingsHTML() {
     <div class="set"><b>Volume</b><input id="vol" type="range" min="0" max="1" step="0.05" value="${S.settings.volume}"></div>
     <div class="set"><b>Mostrar FPS</b>${seg('fps', S.settings.fps ? 1 : 0, [[1, 'Sim'], [0, 'Não']])}</div>
     <div class="set"><div><b>Desatolar</b><br><small style="opacity:.7">Leva o caminhão de volta para a rua mais próxima</small></div><button class="btn alt" data-act="rescue" style="margin:0">Reposicionar</button></div>
-    <div class="set"><div><b>Controles no teclado</b><br><small style="opacity:.7">WASD/setas • Espaço freio • E motor • R ré • N neutro • P freio de mão • L faróis • H buzina • C câmera • M mapa</small></div></div>
+    <div class="set"><div><b>Controles no teclado</b><br><small style="opacity:.7">Z/X pisca-pisca • WASD/setas • Espaço freio • E motor • R ré • N neutro • P freio de mão • L faróis • H buzina • C câmera • M mapa</small></div></div>
     <div class="set"><b>Menu principal</b><button class="btn alt" data-act="tomenu" style="margin:0">Voltar ao menu</button></div>
     <div class="set"><b>Apagar progresso</b><button class="btn danger" data-act="reset" style="margin:0">Resetar</button></div>`;
 }
@@ -1322,6 +1351,6 @@ window.addEventListener('error', (e) => {
 });
 
 // Expõe ganchos para testes automatizados
-window.__game = { get scene() { return scene; }, get sun() { return sun; }, get renderer() { return renderer; }, S, get rig() { return rig; }, get state() { return state; }, ctl, acceptJob: (i) => acceptJob(i), get jobs() { return jobs; }, world: () => world, cam };
+window.__game = { TRUCK, CARGO, get scene() { return scene; }, get sun() { return sun; }, get renderer() { return renderer; }, S, get rig() { return rig; }, get state() { return state; }, ctl, acceptJob: (i) => acceptJob(i), get jobs() { return jobs; }, world: () => world, cam };
 
 boot().catch((e) => { $("loadmsg").textContent = "Erro ao iniciar: " + e.message; console.error(e); });

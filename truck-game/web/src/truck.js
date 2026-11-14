@@ -13,13 +13,17 @@ let MATS = null;
 function mats() {
   if (MATS) return MATS;
   const pbr = QUAL !== 'low';
-  const S = (o) => (pbr ? new THREE.MeshStandardMaterial(o) : new THREE.MeshPhongMaterial({ color: o.color, map: o.map, vertexColors: o.vertexColors, side: o.side, shininess: o.roughness < 0.3 ? 120 : 20, specular: o.metalness > 0.5 ? 0xffffff : 0x333333 }));
+  const S = (o) => (pbr ? new THREE.MeshStandardMaterial(o) : new THREE.MeshPhongMaterial({ color: o.color, map: o.map, vertexColors: o.vertexColors, side: o.side, transparent: o.transparent, opacity: o.opacity ?? 1, shininess: o.roughness < 0.3 ? 120 : 20, specular: o.metalness > 0.5 ? 0xffffff : 0x333333 }));
   MATS = {
     chrome: S({ color: 0xf2f4f6, metalness: 1, roughness: 0.14, map: tex.metal() }),
     alu: S({ color: 0xc9cdd1, metalness: 0.9, roughness: 0.3 }),
     dark: S({ color: 0x1f2328, metalness: 0.1, roughness: 0.75, side: THREE.DoubleSide }),
     steel: S({ color: 0x3b4148, metalness: 0.5, roughness: 0.5 }),
-    glass: S({ color: 0x0b1219, metalness: 0.3, roughness: 0.04 }),
+    glass: S({ color: 0x0f1a24, metalness: 0.4, roughness: 0.03, transparent: true, opacity: 0.62, side: THREE.DoubleSide }),
+    interior: S({ color: 0x2a2d31, metalness: 0, roughness: 0.9 }),
+    lamp: pbr ? new THREE.MeshStandardMaterial({ map: tex.headlamp(), emissiveMap: tex.headlamp(), emissive: 0xffffff, emissiveIntensity: 0.15, metalness: 0.6, roughness: 0.15, side: THREE.DoubleSide }) : new THREE.MeshBasicMaterial({ map: tex.headlamp(), side: THREE.DoubleSide }),
+    tail: new THREE.MeshBasicMaterial({ map: tex.taillamp(), side: THREE.DoubleSide }),
+    blink: new THREE.SpriteMaterial({ map: tex.glow(), color: 0xffa21a, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }),
     rubber: S({ color: 0xffffff, map: tex.tire(), metalness: 0, roughness: 0.92 }),
     rim: S({ color: 0xe8eaec, metalness: 0.85, roughness: 0.25 }),
     light: new THREE.MeshBasicMaterial({ color: 0xfff8e1 }),
@@ -124,6 +128,37 @@ function RB(w, h, d, r) {
 // para-lama em arco (meia casca de cilindro, metade de cima)
 const ARC = new THREE.CylinderGeometry(1, 1, 1, 14, 1, true, 0, Math.PI);
 
+// perfil lateral (z,y) extrudado na largura (x) com bordas arredondadas
+function extrude(draw, width, bevel = 0.06, segs = 3) {
+  const sh = new THREE.Shape();
+  draw(sh);
+  const depth = Math.max(0.01, width - 2 * bevel);
+  const g = new THREE.ExtrudeGeometry(sh, { depth, bevelEnabled: bevel > 0, bevelThickness: bevel, bevelSize: bevel, bevelSegments: segs, curveSegments: 10 });
+  g.rotateY(-Math.PI / 2);
+  g.translate(depth / 2, 0, 0);
+  // UV pelo envelope (poeira de baixo para cima em toda a peça)
+  g.computeBoundingBox();
+  const bb = g.boundingBox, p = g.attributes.position, uv = g.attributes.uv;
+  for (let i = 0; i < p.count; i++) uv.setXY(i, (p.getZ(i) - bb.min.z) / (bb.max.z - bb.min.z || 1), (p.getY(i) - bb.min.y) / (bb.max.y - bb.min.y || 1));
+  return g;
+}
+
+// quadrilátero nos dois lados da cabine (janelas, decalques)
+function sides(b, pts, xs, uvs = [0, 0, 1, 0, 1, 1, 0, 1]) {
+  for (const s of [-1, 1]) {
+    const P = pts.map(([z, y]) => [s * xs, y, z]);
+    b.quad(P[0], P[1], P[2], P[3], [s, 0, 0], s > 0 ? uvs : [uvs[2], uvs[3], uvs[0], uvs[1], uvs[6], uvs[7], uvs[4], uvs[5]]);
+  }
+}
+
+// quadrilátero inclinado (para-brisa) entre dois pontos do perfil
+function slantQuad(b, za, ya, zb, yb, w, off, x0 = 0) {
+  const dz = zb - za, dy = yb - ya, l = Math.hypot(dz, dy);
+  const nz = dy / l, ny = -dz / l;
+  const A = [za + nz * off, ya + ny * off], B = [zb + nz * off, yb + ny * off];
+  b.quad([x0 - w / 2, A[1], A[0]], [x0 + w / 2, A[1], A[0]], [x0 + w / 2, B[1], B[0]], [x0 - w / 2, B[1], B[0]], [0, ny, nz], [0, 0, 1, 0, 1, 1, 0, 1]);
+}
+
 // ---------- caminhão ----------
 export function buildTruck(def) {
   const M = mats();
@@ -131,158 +166,270 @@ export function buildTruck(def) {
   root.rotation.order = 'YXZ';
   const body = new THREE.Group();
   root.add(body);
-  const P = new Builder(), C = new Builder(), D = new Builder(), GL = new Builder(), LI = new Builder(), RE = new Builder(), AM = new Builder(), GR = new Builder(), ST = new Builder(), AL = new Builder();
+  const P = new Builder(), C = new Builder(), D = new Builder(), GL = new Builder(), LI = new Builder(), RE = new Builder(), AM = new Builder(), GR = new Builder(), ST = new Builder(), AL = new Builder(), LP = new Builder(), TL = new Builder(), DC = new Builder(), IN = new Builder();
   const box = (b, w, h, d, x, y, z, rx = 0, ry = 0, rz = 0) => b.add(G.box(), mat(x, y, z, rx, ry, rz, w, h, d));
   const rbox = (b, w, h, d, x, y, z, r = 0.1, rx = 0) => b.add(RB(w, h, d, r), mat(x, y, z, rx, 0, 0));
   const cyl = (b, rad, len, x, y, z, rx = 0, ry = 0, rz = 0, seg = 14) => b.add(G.cyl(seg), mat(x, y, z, rx, ry, rz, rad * 2, len, rad * 2));
-  const arc = (b, rad, wid, x, y, z) => b.add(ARC, mat(x, y, z, 0, 0, Math.PI / 2, rad, wid, rad));
+  const ex = (b, geo, x = 0) => b.add(geo, mat(x, 0, 0));
 
   const rigid = def.rigid, small = def.id === 'urbano', conv = def.cab === 'conventional';
+  const hi = def.roof === 'high', mid = def.roof === 'mid';
   const wr = small ? 0.42 : 0.53;
-  const wb = small ? 3.3 : rigid ? 4.3 : conv ? (def.axles >= 4 ? 5.6 : 5.2) : def.axles >= 4 ? 4.6 : 3.9;
+  const wb = small ? 3.3 : rigid ? 4.3 : conv ? (def.axles >= 4 ? 5.9 : 5.6) : def.axles >= 4 ? 4.6 : 3.9;
   const cabW = small ? 2.15 : 2.5;
-  const y0 = small ? 0.95 : 1.15;
-  const ch = small ? 1.75 : 2.05;
-  const zf = wb + (small ? 1.25 : conv ? 2.05 : 1.4);
-  let cabFront = zf;
-  const cabL = small ? 1.9 : 2.25;
+  const H = small ? 0.95 : 1.15;          // piso da cabine
+  const k = small ? 0.86 : 1;             // escala vertical
+  const Y = (v) => H + v * k;
+  const zf = wb + (small ? 1.25 : conv ? 1.6 : 1.4);
   const rearEnd = rigid ? -(small ? 1.4 : 2.0) : -1.45;
+  const W2 = cabW / 2;
+  let cf, cabBack; // frente da cabine (para-brisa) e traseira
 
   // chassi
-  for (const s of [-1, 1]) box(ST, 0.12, 0.3, zf - rearEnd - 0.4, s * 0.45, y0 - 0.28, (zf + rearEnd) / 2 - 0.15);
-  for (let z = rearEnd + 0.4; z < wb; z += 1.1) box(ST, 0.9, 0.14, 0.12, 0, y0 - 0.28, z);
+  for (const s of [-1, 1]) box(ST, 0.12, 0.3, zf - rearEnd - 0.4, s * 0.45, H - 0.28, (zf + rearEnd) / 2 - 0.15);
+  for (let z = rearEnd + 0.4; z < wb; z += 1.1) box(ST, 0.9, 0.14, 0.12, 0, H - 0.28, z);
 
-  if (conv) {
-    // capô longo (bicudo)
-    const hoodL = 2.15;
-    cabFront = zf - hoodL - 0.1;
-    rbox(P, cabW * 0.74, 1.05, hoodL, 0, y0 + 0.5, zf - hoodL / 2 - 0.05, 0.22, 0.03);
-    box(C, cabW * 0.66, 1.15, 0.1, 0, y0 + 0.48, zf - 0.04);
-    box(GR, cabW * 0.56, 1.0, 0.05, 0, y0 + 0.48, zf + 0.02);
-    box(C, 0.3, 0.12, 0.12, 0, y0 + 1.12, zf - 0.1);
-    for (const s of [-1, 1]) {
-      arc(P, wr + 0.16, 0.6, s * (cabW / 2 - 0.28), wr + 0.02, wb);
-      box(P, 0.55, 0.06, 1.6, s * (cabW / 2 - 0.28), wr * 2 + 0.16, wb - 0.4, 0.15);
-      rbox(C, 0.5, 0.26, 0.12, s * (cabW / 2 - 0.42), y0 + 0.05, zf - 0.25, 0.05);
-      box(LI, 0.4, 0.17, 0.04, s * (cabW / 2 - 0.42), y0 + 0.05, zf - 0.18);
-      cyl(C, 0.22, 1.2, s * (cabW / 2 + 0.05), y0 + 1.1, cabFront + 0.1);
-      cyl(C, 0.06, 0.6, s * (cabW / 2 + 0.05), y0 + 1.9, cabFront + 0.1);
+  if (!conv) {
+    // ===== cara-chata (cab-over) =====
+    const f = zf, L = small ? 1.75 : rigid ? 1.95 : 2.3, b = f - L;
+    cf = f; cabBack = b;
+    const roofY = hi ? Y(3.0) : mid ? Y(2.55) : Y(2.14);
+    ex(P, extrude((s) => {
+      s.moveTo(b, H);
+      s.lineTo(f - 0.18, H);
+      s.quadraticCurveTo(f - 0.02, H, f - 0.02, Y(0.2));
+      s.lineTo(f - 0.06, Y(1.0));
+      s.lineTo(f - 0.12, Y(1.08));
+      s.lineTo(f - 0.4, Y(2.0));
+      s.quadraticCurveTo(f - 0.47, Y(2.14), f - 0.7, Y(2.15));
+      if (hi || mid) {
+        s.quadraticCurveTo(f - 0.95, Y(2.17), f - 1.05, hi ? Y(2.55) : Y(2.35));
+        s.quadraticCurveTo(f - 1.15, roofY, f - 1.5, roofY);
+      }
+      s.lineTo(b + 0.16, roofY);
+      s.quadraticCurveTo(b, roofY, b, roofY - 0.16);
+      s.lineTo(b, H);
+    }, cabW, 0.07));
+    // para-brisa, palhetas e quebra-sol
+    slantQuad(GL, f - 0.12, Y(1.1), f - 0.4, Y(1.98), cabW - 0.34, 0.075);
+    for (const x of [-0.45, 0.35]) box(D, 0.7, 0.03, 0.03, x, Y(1.15), f - 0.04, 0, 0, 0.25);
+    ex(P, extrude((s) => { s.moveTo(f - 0.42, Y(2.06)); s.lineTo(f + 0.04, Y(2.0)); s.lineTo(f + 0.04, Y(1.95)); s.lineTo(f - 0.42, Y(2.0)); }, cabW - 0.12, 0.015, 1));
+    for (let i = -2; i <= 2; i++) box(AM, 0.13, 0.06, 0.08, i * 0.34, Y(2.06), f - 0.12);
+    // grade com frisos e emblema
+    box(GR, cabW * 0.68, 0.55 * k, 0.03, 0, Y(0.62), f + 0.03, -0.05);
+    for (const y of [0.42, 0.62, 0.82]) box(C, cabW * 0.7, 0.035, 0.035, 0, Y(y), f + 0.05);
+    box(C, 0.24, 0.24, 0.04, 0, Y(0.98), f + 0.02, 0, 0, Math.PI / 4);
+    // para-choque esculpido, faróis, piscas e neblina
+    ex(D, extrude((s) => {
+      s.moveTo(f - 0.35, H - 0.55); s.lineTo(f + 0.05, H - 0.55);
+      s.quadraticCurveTo(f + 0.17, H - 0.55, f + 0.17, H - 0.4);
+      s.lineTo(f + 0.13, H + 0.12); s.lineTo(f - 0.35, H + 0.12);
+    }, cabW + 0.04, 0.05));
+    for (const sd of [-1, 1]) {
+      LP.quad([sd * (W2 - 0.12) - (sd > 0 ? 0.62 : 0), H - 0.2, f + 0.235], [sd * (W2 - 0.12) + (sd > 0 ? 0 : 0.62), H - 0.2, f + 0.235], [sd * (W2 - 0.12) + (sd > 0 ? 0 : 0.62), H + 0.06, f + 0.2], [sd * (W2 - 0.12) - (sd > 0 ? 0.62 : 0), H + 0.06, f + 0.2], [0, 0, 1], [0, 0, 1, 0, 1, 1, 0, 1]);
+      cyl(LI, 0.075, 0.04, sd * (W2 - 0.4), H - 0.42, f + 0.235, Math.PI / 2, 0, 0, 12);
+      // para-lama dianteiro
+      D.add(ARC, mat(sd * (W2 - 0.25), wr, wb, 0, 0, Math.PI / 2, wr + 0.12, 0.44, wr + 0.12));
+      // degraus atrás da roda
+      for (const kk of [0, 1]) box(ST, 0.4, 0.05, 0.42, sd * (W2 - 0.2), 0.48 + kk * 0.36, wb - 0.72);
+      box(D, 0.06, 0.95, 0.5, sd * (W2 - 0.01), 0.7, wb - 0.72);
     }
-    rbox(C, cabW + 0.1, 0.4, 0.32, 0, y0 - 0.2, zf + 0.12, 0.06);
+    // portas: frisos, maçaneta, janelas
+    for (const sd of [-1, 1]) {
+      const x = sd * (W2 + 0.072);
+      box(D, 0.02, Y(1.95) - Y(0.15), 0.025, x, (Y(1.95) + Y(0.15)) / 2, f - 1.32);
+      box(D, 0.02, Y(1.0) - Y(0.15), 0.025, x, (Y(1.0) + Y(0.15)) / 2, f - 0.22);
+      box(D, 0.02, 0.025, 1.1, x, Y(0.15), f - 0.77);
+      box(C, 0.04, 0.05, 0.2, sd * (W2 + 0.09), Y(1.02), f - 1.18);
+      box(C, 0.02, 0.03, 1.15, sd * (W2 + 0.078), Y(1.16), f - 0.78);
+      // retrovisores (braço + carcaça + lente)
+      box(C, 0.42, 0.04, 0.04, sd * (W2 + 0.24), Y(1.96), f - 0.3, 0, sd * -0.3, 0);
+      box(C, 0.04, 0.5, 0.04, sd * (W2 + 0.44), Y(1.72), f - 0.18);
+      rbox(D, 0.15, 0.64, 0.32, sd * (W2 + 0.5), Y(1.6), f - 0.14, 0.05);
+      box(GL, 0.02, 0.54, 0.24, sd * (W2 + 0.425), Y(1.6), f - 0.14);
+      rbox(D, 0.13, 0.26, 0.22, sd * (W2 + 0.48), Y(1.12), f - 0.12, 0.05);
+    }
+    sides(GL, [[f - 0.17, Y(1.18)], [f - 1.25, Y(1.18)], [f - 1.25, Y(1.92)], [f - 0.41, Y(1.92)]], W2 + 0.075);
+    if (hi) sides(GL, [[b + 0.35, Y(2.25)], [b + 0.15, Y(2.25)], [b + 0.15, Y(2.7)], [b + 0.35, Y(2.7)]], W2 + 0.075);
+    sides(DC, [[f - 0.15, Y(0.2)], [b + 0.05, Y(0.2)], [b + 0.05, Y(1.05)], [f - 0.15, Y(1.05)]], W2 + 0.08);
+    // saias laterais aerodinâmicas (cavalos de teto alto)
+    if (hi && !rigid) for (const sd of [-1, 1]) box(P, 0.05, 0.62, wb - 0.95 - 1.2, sd * (W2 - 0.04), 0.78, (wb - 0.95 + 1.2) / 2);
+    // interior: painel, volante, bancos
+    box(IN, cabW - 0.3, 0.3, 0.55, 0, Y(1.0), f - 0.45);
+    const sw = new THREE.TorusGeometry(0.21, 0.025, 6, 18);
+    IN.add(sw, mat(0.55, Y(1.18), f - 0.72, 0.55, 0, 0));
+    for (const sd of [-1, 1]) { box(IN, 0.55, 0.15, 0.55, sd * 0.55, Y(0.55), f - 1.25); box(IN, 0.55, 0.75, 0.12, sd * 0.55, Y(0.95), f - 1.55, -0.15); }
   } else {
-    box(GR, cabW * 0.66, ch * 0.36, 0.04, 0, y0 + ch * 0.33, zf + 0.01);
-    box(C, cabW * 0.7, 0.07, 0.06, 0, y0 + ch * 0.52, zf + 0.02);
-    box(C, 0.26, 0.26, 0.04, 0, y0 + ch * 0.42, zf + 0.05, 0, 0, Math.PI / 4);
-    rbox(D, cabW + 0.06, 0.42, 0.34, 0, y0 - 0.12, zf + 0.08, 0.08);
-    for (const s of [-1, 1]) {
-      rbox(C, 0.56, 0.26, 0.1, s * (cabW / 2 - 0.4), y0 + 0.22, zf + 0.02, 0.05);
-      box(LI, 0.46, 0.18, 0.04, s * (cabW / 2 - 0.4), y0 + 0.22, zf + 0.07);
-      box(AM, 0.14, 0.18, 0.04, s * (cabW / 2 - 0.08), y0 + 0.22, zf + 0.04);
-      cyl(LI, 0.07, 0.04, s * (cabW / 2 - 0.35), y0 - 0.14, zf + 0.26, Math.PI / 2, 0, 0, 10);
-      arc(D, wr + 0.12, 0.42, s * (cabW / 2 - 0.25), wr, wb);
+    // ===== bicudo (capô longo) =====
+    const hf = zf, hoodL = 2.05, hb = hf - hoodL, hoodW = cabW * 0.64;
+    cf = hb;
+    const sleeperL = hi ? 1.9 : 1.2;
+    cabBack = cf - 1.8 - sleeperL;
+    ex(P, extrude((s) => {
+      s.moveTo(hb, H - 0.15); s.lineTo(hf - 0.1, H - 0.15); s.lineTo(hf, H - 0.05);
+      s.lineTo(hf, Y(1.0));
+      s.quadraticCurveTo(hf, Y(1.18), hf - 0.28, Y(1.21));
+      s.lineTo(hb, Y(1.36)); s.lineTo(hb, H - 0.15);
+    }, hoodW, 0.12));
+    // grade alta cromada, enfeite do capô
+    rbox(C, hoodW * 0.9, 1.12 * k, 0.12, 0, Y(0.48), hf + 0.15, 0.04);
+    box(GR, hoodW * 0.76, 1.0 * k, 0.03, 0, Y(0.48), hf + 0.22);
+    box(C, 0.08, 0.12, 0.28, 0, Y(1.27), hf - 0.15);
+    // para-lamas envolventes
+    const R = wr + 0.14;
+    for (const sd of [-1, 1]) {
+      ex(P, extrude((s) => {
+        s.moveTo(wb + R * Math.cos(-0.35), wr + R * Math.sin(-0.35));
+        s.absarc(wb, wr, R, -0.35, Math.PI, false);
+        s.lineTo(wb - R - 0.55, wr + 0.02);
+        s.lineTo(wb - R - 0.55, wr - 0.06);
+        s.lineTo(wb - R + 0.08, wr - 0.06);
+        s.absarc(wb, wr, R - 0.08, Math.PI, -0.35, true);
+      }, 0.62, 0.03, 2), sd * (W2 - 0.31));
+      // faróis na frente do para-lama
+      LP.quad([sd * (W2 - 0.31) - 0.24, wr + 0.32, wb + R + 0.02], [sd * (W2 - 0.31) + 0.24, wr + 0.32, wb + R + 0.02], [sd * (W2 - 0.31) + 0.24, wr + 0.56, wb + R - 0.03], [sd * (W2 - 0.31) - 0.24, wr + 0.56, wb + R - 0.03], [0, 0.2, 1], [0, 0, 1, 0, 1, 1, 0, 1]);
+      // filtros de ar e degraus
+      cyl(C, 0.2, 1.1, sd * (W2 + 0.02), Y(0.95), cf + 0.15);
+      cyl(C, 0.06, 0.55, sd * (W2 + 0.02), Y(1.7), cf + 0.15);
+      for (const kk of [0, 1]) box(ST, 0.42, 0.05, 0.6, sd * (W2 - 0.2), 0.48 + kk * 0.36, cf - 0.55);
+      box(D, 0.06, 0.95, 0.65, sd * (W2 - 0.01), 0.72, cf - 0.55);
     }
+    // para-choque cromado
+    ex(C, extrude((s) => {
+      s.moveTo(hf - 0.05, H - 0.62); s.lineTo(hf + 0.3, H - 0.62);
+      s.quadraticCurveTo(hf + 0.38, H - 0.6, hf + 0.38, H - 0.42);
+      s.lineTo(hf + 0.34, H - 0.14); s.lineTo(hf - 0.05, H - 0.14);
+    }, cabW + 0.1, 0.05));
+    // cabine
+    ex(P, extrude((s) => {
+      s.moveTo(cf - 1.8, H); s.lineTo(cf - 0.05, H); s.lineTo(cf, Y(0.3)); s.lineTo(cf, Y(1.36));
+      s.lineTo(cf - 0.3, Y(2.1));
+      s.quadraticCurveTo(cf - 0.4, Y(2.24), cf - 0.62, Y(2.25));
+      s.lineTo(cf - 1.65, Y(2.25)); s.quadraticCurveTo(cf - 1.8, Y(2.25), cf - 1.8, Y(2.1)); s.lineTo(cf - 1.8, H);
+    }, cabW, 0.07));
+    // dormitório com defletor
+    const top = hi ? Y(3.05) : Y(2.4);
+    ex(P, extrude((s) => {
+      s.moveTo(cabBack, H); s.lineTo(cf - 1.76, H); s.lineTo(cf - 1.76, Y(2.2));
+      s.quadraticCurveTo(cf - 1.95, top, cf - 2.6, top);
+      s.lineTo(cabBack + 0.15, top); s.quadraticCurveTo(cabBack, top, cabBack, top - 0.15); s.lineTo(cabBack, H);
+    }, cabW - 0.04, 0.07));
+    for (const sd of [-1, 1]) slantQuad(GL, cf, Y(1.38), cf - 0.3, Y(2.08), cabW / 2 - 0.24, 0.075, sd * (cabW / 4 - 0.04));
+    for (const x of [-0.6, 0.6]) box(D, 0.6, 0.03, 0.03, x, Y(1.42), cf + 0.06, 0, 0, 0.2);
+    rbox(P, cabW - 0.1, 0.12, 0.45, 0, Y(2.2), cf + 0.08, 0.04, -0.25);
+    for (let i = -2; i <= 2; i++) box(AM, 0.13, 0.06, 0.08, i * 0.34, Y(2.3), cf - 0.1);
+    for (const sd of [-1, 1]) {
+      const x = sd * (W2 + 0.072);
+      box(D, 0.02, Y(2.0) - Y(0.15), 0.025, x, (Y(2.0) + Y(0.15)) / 2, cf - 1.2);
+      box(D, 0.02, 0.025, 1.1, x, Y(0.15), cf - 0.65);
+      box(C, 0.04, 0.05, 0.2, sd * (W2 + 0.09), Y(1.1), cf - 1.05);
+      box(C, 0.4, 0.04, 0.04, sd * (W2 + 0.22), Y(2.0), cf - 0.25, 0, sd * -0.3, 0);
+      box(C, 0.04, 0.55, 0.04, sd * (W2 + 0.42), Y(1.75), cf - 0.12);
+      rbox(C, 0.15, 0.7, 0.3, sd * (W2 + 0.48), Y(1.6), cf - 0.1, 0.05);
+      box(GL, 0.02, 0.6, 0.22, sd * (W2 + 0.4), Y(1.6), cf - 0.1);
+      cyl(C, 0.11, 3.0, sd * (W2 - 0.12), Y(2.4), cabBack - 0.22);
+      cyl(C, 0.15, 1.0, sd * (W2 - 0.12), Y(1.6), cabBack - 0.22);
+    }
+    sides(GL, [[cf - 0.07, Y(1.44)], [cf - 1.12, Y(1.44)], [cf - 1.12, Y(2.06)], [cf - 0.32, Y(2.06)]], W2 + 0.075);
+    sides(GL, [[cf - 2.3, Y(1.4)], [cf - 2.7, Y(1.4)], [cf - 2.7, Y(1.75)], [cf - 2.3, Y(1.75)]], W2 + 0.055);
+    sides(DC, [[cf - 0.05, Y(0.3)], [cabBack + 0.1, Y(0.3)], [cabBack + 0.1, Y(1.15)], [cf - 0.05, Y(1.15)]], W2 + 0.08);
+    box(IN, cabW - 0.3, 0.3, 0.5, 0, Y(1.25), cf - 0.35);
+    IN.add(new THREE.TorusGeometry(0.22, 0.025, 6, 18), mat(0.55, Y(1.42), cf - 0.65, 0.6, 0, 0));
+    for (const sd of [-1, 1]) { box(IN, 0.55, 0.15, 0.55, sd * 0.55, Y(0.7), cf - 1.1); box(IN, 0.55, 0.8, 0.12, sd * 0.55, Y(1.1), cf - 1.4, -0.15); }
   }
 
-  // cabine
-  const cz = cabFront - cabL / 2;
-  rbox(P, cabW, ch, cabL, 0, y0 + ch / 2, cz, 0.14);
-  if (def.roof === 'high') rbox(P, cabW - 0.04, 1.0, cabL - 0.2, 0, y0 + ch + 0.42, cz - 0.08, 0.28);
-  else if (def.roof === 'mid') rbox(P, cabW - 0.06, 0.42, cabL - 0.3, 0, y0 + ch + 0.16, cz - 0.1, 0.18);
-  const sl = conv ? 1.5 : 0.9;
-  if (conv || !rigid) {
-    const sh = ch + (def.roof === 'high' ? 0.95 : 0.3);
-    rbox(P, cabW - 0.02, sh, sl, 0, y0 + sh / 2, cabFront - cabL - sl / 2 + 0.05, 0.16);
-  }
-  const wsY = y0 + ch * 0.7, wsH = ch * 0.42;
-  if (conv) for (const s of [-1, 1]) box(GL, cabW / 2 - 0.22, wsH, 0.05, s * (cabW / 4 - 0.02), wsY, cabFront + 0.01, -0.12);
-  else box(GL, cabW - 0.28, wsH, 0.05, 0, wsY, cabFront + 0.01, -0.05);
-  rbox(D, cabW - 0.16, 0.14, 0.42, 0, y0 + ch + 0.02, cabFront + 0.1, 0.05, -0.2);
-  for (let i = -2; i <= 2; i++) box(AM, 0.13, 0.07, 0.08, i * 0.34, y0 + ch + (def.roof === 'high' ? 0.94 : 0.13), cabFront - 0.15);
-  for (const s of [-1, 1]) {
-    box(GL, 0.04, ch * 0.36, cabL * 0.4, s * (cabW / 2 + 0.005), wsY + 0.02, cabFront - cabL * 0.3);
-    box(GL, 0.04, ch * 0.2, cabL * 0.12, s * (cabW / 2 + 0.005), wsY - 0.05, cabFront - cabL * 0.08);
-    box(D, 0.03, ch * 0.85, 0.025, s * (cabW / 2 + 0.006), y0 + ch * 0.45, cabFront - cabL * 0.66);
-    box(C, 0.04, 0.05, 0.22, s * (cabW / 2 + 0.02), y0 + ch * 0.5, cabFront - cabL * 0.6);
-    for (const k of [0, 1]) box(ST, 0.36, 0.05, 0.5, s * (cabW / 2 - 0.15), 0.5 + k * 0.38, cabFront - cabL * 0.35);
-    box(D, 0.08, 0.95, 0.6, s * (cabW / 2 - 0.02), 0.72, cabFront - cabL * 0.35);
-    box(C, 0.5, 0.05, 0.05, s * (cabW / 2 + 0.23), y0 + ch * 0.86, cabFront - 0.1);
-    box(C, 0.05, 0.75, 0.05, s * (cabW / 2 + 0.47), y0 + ch * 0.62, cabFront - 0.1);
-    rbox(D, 0.13, 0.62, 0.3, s * (cabW / 2 + 0.5), y0 + ch * 0.68, cabFront - 0.14, 0.04);
-    box(GL, 0.02, 0.52, 0.22, s * (cabW / 2 + 0.43), y0 + ch * 0.68, cabFront - 0.14);
-    rbox(D, 0.12, 0.26, 0.22, s * (cabW / 2 + 0.5), y0 + ch * 0.3, cabFront - 0.12, 0.04);
-    if (def.roof === 'high' && !rigid) box(P, 0.05, ch + 0.8, 0.55, s * (cabW / 2 - 0.02), y0 + (ch + 0.8) / 2 + 0.1, cabFront - cabL - sl - 0.2);
-    box(RE, 0.32, 0.18, 0.05, s * 0.88, y0 - 0.2, rearEnd - 0.02);
-    box(LI, 0.12, 0.18, 0.05, s * 0.6, y0 - 0.2, rearEnd - 0.02);
-    box(D, 0.62, 0.62, 0.03, s * 1.0, 0.55, def.axles >= 3 && !rigid ? -1.45 : -0.8);
-  }
+  // tanques, escapamento (cara-chata), passarela e quinta roda
   if (!small) {
-    const tz = wb - (conv ? 2.4 : 1.6);
-    cyl(AL, 0.34, 1.4, 1.02, 0.86, tz, Math.PI / 2);
-    for (const k of [-0.45, 0.45]) cyl(D, 0.355, 0.06, 1.02, 0.86, tz + k, Math.PI / 2);
+    const tz = conv ? cf - 1.4 : wb - 1.6;
+    cyl(AL, 0.34, 1.4, 1.02, 0.86, tz, Math.PI / 2, 0, 0, 20);
+    for (const kk of [-0.45, 0.45]) cyl(D, 0.355, 0.06, 1.02, 0.86, tz + kk, Math.PI / 2, 0, 0, 20);
     box(D, 0.5, 0.5, 0.7, -1.0, 0.85, tz + 0.1);
     cyl(ST, 0.17, 1.1, -0.95, 0.62, tz - 0.9, Math.PI / 2);
   }
   if (!rigid) {
-    const ez = cabFront - cabL - sl - 0.25;
-    for (const s of conv ? [-1, 1] : [1]) {
-      cyl(C, 0.11, 3.0, s * (cabW / 2 - 0.12), y0 + ch + 0.25, ez);
-      cyl(C, 0.15, 1.0, s * (cabW / 2 - 0.12), y0 + ch - 0.6, ez);
+    const ez = cabBack - 0.25;
+    if (!conv) {
+      cyl(C, 0.11, 2.6, W2 - 0.14, Y(2.0) + (hi ? 0.4 : 0), ez);
+      cyl(C, 0.15, 0.9, W2 - 0.14, Y(1.2), ez);
     }
-    box(AL, 1.3, 0.05, 0.55, 0, y0 + 0.05, ez - 0.1);
+    box(AL, 1.3, 0.05, 0.55, 0, H + 0.05, ez - 0.1);
     for (const [c, x] of [[0xc0392b, -0.18], [0x2e86de, 0.18]]) {
       const t = new THREE.Mesh(new THREE.TorusGeometry(0.16, 0.025, 6, 16), new THREE.MeshLambertMaterial({ color: c }));
-      t.position.set(x, y0 + 0.5, ez - 0.05);
+      t.position.set(x, H + 0.5, ez - 0.05);
       body.add(t);
     }
-    box(ST, 1.35, 0.14, 1.3, 0, y0 - 0.02, 0.3);
-    box(AL, 1.2, 0.03, 1.1, 0, y0 + 0.06, 0.3);
-    for (const s of [-1, 1]) box(D, 0.7, 0.05, def.axles >= 3 ? 2.7 : 1.4, s * 0.98, wr * 2 + 0.14, 0);
+    box(ST, 1.35, 0.14, 1.3, 0, H - 0.02, 0.3);
+    box(AL, 1.2, 0.03, 1.1, 0, H + 0.06, 0.3);
+    for (const sd of [-1, 1]) box(D, 0.7, 0.05, def.axles >= 3 ? 2.7 : 1.4, sd * 0.98, wr * 2 + 0.14, 0);
   }
+  // traseira: lanternas, lameiros
+  for (const sd of [-1, 1]) {
+    TL.quad([sd * 0.62 - 0.22, H - 0.32, rearEnd - 0.03], [sd * 0.62 + 0.22, H - 0.32, rearEnd - 0.03], [sd * 0.62 + 0.22, H - 0.1, rearEnd - 0.03], [sd * 0.62 - 0.22, H - 0.1, rearEnd - 0.03], [0, 0, -1], sd > 0 ? [1, 0, 0, 0, 0, 1, 1, 1] : [0, 0, 1, 0, 1, 1, 0, 1]);
+    box(D, 0.62, 0.62, 0.03, sd * 1.0, 0.55, def.axles >= 3 && !rigid ? -1.45 : -0.8);
+  }
+  box(ST, 2.0, 0.1, 0.12, 0, H - 0.2, rearEnd);
 
+  // baú (rígidos)
   let hitchZ = 0.3;
   if (rigid) {
-    const bz1 = cabFront - cabL - 0.15, bz0 = rearEnd;
+    const bz1 = cabBack - 0.15, bz0 = rearEnd;
     const bh = small ? 2.3 : 2.7, bw = small ? 2.25 : 2.5;
-    box(ST, bw, 0.12, bz1 - bz0, 0, y0 + 0.02, (bz0 + bz1) / 2);
+    box(ST, bw, 0.12, bz1 - bz0, 0, H + 0.02, (bz0 + bz1) / 2);
     const boxMat = new THREE.MeshLambertMaterial({ map: tex.cargoBox('#' + new THREE.Color(def.color === 0xf2f2f2 ? 0x2f6fde : def.color).getHexString(), 'DRIZZIE') });
     const side = new Builder();
-    const yb = y0 + 0.08, yt = y0 + 0.08 + bh;
+    const yb = H + 0.08, yt = H + 0.08 + bh;
     side.quad([bw / 2 + 0.01, yb, bz1], [bw / 2 + 0.01, yb, bz0], [bw / 2 + 0.01, yt, bz0], [bw / 2 + 0.01, yt, bz1], [1, 0, 0], [1, 0, 0, 0, 0, 1, 1, 1]);
     side.quad([-bw / 2 - 0.01, yb, bz0], [-bw / 2 - 0.01, yb, bz1], [-bw / 2 - 0.01, yt, bz1], [-bw / 2 - 0.01, yt, bz0], [-1, 0, 0], [0, 0, 1, 0, 1, 1, 0, 1]);
     body.add(side.mesh(boxMat, { cast: true }));
-    const W = new Builder(true);
-    W.box(-bw / 2, yb, bz0, bw / 2, yt, bz1, 1, 0xf4f4f4);
-    for (const s of [-1, 1]) W.add(G.box(), mat(s * bw / 4, (yb + yt) / 2, bz0 - 0.02, 0, 0, 0, bw / 2 - 0.08, bh - 0.12, 0.02), 0xdcdcdc);
-    W.add(G.box(), mat(0, yt + 0.02, (bz0 + bz1) / 2, 0, 0, 0, bw + 0.04, 0.06, bz1 - bz0 + 0.04), 0xd0d3d6);
-    body.add(W.mesh(M.flat, { cast: true }));
-    for (const s of [-0.3, 0.3]) box(C, 0.04, bh - 0.3, 0.04, s, (yb + yt) / 2, bz0 - 0.04);
+    const Wb = new Builder(true);
+    Wb.box(-bw / 2, yb, bz0, bw / 2, yt, bz1, 1, 0xf4f4f4);
+    for (const sd of [-1, 1]) Wb.add(G.box(), mat(sd * bw / 4, (yb + yt) / 2, bz0 - 0.02, 0, 0, 0, bw / 2 - 0.08, bh - 0.12, 0.02), 0xdcdcdc);
+    Wb.add(G.box(), mat(0, yt + 0.02, (bz0 + bz1) / 2, 0, 0, 0, bw + 0.04, 0.06, bz1 - bz0 + 0.04), 0xd0d3d6);
+    body.add(Wb.mesh(M.flat, { cast: true }));
+    for (const sd of [-0.3, 0.3]) box(C, 0.04, bh - 0.3, 0.04, sd, (yb + yt) / 2, bz0 - 0.04);
     box(D, bw - 0.2, 0.12, 0.1, 0, 0.55, bz0 - 0.05);
     hitchZ = rearEnd;
   }
 
   const paint = paintMat(def.color);
-  meshesFrom([[P, paint], [C, M.chrome], [D, M.dark], [GL, M.glass], [LI, M.light], [RE, M.red], [AM, M.amber], [GR, M.grill], [ST, M.steel], [AL, M.alu]], body);
+  const decal = new THREE.MeshLambertMaterial({ map: tex.cabDecal(def.color), transparent: true, alphaTest: 0.05, depthWrite: false, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2 });
+  meshesFrom([[P, paint], [C, M.chrome], [D, M.dark], [GL, M.glass], [LI, M.light], [RE, M.red], [AM, M.amber], [GR, M.grill], [ST, M.steel], [AL, M.alu], [LP, M.lamp], [TL, M.tail], [DC, decal], [IN, M.interior]], body);
 
+  // luzes noturnas e pisca-pisca
   const night = new THREE.Group();
-  for (const s of [-1, 1]) {
+  const frontLampY = conv ? wr + 0.44 : H - 0.07, frontLampZ = conv ? wb + wr + 0.3 : zf + 0.3;
+  const frontLampX = conv ? W2 - 0.31 : W2 - 0.43;
+  for (const sd of [-1, 1]) {
     const g = new THREE.Sprite(M.glow);
-    g.scale.set(1.6, 1.6, 1);
-    g.position.set(s * (cabW / 2 - 0.42), conv ? y0 + 0.05 : y0 + 0.22, zf + 0.15);
+    g.scale.set(1.7, 1.7, 1);
+    g.position.set(sd * frontLampX, frontLampY, frontLampZ);
     night.add(g);
     const rg = new THREE.Sprite(M.glowRed);
     rg.scale.set(0.9, 0.9, 1);
-    rg.position.set(s * 0.88, y0 - 0.2, rearEnd - 0.12);
+    rg.position.set(sd * 0.62, H - 0.2, rearEnd - 0.12);
     night.add(rg);
   }
   const beam = new THREE.Mesh(new THREE.PlaneGeometry(9, 26), M.beam);
-  beam.rotation.x = -Math.PI / 2;
-  beam.position.set(0, 0.07, zf + 13);
+  beam.rotation.set(-Math.PI / 2, 0, Math.PI); // parte larga do facho à frente
+  beam.position.set(0, 0.07, zf + 13.5);
   night.add(beam);
   night.visible = false;
   root.add(night);
+  const blinkL = [], blinkR = [];
+  for (const sd of [-1, 1]) {
+    for (const [x, y, z] of [[sd * (W2 - 0.05), conv ? wr + 0.44 : H - 0.07, conv ? wb + wr + 0.3 : zf + 0.25], [sd * (W2 + 0.05), conv ? Y(0.6) : Y(0.3), conv ? cf - 0.2 : wb + 0.6], [sd * 0.98, H - 0.2, rearEnd - 0.1]]) {
+      const sp = new THREE.Sprite(M.blink);
+      sp.scale.set(0.8, 0.8, 1);
+      sp.position.set(x, y, z);
+      sp.visible = false;
+      root.add(sp);
+      (sd > 0 ? blinkL : blinkR).push(sp);
+    }
+  }
 
+  // rodas
   const front = [], rear = [];
-  const fx = cabW / 2 - 0.3, fw = small ? 0.26 : 0.32;
+  const fx = W2 - 0.3, fw = small ? 0.26 : 0.32;
   front.push(steerWheel(wb, fx, wr, fw, 1), steerWheel(wb, -fx, wr, fw, -1));
   if (def.axles >= 4) front.push(steerWheel(wb - 1.55, fx, wr, fw, 1), steerWheel(wb - 1.55, -fx, wr, fw, -1));
   for (const f of front) root.add(f);
@@ -295,7 +442,7 @@ export function buildTruck(def) {
   blob.rotation.x = -Math.PI / 2;
   blob.position.set(0, 0.05, (zf + rearEnd) / 2);
   root.add(blob);
-  return { root, body, front, rear, wb, wr, hitchZ, zf, rearEnd, paint, blob, cabW, night, y0, cabFront, ch, conv };
+  return { root, body, front, rear, wb, wr, hitchZ, zf, rearEnd, paint, blob, cabW, night, y0: H, cabFront: cf, ch: 2.05 * k, conv, blinkL, blinkR };
 }
 
 // ---------- carreta ----------
@@ -459,12 +606,21 @@ export function buildTrailer(cargo) {
   }
   night.visible = false;
   root.add(night);
+  const blinkL = [], blinkR = [];
+  for (const sd of [-1, 1]) {
+    const sp = new THREE.Sprite(M.blink);
+    sp.scale.set(0.8, 0.8, 1);
+    sp.position.set(sd * 1.2, deck - 0.4, back - 0.12);
+    sp.visible = false;
+    root.add(sp);
+    (sd > 0 ? blinkL : blinkR).push(sp);
+  }
   const blob = new THREE.Mesh(new THREE.PlaneGeometry(3.4, Lt + 1.5), M.blob);
   blob.rotation.x = -Math.PI / 2;
   blob.position.set(0, 0.05, (front + back) / 2);
   root.add(blob);
   root.traverse((o) => { if (o.isMesh && o !== blob) o.castShadow = true; });
-  return { root, axles, Lk: -axC, Lt, front, back, blob, night };
+  return { root, axles, Lk: -axC, Lt, front, back, blob, night, blinkL, blinkR };
 }
 
 // ---------- física ----------
@@ -512,7 +668,16 @@ export class Rig {
     this.sync();
   }
 
+  // pisca-pisca: dir = -1 esquerda, 1 direita, 2 alerta, 0 desligado; on = fase acesa
+  setBlink(dir, on) {
+    const show = (arr, v) => { for (const s of arr) s.visible = v; };
+    const L = on && (dir === -1 || dir === 2), R = on && (dir === 1 || dir === 2);
+    show(this.model.blinkL, L); show(this.model.blinkR, R);
+    if (this.trailer) { show(this.trailer.blinkL, L); show(this.trailer.blinkR, R); }
+  }
+
   setLights(on) {
+    if (MATS && MATS.lamp.emissiveIntensity !== undefined) MATS.lamp.emissiveIntensity = on ? 1.6 : 0.15;
     this.lightsOn = on;
     this.model.night.visible = on;
     if (this.trailer) this.trailer.night.visible = on;

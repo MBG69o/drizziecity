@@ -77,6 +77,7 @@ export class Traffic {
     this.beamMat = new THREE.MeshBasicMaterial({ map: tex.beam(), transparent: true, opacity: 0.7, depthWrite: false, blending: THREE.AdditiveBlending });
     const beamG = new THREE.PlaneGeometry(6, 16);
     beamG.rotateX(-Math.PI / 2);
+    beamG.rotateY(Math.PI); // parte larga do facho à frente
     const geos = {};
     for (let i = 0; i < count; i++) {
       const type = i % 7 === 3 ? 3 : i % 11 === 5 ? 2 : i % 3 === 1 ? 1 : 0;

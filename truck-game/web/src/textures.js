@@ -518,6 +518,53 @@ export const tex = {
     return finish(c);
   }),
 
+
+  // Farol: lente com refletores e luz diurna (DRL)
+  headlamp: () => memo('headlamp', () => {
+    const w = 256, h = 128;
+    const [c, ctx] = canvas(w, h);
+    const g = ctx.createLinearGradient(0, 0, 0, h);
+    g.addColorStop(0, '#3a4048'); g.addColorStop(1, '#14181c');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
+    for (const [x, r] of [[70, 40], [170, 34]]) {
+      const rg = ctx.createRadialGradient(x, 60, 2, x, 60, r);
+      rg.addColorStop(0, '#ffffff'); rg.addColorStop(0.35, '#dfe6ee'); rg.addColorStop(0.7, '#8d98a5'); rg.addColorStop(1, '#2b3138');
+      ctx.fillStyle = rg; ctx.beginPath(); ctx.arc(x, 60, r, 0, 7); ctx.fill();
+    }
+    ctx.fillStyle = '#f7fbff'; ctx.fillRect(20, 108, 216, 8);
+    ctx.strokeStyle = 'rgba(255,255,255,0.5)'; ctx.lineWidth = 4; ctx.strokeRect(2, 2, w - 4, h - 4);
+    return finish(c, false);
+  }),
+
+  // Lanterna traseira
+  taillamp: () => memo('taillamp', () => {
+    const w = 128, h = 64;
+    const [c, ctx] = canvas(w, h);
+    ctx.fillStyle = '#5a0a0a'; ctx.fillRect(0, 0, w, h);
+    ctx.fillStyle = '#ff2a1a'; ctx.fillRect(4, 4, 56, 56);
+    ctx.fillStyle = '#ffa21a'; ctx.fillRect(64, 4, 28, 56);
+    ctx.fillStyle = '#f2f2f2'; ctx.fillRect(96, 4, 28, 56);
+    return finish(c, false);
+  }),
+
+  // Faixas decorativas da cabine (fundo transparente)
+  cabDecal: (hex) => memo('decal' + hex, () => {
+    const w = 512, h = 192;
+    const [c, ctx] = canvas(w, h);
+    ctx.clearRect(0, 0, w, h);
+    const col = new THREE.Color(hex);
+    const dark = '#' + col.clone().multiplyScalar(0.45).getHexString();
+    const light = col.getHSL({}).l > 0.6 ? '#2a3440' : '#ffffff';
+    ctx.fillStyle = dark;
+    ctx.beginPath(); ctx.moveTo(0, h * 0.55); ctx.lineTo(w, h * 0.25); ctx.lineTo(w, h * 0.42); ctx.lineTo(0, h * 0.72); ctx.fill();
+    ctx.fillStyle = light;
+    ctx.beginPath(); ctx.moveTo(0, h * 0.76); ctx.lineTo(w, h * 0.46); ctx.lineTo(w, h * 0.5); ctx.lineTo(0, h * 0.8); ctx.fill();
+    ctx.font = 'italic 900 46px sans-serif';
+    ctx.fillStyle = light;
+    ctx.fillText('DRIZZIE', 26, h * 0.42);
+    return finish(c, false);
+  }),
+
   warehouse: () => memo('warehouse', () => {
     const s = SIZE / 2;
     const [c, ctx] = canvas(s, s);

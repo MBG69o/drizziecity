@@ -86,7 +86,6 @@ button { font: inherit; color: inherit; border: 0; cursor: pointer; touch-action
 .arrowb { width: 44px; height: 44px; border-radius: 50%; border: 2px solid rgba(255,255,255,.5); font-size: 20px; color: rgba(255,255,255,.85); background: rgba(0,0,0,.25); align-self: flex-start; }
 .arrowb.on { background: rgba(200,16,46,.7); }
 #wheelwrap.buttons #wheel { display: none; }
-#wheelwrap.buttons .arrowb { width: 84px; height: 84px; font-size: 34px; margin-right: 12px; align-self: center; }
 #wheelwrap.tilt #wheel { pointer-events: none; opacity: .8; }
 #lightsbtn { left: max(8px, env(safe-area-inset-left)); bottom: 48px; }
 .rb.small2 { width: 40px; height: 40px; }
@@ -220,3 +219,15 @@ input[type=range] { width: 180px; accent-color: #e3243b; }
   .t-grid button { padding: 9px 6px; }
   #tiname { font-size: 22px; }
 }
+
+/* pisca-pisca e direção por botões */
+.arrowb.blink { color: #3ee07a; border-color: rgba(62,224,122,.6); }
+.arrowb.blink.on { background: #3ee07a; color: #08130c; box-shadow: 0 0 18px #3ee07a; }
+#steerbtns { display: none; }
+#wheelwrap.buttons #steerbtns { display: flex; }
+#wheelwrap.buttons .arrowb { width: 44px; height: 44px; font-size: 18px; margin-right: 0; align-self: flex-start; }
+.steerb { width: 84px; height: 84px; border-radius: 50%; font-size: 34px; margin: 0 6px; }
+#icons .bl { color: rgba(62,224,122,.25); font-size: 16px; }
+#icons .bl.on { color: #3ee07a; text-shadow: 0 0 10px #3ee07a; }
+#ic-haz { color: rgba(255,80,80,.45); font-size: 15px; padding: 0; }
+#ic-haz.on { color: #ff5050; }

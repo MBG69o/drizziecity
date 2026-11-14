@@ -12,6 +12,7 @@ Faça entregas pela cidade, suba de nível, compre caminhões mais fortes e libe
 | Câmbio | seletor **D / N / R** (ou automático em Ajustes) | `R` ré, `N` neutro |
 | Direção | **volante** (arraste), setas ou inclinação do celular | `A` `D` / `←` `→` |
 | Freio de mão / Faróis | **(P)** no painel / botão de farol | `P` / `L` |
+| Pisca-pisca (seta) | setas ◀ ▶ acima do volante (desligam sozinhas após a curva), ⚠ alerta | `Z` / `X` |
 | Buzina / Câmera / Mapa | centro do volante / 🎥 / toque no minimapa | `H` / `C` / `M` |
 
 1. Abra a **Central de Fretes 📋** e aceite uma carga.
