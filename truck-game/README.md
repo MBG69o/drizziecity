@@ -25,7 +25,8 @@ Faça entregas pela cidade, suba de nível, compre caminhões mais fortes e libe
 * **19 tipos de carga**: encomendas (1 t), medicamentos, eletrônicos, hortifrúti, móveis, bebidas, ração,
   trator agrícola, toras, contêiner, soja a granel, combustível, cimento, bobinas de aço, vigas, escavadeira,
   transformador (56 t), pá eólica (62 t) e prensa industrial (85 t).
-* **6 caminhões** com potência e capacidade diferentes — de um VUC 160 cv (5 t) ao Colosso 750 8x4 (90 t).
+* **7 caminhões** — Mini Carga 1.0 e Leve Baú 4.5 usam modelos 3D importados (Labo e Canter, fornecidos
+  pelo dono do projeto em FBX/OBJ, convertidos para GLB otimizado); os demais são modelados no código. Caminhões com potência e capacidade diferentes — de um VUC 160 cv (5 t) ao Colosso 750 8x4 (90 t).
   Uma carga só fica disponível quando o jogador tem **nível** suficiente **e** um caminhão **forte** o bastante.
 * Implementos diferentes por carga: baú, tanque, graneleiro, prancha (madeira/contêiner/bobinas/vigas) e
   prancha rebaixada para cargas indivisíveis. A carreta é articulada (física de engate real).
@@ -91,3 +92,10 @@ Para testar no navegador: `cd truck-game/web && npm run dev` e abra `http://loca
 
 Para publicar na Play Store, defina `KEYSTORE_FILE`, `KEYSTORE_PASSWORD`, `KEY_ALIAS` e `KEY_PASSWORD`
 antes do `assembleRelease` (sem elas, o release é assinado com a chave de debug, útil só para instalar direto).
+
+## Modelos 3D importados
+
+`web/models/*.glb` foram gerados a partir dos arquivos enviados (labo.fbx e canter.obj): peças classificadas
+por material (pintura, vidro, interior, borracha, faróis…), unidade em metros, frente em +Z, origem no eixo
+traseiro, polígonos reduzidos (~22 mil triângulos cada) e rodas substituídas pelas do jogo nas posições
+originais. **Antes de publicar na Play Store, confirme que você tem direito de uso/redistribuição desses modelos.**

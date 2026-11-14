@@ -66,7 +66,8 @@ export const LOC = Object.fromEntries(LOCATIONS.map((l) => [l.id, l]));
 
 // Caminhões. cab: 'cabover' (cara-chata) ou 'conventional' (bicudo).
 export const TRUCKS = [
-  { id: 'urbano', name: 'Urbano 4.5', hp: 160, cap: 5, mass: 4.5, level: 1, price: 0, rigid: true, axles: 2, cab: 'cabover', roof: 'low', color: 0xf2f2f2, vmax: 100, desc: 'VUC leve, ágil na cidade.' },
+  { id: 'mini', name: 'Mini Carga 1.0', hp: 95, cap: 1.5, mass: 1.0, level: 1, price: 0, rigid: true, axles: 2, model: 'labo', color: 0x3d7fd1, vmax: 95, desc: 'Picape de carga compacta para entregas leves.' },
+  { id: 'urbano', name: 'Leve Baú 4.5', hp: 160, cap: 5, mass: 4.5, level: 2, price: 8000, rigid: true, axles: 2, model: 'canter', color: 0xf2f2f2, vmax: 100, desc: 'Caminhão leve com baú, ágil na cidade.' },
   { id: 'toco', name: 'Toco 11-240', hp: 240, cap: 12, mass: 7.5, level: 3, price: 15000, rigid: true, axles: 2, cab: 'cabover', roof: 'mid', color: 0x2f6fde, vmax: 100, desc: 'Caminhão médio de carroceria baú.' },
   { id: 'cavalo', cfg: '4x2', name: 'Cavalo 360', hp: 360, cap: 30, mass: 8, level: 6, price: 60000, rigid: false, axles: 2, cab: 'cabover', roof: 'high', color: 0xd23a2a, vmax: 110, desc: 'Cavalo mecânico cara-chata para carretas.' },
   { id: 'rodo', cfg: '6x2', name: 'Rodomax 480', hp: 480, cap: 45, mass: 9, level: 10, price: 140000, rigid: false, axles: 3, cab: 'cabover', roof: 'high', color: 0x1f9e6e, vmax: 110, desc: 'Cavalo 6x2 de teto alto para longas viagens.' },

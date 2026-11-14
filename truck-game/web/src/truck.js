@@ -7,6 +7,7 @@ import { tex } from './textures.js';
 import { trailerMass } from './data.js';
 
 let QUAL = 'medium';
+export const MODELS = {}; // modelos 3D importados (GLB)
 export function setTruckQuality(q) { QUAL = q; }
 
 let MATS = null;
@@ -23,6 +24,7 @@ function mats() {
     interior: S({ color: 0x2a2d31, metalness: 0, roughness: 0.9 }),
     lamp: pbr ? new THREE.MeshStandardMaterial({ map: tex.headlamp(), emissiveMap: tex.headlamp(), emissive: 0xffffff, emissiveIntensity: 0.15, metalness: 0.6, roughness: 0.15, side: THREE.DoubleSide }) : new THREE.MeshBasicMaterial({ map: tex.headlamp(), side: THREE.DoubleSide }),
     tail: new THREE.MeshBasicMaterial({ map: tex.taillamp(), side: THREE.DoubleSide }),
+    lampFlat: pbr ? new THREE.MeshStandardMaterial({ color: 0xf4f6f8, emissive: 0xfff3d6, emissiveIntensity: 0.15, metalness: 0.5, roughness: 0.1 }) : new THREE.MeshBasicMaterial({ color: 0xf4f6f8 }),
     blink: new THREE.SpriteMaterial({ map: tex.glow(), color: 0xffa21a, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }),
     rubber: S({ color: 0xffffff, map: tex.tire(), metalness: 0, roughness: 0.92 }),
     rim: S({ color: 0xe8eaec, metalness: 0.85, roughness: 0.25 }),
@@ -159,8 +161,117 @@ function slantQuad(b, za, ya, zb, yb, w, off, x0 = 0) {
   b.quad([x0 - w / 2, A[1], A[0]], [x0 + w / 2, A[1], A[0]], [x0 + w / 2, B[1], B[0]], [x0 - w / 2, B[1], B[0]], [0, ny, nz], [0, 0, 1, 0, 1, 1, 0, 1]);
 }
 
+// ---------- caminhão a partir de modelo 3D importado ----------
+const MODEL_CFG = {
+  // vidros (para-brisa e laterais) e caçamba, em coordenadas do modelo
+  canter: { glass: { ws: [5.1, 1.73, 4.76, 2.2, 1.76], side: [[4.3, 1.5], [5.08, 1.5], [4.8, 2.12], [4.3, 2.12]], sideX: 0.965 }, lampY: 0.78, blinkY: 0.62 },
+  labo: { lampY: 0.78, blinkY: 0.62, bed: { z0: -0.62, z1: 1.18, y: 0.66, w: 1.3 } },
+};
+
+function buildFromModel(def, src) {
+  const M = mats();
+  let meta = {};
+  src.traverse((o) => { if (o.userData && o.userData.wb) meta = o.userData; });
+  const cfg = MODEL_CFG[def.model] || {};
+  const root = new THREE.Group();
+  root.rotation.order = 'YXZ';
+  const body = new THREE.Group();
+  root.add(body);
+  const paint = QUAL === 'low' ? new THREE.MeshPhongMaterial({ color: def.color, shininess: 90, specular: 0x888888 })
+    : QUAL === 'high' ? new THREE.MeshPhysicalMaterial({ color: def.color, metalness: 0.3, roughness: 0.35, clearcoat: 1, clearcoatRoughness: 0.08 })
+      : new THREE.MeshStandardMaterial({ color: def.color, metalness: 0.3, roughness: 0.33 });
+  M.boxWhite = M.boxWhite || (QUAL === 'low' ? new THREE.MeshPhongMaterial({ color: 0xeef0f2, shininess: 40 }) : new THREE.MeshStandardMaterial({ color: 0xeef0f2, metalness: 0.25, roughness: 0.45 }));
+  M.tireFlat = M.tireFlat || new THREE.MeshStandardMaterial({ color: 0x151515, roughness: 0.92 });
+  const byRole = { paint, box: M.boxWhite, glass: M.glass, interior: M.interior, steel: M.steel, dark: M.dark, rubber: M.tireFlat, chrome: M.chrome, lamp: M.lampFlat, red: M.red, amber: M.amber };
+  // modelos importados podem ter faces invertidas: materiais dupla face
+  const ds = {};
+  const two = (m) => { if (!m) return m; if (m.side === THREE.DoubleSide) return m; return ds[m.uuid] || (ds[m.uuid] = Object.assign(m.clone(), { side: THREE.DoubleSide })); };
+  src.traverse((o) => {
+    if (!o.isMesh) return;
+    const m = new THREE.Mesh(o.geometry, two(byRole[o.name] || byRole[o.material && o.material.name] || M.steel));
+    m.castShadow = true;
+    body.add(m);
+  });
+  const zf = meta.zFront, rearEnd = meta.zRear, W = meta.width, W2 = W / 2;
+  // vidros que faltam no modelo
+  if (cfg.glass) {
+    const G2 = new Builder();
+    const [za, ya, zb, yb, w] = cfg.glass.ws;
+    slantQuad(G2, za, ya, zb, yb, w, 0.0);
+    sides(G2, cfg.glass.side, cfg.glass.sideX);
+    body.add(G2.mesh(M.glass, { cast: false }));
+  }
+  // carga na caçamba (aparece quando carregado)
+  let bedCargo = null;
+  if (cfg.bed) {
+    const b = cfg.bed, cb = new Builder(true);
+    const cols = [0xc49a6c, 0xb88a58, 0xd2ab7c];
+    let i = 0;
+    for (let z = b.z0 + 0.3; z < b.z1 - 0.25; z += 0.55)
+      for (let x = -b.w / 2 + 0.3; x < b.w / 2 - 0.25; x += 0.6) {
+        const h = 0.35 + ((i * 7) % 3) * 0.12;
+        cb.add(G.box(), mat(x, b.y + h / 2, z, 0, ((i * 13) % 5) * 0.04, 0, 0.52, h, 0.48), cols[i++ % 3]);
+      }
+    bedCargo = cb.mesh(new THREE.MeshLambertMaterial({ vertexColors: true }), { cast: true });
+    bedCargo.visible = false;
+    body.add(bedCargo);
+  }
+  // rodas do jogo nas posições exatas do modelo
+  const wheels = meta.wheels || [];
+  const front = [], rear = [];
+  for (const wd of wheels.filter((w) => w.tag[0] === 'F')) {
+    const g = steerWheel(wd.z, wd.x, wd.r, Math.max(0.16, wd.w), wd.x > 0 ? 1 : -1);
+    g.position.y = wd.r;
+    front.push(g);
+    root.add(g);
+  }
+  const rl = wheels.filter((w) => w.tag[0] === 'R');
+  if (rl.length) {
+    const dual = rl[0].w > 0.3;
+    const a = axleMesh(rl[0].z, Math.abs(rl[0].x) * 2, rl[0].r, dual ? rl[0].w / 2.1 : Math.max(0.16, rl[0].w), dual);
+    rear.push(a);
+    root.add(a);
+  }
+  const wr = meta.wr || 0.4, wb = meta.wb || 3;
+  // luzes
+  const night = new THREE.Group();
+  const ly = cfg.lampY || 0.8;
+  for (const sd of [-1, 1]) {
+    const g = new THREE.Sprite(M.glow);
+    g.scale.set(1.4, 1.4, 1);
+    g.position.set(sd * (W2 - 0.3), ly, zf + 0.1);
+    night.add(g);
+    const rg = new THREE.Sprite(M.glowRed);
+    rg.scale.set(0.8, 0.8, 1);
+    rg.position.set(sd * (W2 - 0.2), ly, rearEnd - 0.08);
+    night.add(rg);
+  }
+  const beam = new THREE.Mesh(new THREE.PlaneGeometry(8, 24), M.beam);
+  beam.rotation.set(-Math.PI / 2, 0, Math.PI);
+  beam.position.set(0, 0.07, zf + 12.5);
+  night.add(beam);
+  night.visible = false;
+  root.add(night);
+  const blinkL = [], blinkR = [];
+  for (const sd of [-1, 1])
+    for (const [y, z] of [[cfg.blinkY || 0.6, zf + 0.08], [cfg.blinkY || 0.6, rearEnd - 0.08]]) {
+      const sp = new THREE.Sprite(M.blink);
+      sp.scale.set(0.7, 0.7, 1);
+      sp.position.set(sd * (W2 - 0.08), y, z);
+      sp.visible = false;
+      root.add(sp);
+      (sd > 0 ? blinkL : blinkR).push(sp);
+    }
+  const blob = new THREE.Mesh(new THREE.PlaneGeometry(W + 0.8, zf - rearEnd + 1.2), M.blob);
+  blob.rotation.x = -Math.PI / 2;
+  blob.position.set(0, 0.05, (zf + rearEnd) / 2);
+  root.add(blob);
+  return { root, body, front, rear, wb, wr, hitchZ: rearEnd, zf, rearEnd, paint, blob, cabW: W, night, y0: 1.0, cabFront: zf, ch: meta.height || 2, conv: false, blinkL, blinkR, bedCargo };
+}
+
 // ---------- caminhão ----------
 export function buildTruck(def) {
+  if (def.model && MODELS[def.model]) return buildFromModel(def, MODELS[def.model]);
   const M = mats();
   const root = new THREE.Group();
   root.rotation.order = 'YXZ';
@@ -653,11 +764,13 @@ export class Rig {
     this.model.night.visible = this.lightsOn;
     if (this.onModel) this.onModel(this.model);
     if (this.trailer && def.rigid) this.detach();
+    if (this.model.bedCargo) this.model.bedCargo.visible = !!this.cargo;
     this.sync();
   }
 
   attach(cargo) {
     this.cargo = cargo;
+    if (this.model.bedCargo) this.model.bedCargo.visible = true;
     if (this.def.rigid) return;
     const tr = buildTrailer(cargo);
     tr.blob.visible = !this.shadows;
@@ -678,12 +791,14 @@ export class Rig {
 
   setLights(on) {
     if (MATS && MATS.lamp.emissiveIntensity !== undefined) MATS.lamp.emissiveIntensity = on ? 1.6 : 0.15;
+    if (MATS && MATS.lampFlat.emissiveIntensity !== undefined) MATS.lampFlat.emissiveIntensity = on ? 2.2 : 0.15;
     this.lightsOn = on;
     this.model.night.visible = on;
     if (this.trailer) this.trailer.night.visible = on;
   }
 
   detach() {
+    if (this.model.bedCargo) this.model.bedCargo.visible = false;
     if (this.trailer) this.scene.remove(this.trailer.root);
     this.trailer = null;
     this.cargo = null;

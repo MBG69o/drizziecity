@@ -3,7 +3,8 @@ import * as THREE from 'three';
 import { BLOCK, ROAD_W, HW_HALF, CITIES, cx1, cz1, zoneOf, LOCATIONS, LOC, TRUCKS, TRUCK, CARGOS, CARGO, xpForLevel, MAX_LEVEL, WORLD, SEA_Z, RIVER_W } from './data.js';
 import { configureTextures, tex } from './textures.js';
 import { World } from './world.js';
-import { Rig, setTruckQuality } from './truck.js';
+import { Rig, setTruckQuality, MODELS } from './truck.js';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { Traffic } from './traffic.js';
 import { findRoute, buildGraph } from './route.js';
 import { Audio } from './audio.js';
@@ -15,14 +16,18 @@ const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
 // ---------------- Save ----------------
 const DEFAULTS = {
-  money: 3000, xp: 0, level: 1, owned: ['urbano'], truck: 'urbano', job: null, pos: null, name: 'Motorista', clock: 15.5,
+  money: 3000, xp: 0, level: 1, owned: ['mini'], truck: 'mini', job: null, pos: null, name: 'Motorista', clock: 15.5,
   stats: { deliveries: 0, km: 0, earned: 0, tons: 0, crashes: 0 },
   settings: { quality: 'auto', volume: 0.7, fps: false, steer: 'wheel', camera: 0, time: 'cycle', gearbox: 'manual', gauge: 'analog', accent: 'amber', hud: 'normal' },
 };
 function loadSave() {
   try {
     const s = JSON.parse(localStorage.getItem(SAVE_KEY));
-    if (s && s.level) return { ...DEFAULTS, ...s, stats: { ...DEFAULTS.stats, ...s.stats }, settings: { ...DEFAULTS.settings, ...s.settings } };
+    if (s && s.level) {
+      const r = { ...DEFAULTS, ...s, stats: { ...DEFAULTS.stats, ...s.stats }, settings: { ...DEFAULTS.settings, ...s.settings } };
+      if (!r.owned.includes('mini')) r.owned.unshift('mini');
+      return r;
+    }
   } catch (e) { /* sem save */ }
   return JSON.parse(JSON.stringify(DEFAULTS));
 }
@@ -131,6 +136,11 @@ async function boot() {
   await step(45, 'Construindo a cidade…');
   world = new World(scene, Q);
   buildGraph(world);
+  await step(62, 'Carregando caminhões 3D…');
+  const gl = new GLTFLoader();
+  for (const name of ['labo', 'canter']) {
+    try { MODELS[name] = (await gl.loadAsync(`models/${name}.glb`)).scene; } catch (e) { console.warn('modelo', name, e); }
+  }
   await step(70, 'Ligando o motor…');
   rig = new Rig(scene, TRUCK[S.truck] || TRUCKS[0], Q.shadows);
   if (qName !== 'low') {
@@ -248,7 +258,7 @@ function titleCamera(dt) {
   const md = rig.model;
   const fx = Math.sin(rig.h), fz = Math.cos(rig.h);
   const cx = rig.x + fx * md.wb * 0.4, cz = rig.z + fz * md.wb * 0.4;
-  const dist = 11 + (rig.trailer ? 6 : 0);
+  const dist = ((md.zf - md.rearEnd) * 1.15 + 4.5 + (rig.trailer ? 6 : 0)) * (cam.zoom || 1);
   const ang = rig.h + 0.7 + Math.sin(t) * 0.9;
   camera.position.set(cx + Math.sin(ang) * dist, 1.6 + Math.sin(t * 0.7) * 0.6, cz + Math.cos(ang) * dist);
   // olha um pouco à direita do caminhão para dar espaço ao menu
@@ -696,8 +706,9 @@ function updateCamera(dt, instant = false) {
     camera.fov = 70;
   } else {
     const len = rig.trailer ? rig.trailer.Lt : 0;
-    let dist = (cam.mode === 0 ? 11 : 20) + len * (cam.mode === 0 ? 0.75 : 1.1);
-    const hgt = (cam.mode === 0 ? 4.6 : 14) + len * (cam.mode === 0 ? 0.18 : 0.4);
+    const tl = md.zf - md.rearEnd; // comprimento do caminhão
+    let dist = (cam.mode === 0 ? 3.5 + tl : 12 + tl * 1.2) + len * (cam.mode === 0 ? 0.75 : 1.1);
+    const hgt = (cam.mode === 0 ? 2.2 + tl * 0.3 : 9 + tl * 0.7) + len * (cam.mode === 0 ? 0.18 : 0.4);
     const px = rig.x + fx * md.wb * 0.5 - (rig.trailer ? Math.sin(rig.th) * len * 0.25 : 0);
     const pz = rig.z + fz * md.wb * 0.5 - (rig.trailer ? Math.cos(rig.th) * len * 0.25 : 0);
     const bx = Math.sin(cam.yaw), bz = Math.cos(cam.yaw);
