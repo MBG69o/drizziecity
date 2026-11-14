@@ -1,0 +1,84 @@
+# Compilar o plugin EagleEYE
+
+Plugins SA-MP/open.mp são **32 bits**. Compile num ambiente 32 bits (ou com toolchain cruzada) e nunca distribua o `ee_secrets.h` nem o `secrets.json`.
+
+## ⚡ Jeito rápido: só o núcleo (`.dll` + `.so`), sem a sampgdk
+
+Já vem um script que compila o **núcleo** (crypto, store, licença, http + entry-point) para os dois sistemas. O plugin resultante **carrega no servidor**, gera/lê o token cifrado, mostra no console e roda o loop de licença/config com o bot. Ele ainda **não engancha as detecções** (isso é a parte 1–5 abaixo, com a sampgdk), mas serve para empacotar, assinar e validar o binário.
+
+```bash
+# toolchains (Debian/Ubuntu):
+sudo apt-get install -y g++-mingw-w64-i686 g++-multilib
+# segredos (para testar, copie o exemplo; para produção, use o obfuscate.py — ver parte 2):
+cp src/ee_secrets.example.h src/ee_secrets.h
+./build.sh
+# saída: eagleeye.dll (Windows) e eagleeye.so (Linux), ambos 32 bits
+```
+
+O `build.sh` usa `i686-w64-mingw32-g++-posix` (preciso para `std::thread`) e `-Wl,--kill-at` (exporta `Supports`/`Load`/`Unload` sem a decoração `@N` do `__stdcall`). A `.dll` importa só `KERNEL32`, `msvcrt` e `WS2_32`; a `.so` só a glibc padrão — nada extra no servidor.
+
+Para o anti-cheat **completo** (com detecção), siga as partes abaixo, que adicionam o SDK do SA-MP + a sampgdk e a cola `ee_detections.cpp`.
+
+## 1. Dependências (você baixa uma vez)
+
+- **SDK de plugin do SA-MP** (headers `amx/` e `plugincommon.h`): https://github.com/Zeex/samp-plugin-sdk → copie para `plugin/sdk/`.
+- **sampgdk** (amalgamation `sampgdk.h` + `sampgdk.c`): https://github.com/Zeex/sampgdk/releases → copie para `plugin/sampgdk/`.
+
+## 2. Segredos
+
+Crie `secrets.json` (fora do git) com os mesmos valores do `.env` do bot:
+
+```json
+{
+  "api_host": "eagleeye.discloud.dev",
+  "api_path": "<igual ao AC_PATH_SECRET do bot, ex.: /x7f3k9q2>",
+  "api_key": "<igual ao AC_APP_KEY do bot>",
+  "license_pepper": "<igual ao AC_LICENSE_PEPPER do bot>",
+  "license_sign": "<igual ao AC_LICENSE_SIGN do bot>",
+  "store_phrase": "<frase só do plugin>",
+  "store_hmac": "<segredo só do plugin>"
+}
+```
+
+Gere o header ofuscado:
+
+```bash
+python3 tools/obfuscate.py secrets.json > src/ee_secrets.h
+```
+
+## 3. Linux (.so, 32 bits)
+
+```bash
+sudo apt-get install -y gcc-multilib g++-multilib cmake
+cmake -S . -B build -DEE_HAVE_SDK=ON
+cmake --build build
+# saída: build/eagleeye.so
+```
+
+Ou direto:
+
+```bash
+g++ -m32 -std=c++14 -O2 -shared -fPIC -DEE_HAVE_SDK \
+  -Isdk -Isampgdk \
+  src/*.cpp sampgdk/sampgdk.c -lpthread -o eagleeye.so
+```
+
+## 4. Windows (.dll, 32 bits)
+
+Com o Visual Studio (x86) ou MinGW 32 bits:
+
+```bat
+cmake -S . -B build -A Win32 -DEE_HAVE_SDK=ON
+cmake --build build --config Release
+```
+
+A DLL linka com `ws2_32`.
+
+## 5. Conferir
+
+- `strings eagleeye.so | grep discloud` não deve achar nada (segredos ofuscados).
+- No servidor de teste, o console deve mostrar `[EagleEYE] Plugin v2.2.0 carregado.`
+
+## Build automático (CI)
+
+Um GitHub Actions com `ubuntu-latest` + multilib (Linux) e `windows-latest` (DLL) gera os dois binários a cada tag, sem expor os segredos (eles entram como secrets do CI). Posso montar o workflow quando quiser.

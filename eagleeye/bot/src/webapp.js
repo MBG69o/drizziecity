@@ -1,0 +1,830 @@
+'use strict';
+
+/**
+ * SITE DE GERENCIAMENTO (completo).
+ *
+ * Login em 2 etapas (token -> código de 5 min) e, depois de logado, o cliente
+ * ativa/desliga proteções, ajusta ação/tolerância/limite, liga/desliga o
+ * anti-cheat, manda aviso no jogo e vê as detecções recentes e a reputação
+ * dos jogadores — tudo no navegador.
+ *
+ * Este módulo cuida das rotas /app* e devolve true quando tratou a requisição.
+ * A página é servida inteira (HTML+JS embutidos) e conversa com a API JSON.
+ */
+
+const { PROTECTIONS, CATEGORIES, ACTIONS, byKey } = require('./protections');
+const { gradeLetter } = require('./dashboard');
+const { sanitizeGameText, isValidNick, isValidIPv4Pattern } = require('./config-format');
+const { serverStats, cleanlinessRanking } = require('./stats');
+const achievements = require('./achievements');
+const webhooks = require('./webhooks');
+
+function jsonBody(res, send, status, obj) {
+  send(res, status, JSON.stringify(obj), { 'Content-Type': 'application/json; charset=utf-8' });
+}
+function clampInt(v, lo, hi, def) {
+  const n = Number.parseInt(v, 10);
+  if (!Number.isFinite(n)) return def;
+  return n < lo ? lo : (n > hi ? hi : n);
+}
+
+const CATALOG = {
+  categories: CATEGORIES,
+  actions: ACTIONS,
+  protections: PROTECTIONS.map((p) => ({ id: p.id, key: p.key, cat: p.cat, name: p.name, desc: p.desc, valueLabel: p.valueLabel })),
+};
+
+/** Servidores que a sessão pode gerenciar. */
+function scopedServers(store, session) {
+  const byOwner = [...store.servers.values()].filter((s) => s.owners.includes(session.ownerKey));
+  if (byOwner.length) return byOwner;
+  return (session.scope || []).map((id) => store.getServer(id)).filter(Boolean);
+}
+
+function serverView(store, security, trust, s) {
+  const st = store.getStatus(s);
+  const online = store.isServerOnline(s);
+  const rep = security ? security.securityReport(store, s) : { grade: '-', score: null };
+  const prot = {};
+  for (const [k, v] of Object.entries(s.protections)) prot[k] = { enabled: !!v.enabled, action: v.action, tolerance: v.tolerance, value: v.value };
+  return {
+    id: s.id, name: s.name, online, activated: s.activated !== false, global: !!s.global,
+    players: online ? (st.players || 0) : 0, maxPlayers: st.maxPlayers || 0, version: st.version || '?',
+    grade: rep.grade, gradeLetter: gradeLetter(rep.score), score: rep.score,
+    publicBadge: !!s.publicBadge, lastSeen: st.lastSeen || 0, protections: prot,
+    achievements: achievements.compute(s, st, store.getHistory(s)).earned,
+    webhookUrl: s.webhookUrl || '', webhookMinAction: Number.isInteger(s.webhookMinAction) ? s.webhookMinAction : 1,
+    detections24h: store.getHistory(s).filter((d) => Date.now() - d.time < 24 * 3600 * 1000).length,
+  };
+}
+
+/**
+ * ctx: { store, webauth, trust, security, guard, ip, readBody, send, logger, onAuthCode }
+ * Retorna true se tratou a rota.
+ */
+function handleWebApp(req, res, url, ctx) {
+  const { store, webauth, trust, security, send, readBody, logger, onAuthCode, blacklist, watchlist } = ctx;
+  const path = url.pathname;
+  if (path !== '/app' && !path.startsWith('/app/')) return false;
+
+  // --- página (shell) ---
+  if (req.method === 'GET' && (path === '/app' || path === '/app/')) {
+    res.writeHead(200, {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Cache-Control': 'no-store',
+      'Content-Security-Policy':
+        "default-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'; " +
+        "object-src 'none'; img-src 'self' data:; " +
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
+        "font-src 'self' https://fonts.gstatic.com; " +
+        "script-src 'self' 'unsafe-inline'; connect-src 'self'",
+      'X-Content-Type-Options': 'nosniff',
+      'X-Frame-Options': 'DENY',
+      'Referrer-Policy': 'no-referrer',
+      'Cross-Origin-Opener-Policy': 'same-origin',
+      'Permissions-Policy': 'geolocation=(), microphone=(), camera=()',
+      'Strict-Transport-Security': 'max-age=31536000; includeSubDomains',
+    });
+    res.end(APP_PAGE);
+    return true;
+  }
+
+  const session = () => {
+    const h = String(req.headers['authorization'] || '').replace(/^Bearer\s+/i, '') || String(req.headers['x-ee-session'] || '');
+    return webauth.resolveSession(h.trim());
+  };
+
+  // --- etapa 1: token -> envia código ---
+  if (req.method === 'POST' && path === '/app/login/start') {
+    readBody(req, res, 1024, (body) => {
+      let token = '';
+      try { token = String(JSON.parse(body).token || '').trim(); } catch { token = ''; }
+      if (!token) return jsonBody(res, send, 400, { error: 'Informe o token.' });
+      const r = store.loginWithToken(token);
+      if (r.error) {
+        const msg = {
+          format: 'Token em formato inválido.',
+          token: 'Token incorreto para esse servidor.',
+          notseen: 'Esse servidor ainda não se conectou ao bot. Ligue o servidor e tente de novo.',
+        }[r.error] || 'Token inválido.';
+        return jsonBody(res, send, 401, { error: msg });
+      }
+      const server = r.server;
+      const ownerKey = server.owners[0] || server.id;
+      const scope = scopedServers(store, { ownerKey, scope: [server.id] }).map((s) => s.id);
+      const ch = webauth.startChallenge({
+        serverId: server.id, ownerKey, scope: scope.length ? scope : [server.id], name: server.name,
+      });
+      if (ch.error === 'locked') return jsonBody(res, send, 429, { error: 'Muitas tentativas. Tente novamente em alguns minutos.' });
+      if (ch.error === 'rate') return jsonBody(res, send, 429, { error: 'Você pediu códigos demais. Aguarde alguns minutos e tente de novo.' });
+      const { challengeId, expiresAt, code } = ch;
+      // entrega o código: console do servidor (sempre) + DM no Discord (se houver dono)
+      try { store.queueCommand(server, 'authcode', code); } catch (e) { logger.error('[webapp] queue authcode', e.message); }
+      let dmed = false;
+      if (onAuthCode) { try { dmed = !!onAuthCode(server, code); } catch (e) { logger.error('[webapp] onAuthCode', e.message); } }
+      const online = store.isServerOnline(server);
+      const vias = [];
+      if (online) vias.push('no console do servidor');
+      if (dmed) vias.push('na sua DM do Discord');
+      let via = vias.join(' e ');
+      if (!vias.length) via = 'no console do servidor assim que ele ficar online (ligue o servidor agora)';
+      return jsonBody(res, send, 200, {
+        ok: true, challengeId, via, expiresInMs: Math.max(0, expiresAt - Date.now()), online,
+      });
+    });
+    return true;
+  }
+
+  // --- etapa 2: código -> sessão ---
+  if (req.method === 'POST' && path === '/app/login/verify') {
+    readBody(req, res, 1024, (body) => {
+      let challengeId = ''; let code = '';
+      try { const j = JSON.parse(body); challengeId = String(j.challengeId || ''); code = String(j.code || '').trim(); } catch { /* */ }
+      const r = webauth.verify(challengeId, code);
+      if (!r.ok) {
+        const msg = {
+          expired: 'Código expirado. Peça um novo.',
+          blocked: 'Tentativas demais. Peça um novo código.',
+          locked: 'Acesso bloqueado por tentativas demais. Aguarde alguns minutos.',
+          code: `Código incorreto. ${r.attemptsLeft ? `${r.attemptsLeft} tentativa(s) restante(s).` : 'Peça um novo código.'}`,
+        }[r.error] || 'Código inválido.';
+        return jsonBody(res, send, 401, { error: msg });
+      }
+      const sess = webauth.resolveSession(r.sessionId);
+      return jsonBody(res, send, 200, { ok: true, session: r.sessionId, name: sess ? sess.name : '' });
+    });
+    return true;
+  }
+
+  // --- logout (opcionalmente de TODAS as sessões do dono) ---
+  if (req.method === 'POST' && path === '/app/logout') {
+    const h = String(req.headers['authorization'] || '').replace(/^Bearer\s+/i, '') || String(req.headers['x-ee-session'] || '');
+    const token = h.trim();
+    readBody(req, res, 256, (body) => {
+      let all = false;
+      try { all = !!JSON.parse(body || '{}').all; } catch { all = false; }
+      let revoked = 0;
+      if (all) {
+        const sess = webauth.resolveSession(token);
+        if (sess && typeof webauth.revokeOwner === 'function') revoked = webauth.revokeOwner(sess.ownerKey);
+      }
+      webauth.destroySession(token);
+      jsonBody(res, send, 200, { ok: true, revoked });
+    });
+    return true;
+  }
+
+  // --- estado completo (auth) ---
+  if (req.method === 'GET' && path === '/app/api/state') {
+    const sess = session();
+    if (!sess) return jsonBody(res, send, 401, { error: 'sessão expirada' }), true;
+    const servers = scopedServers(store, sess).map((s) => serverView(store, security, trust, s));
+    const recent = [];
+    for (const s of scopedServers(store, sess)) {
+      const since = Date.now() - 24 * 3600 * 1000;
+      for (const d of store.getHistory(s).filter((d2) => d2.time >= since)) {
+        recent.push({ server: s.name, name: d.name, code: d.code, key: d.key, action: d.action, detail: d.detail, time: d.time });
+      }
+    }
+    recent.sort((a, b) => b.time - a.time);
+    const worst = trust ? trust.worst(sess.ownerKey, 10) : [];
+    const ranking = servers.length > 1 ? cleanlinessRanking(servers) : [];
+    // procurados online agora, em qualquer servidor do dono
+    const watchedOnline = [];
+    if (watchlist) {
+      for (const s of scopedServers(store, sess)) {
+        const pl = (store.getPlayers(s) || {}).list || [];
+        for (const p of pl) {
+          if (watchlist.isWatched(sess.ownerKey, p.name)) watchedOnline.push({ nick: p.name, server: s.name, id: p.id });
+        }
+      }
+    }
+    jsonBody(res, send, 200, { ok: true, owner: { name: sess.name || '' }, servers, recent: recent.slice(0, 50), worst, ranking, watchedOnline });
+    return true;
+  }
+
+  // helper: pega a sessão + servidor no escopo para rotas de escrita
+  const writeTarget = (body) => {
+    const sess = session();
+    if (!sess) return { err: [401, 'sessão expirada'] };
+    let j = {};
+    try { j = JSON.parse(body); } catch { return { err: [400, 'json inválido'] }; }
+    const server = store.getServer(String(j.serverId || ''));
+    if (!server || !scopedServers(store, sess).some((s) => s.id === server.id)) return { err: [403, 'servidor fora do seu acesso'] };
+    return { sess, server, j };
+  };
+
+  // --- muda uma proteção (auth) ---
+  if (req.method === 'POST' && path === '/app/api/protection') {
+    readBody(req, res, 1024, (body) => {
+      const t = writeTarget(body);
+      if (t.err) return jsonBody(res, send, t.err[0], { error: t.err[1] });
+      const { server, j } = t;
+      const meta = byKey.get(String(j.key || ''));
+      if (!meta) return jsonBody(res, send, 400, { error: 'proteção inválida' });
+      store.updateServer(server, (s) => {
+        const p = s.protections[meta.key];
+        if (typeof j.enabled === 'boolean') p.enabled = j.enabled;
+        if (j.action != null) p.action = clampInt(j.action, 0, 2, p.action);
+        if (j.tolerance != null) p.tolerance = clampInt(j.tolerance, 1, 100, p.tolerance);
+        if (j.value != null) p.value = clampInt(j.value, 0, 1_000_000, p.value);
+      });
+      const p = server.protections[meta.key];
+      logger.log(`[webapp] ${server.id} prot ${meta.key} -> ${JSON.stringify(p)}`);
+      return jsonBody(res, send, 200, { ok: true, key: meta.key, protection: p });
+    });
+    return true;
+  }
+
+  // --- liga/desliga o anti-cheat inteiro (auth) ---
+  if (req.method === 'POST' && path === '/app/api/global') {
+    readBody(req, res, 512, (body) => {
+      const t = writeTarget(body);
+      if (t.err) return jsonBody(res, send, t.err[0], { error: t.err[1] });
+      const { server, j } = t;
+      const on = !!j.on;
+      if (on && server.activated === false) return jsonBody(res, send, 409, { error: 'Confirme a ativação no Discord antes de ligar.' });
+      store.updateServer(server, (s) => { s.global = on; });
+      return jsonBody(res, send, 200, { ok: true, global: on });
+    });
+    return true;
+  }
+
+  // --- aviso no jogo (auth) ---
+  if (req.method === 'POST' && path === '/app/api/announce') {
+    readBody(req, res, 1024, (body) => {
+      const t = writeTarget(body);
+      if (t.err) return jsonBody(res, send, t.err[0], { error: t.err[1] });
+      const { server, j } = t;
+      const msg = sanitizeGameText(String(j.message || ''));
+      if (!msg) return jsonBody(res, send, 400, { error: 'Mensagem vazia.' });
+      if (!store.isServerOnline(server)) return jsonBody(res, send, 409, { error: 'O servidor está offline.' });
+      store.queueCommand(server, 'aviso', msg);
+      return jsonBody(res, send, 200, { ok: true });
+    });
+    return true;
+  }
+
+  // --- histórico / ficha de um jogador (auth) ---
+  if (req.method === 'GET' && path === '/app/api/player') {
+    const sess = session();
+    if (!sess) return jsonBody(res, send, 401, { error: 'sessão expirada' }), true;
+    const server = store.getServer(String(url.searchParams.get('serverId') || ''));
+    if (!server || !scopedServers(store, sess).some((s) => s.id === server.id)) return jsonBody(res, send, 403, { error: 'servidor fora do seu acesso' }), true;
+    const nick = String(url.searchParams.get('nick') || '').trim();
+    if (!nick) return jsonBody(res, send, 400, { error: 'informe o nick' }), true;
+    const info = store.playerInfo(server, nick);
+    const rep = trust && server.owners[0] ? trust.get(server.owners[0], nick) : null;
+    jsonBody(res, send, 200, { ok: true, nick, info, rep });
+    return true;
+  }
+
+  // --- estatísticas visuais de um servidor (auth) ---
+  if (req.method === 'GET' && path === '/app/api/stats') {
+    const sess = session();
+    if (!sess) return jsonBody(res, send, 401, { error: 'sessão expirada' }), true;
+    const server = store.getServer(String(url.searchParams.get('serverId') || ''));
+    if (!server || !scopedServers(store, sess).some((s) => s.id === server.id)) return jsonBody(res, send, 403, { error: 'servidor fora do seu acesso' }), true;
+    jsonBody(res, send, 200, { ok: true, stats: serverStats(store, server) });
+    return true;
+  }
+
+  // --- blacklist: listar (auth) ---
+  if (req.method === 'GET' && path === '/app/api/blacklist') {
+    const sess = session();
+    if (!sess) return jsonBody(res, send, 401, { error: 'sessão expirada' }), true;
+    const entries = blacklist ? blacklist.listFor(sess.ownerKey) : [];
+    jsonBody(res, send, 200, { ok: true, entries });
+    return true;
+  }
+
+  // --- blacklist: adicionar (auth) ---
+  if (req.method === 'POST' && path === '/app/api/blacklist') {
+    readBody(req, res, 1024, (body) => {
+      const sess = session();
+      if (!sess) return jsonBody(res, send, 401, { error: 'sessão expirada' });
+      if (!blacklist) return jsonBody(res, send, 404, { error: 'blacklist indisponível' });
+      let j = {};
+      try { j = JSON.parse(body); } catch { return jsonBody(res, send, 400, { error: 'json inválido' }); }
+      const nick = String(j.nick || '').trim();
+      const ip = String(j.ip || '').trim();
+      const reason = String(j.reason || '').trim();
+      if (!nick && !ip) return jsonBody(res, send, 400, { error: 'informe um nick ou um IP' });
+      if (ip && !isValidIPv4Pattern(ip)) return jsonBody(res, send, 400, { error: 'IP inválido (ex.: 177.10.20.30)' });
+      if (nick && !isValidNick(nick)) return jsonBody(res, send, 400, { error: 'nick inválido (3-24 caracteres)' });
+      const servers = scopedServers(store, sess);
+      if (ip) blacklist.add(sess.ownerKey, { kind: 'ip', value: ip, name: nick, reason, by: sess.ownerKey });
+      if (nick) blacklist.add(sess.ownerKey, { kind: 'nome', value: nick, reason, by: sess.ownerKey });
+      for (const s of servers) {
+        if (ip) store.queueCommand(s, 'banip', ip);
+        if (nick) store.queueCommand(s, 'kickname', nick);
+      }
+      logger.log(`[webapp] blacklist + ${nick || ip} (dono ${sess.ownerKey})`);
+      return jsonBody(res, send, 200, { ok: true, entries: blacklist.listFor(sess.ownerKey), applied: servers.length });
+    });
+    return true;
+  }
+
+  // --- blacklist: remover (auth) ---
+  if (req.method === 'POST' && path === '/app/api/blacklist/remove') {
+    readBody(req, res, 512, (body) => {
+      const sess = session();
+      if (!sess) return jsonBody(res, send, 401, { error: 'sessão expirada' });
+      if (!blacklist) return jsonBody(res, send, 404, { error: 'blacklist indisponível' });
+      let j = {};
+      try { j = JSON.parse(body); } catch { return jsonBody(res, send, 400, { error: 'json inválido' }); }
+      const kind = String(j.kind || '');
+      const value = String(j.value || '');
+      const removed = blacklist.remove(sess.ownerKey, kind, value);
+      if (removed && kind === 'ip') for (const s of scopedServers(store, sess)) store.queueCommand(s, 'unbanip', value);
+      return jsonBody(res, send, removed ? 200 : 404, { ok: removed, entries: blacklist.listFor(sess.ownerKey) });
+    });
+    return true;
+  }
+
+  // --- webhook de saída (auth) ---
+  if (req.method === 'POST' && path === '/app/api/webhook') {
+    readBody(req, res, 512, (body) => {
+      const t = writeTarget(body);
+      if (t.err) return jsonBody(res, send, t.err[0], { error: t.err[1] });
+      const { server, j } = t;
+      const wurl = String(j.url || '').trim();
+      if (wurl && !webhooks.isValidWebhook(wurl)) return jsonBody(res, send, 400, { error: 'Use um webhook do Discord (https://discord.com/api/webhooks/...).' });
+      const min = [0, 1, 2].includes(j.minAction) ? j.minAction : 1;
+      store.updateServer(server, (s) => { s.webhookUrl = wurl; s.webhookMinAction = min; }, { bump: false });
+      return jsonBody(res, send, 200, { ok: true, webhookUrl: wurl, webhookMinAction: min });
+    });
+    return true;
+  }
+
+  // --- procurados (watchlist): listar (auth) ---
+  if (req.method === 'GET' && path === '/app/api/watchlist') {
+    const sess = session();
+    if (!sess) return jsonBody(res, send, 401, { error: 'sessão expirada' }), true;
+    jsonBody(res, send, 200, { ok: true, entries: watchlist ? watchlist.list(sess.ownerKey) : [] });
+    return true;
+  }
+  // --- procurados: adicionar (auth) ---
+  if (req.method === 'POST' && path === '/app/api/watchlist') {
+    readBody(req, res, 1024, (body) => {
+      const sess = session();
+      if (!sess) return jsonBody(res, send, 401, { error: 'sessão expirada' });
+      if (!watchlist) return jsonBody(res, send, 404, { error: 'indisponível' });
+      let j = {}; try { j = JSON.parse(body); } catch { return jsonBody(res, send, 400, { error: 'json inválido' }); }
+      const nick = String(j.nick || '').trim();
+      if (!isValidNick(nick)) return jsonBody(res, send, 400, { error: 'nick inválido (3-24 caracteres)' });
+      watchlist.add(sess.ownerKey, nick, { note: String(j.note || '').slice(0, 100), by: sess.ownerKey });
+      return jsonBody(res, send, 200, { ok: true, entries: watchlist.list(sess.ownerKey) });
+    });
+    return true;
+  }
+  // --- procurados: remover (auth) ---
+  if (req.method === 'POST' && path === '/app/api/watchlist/remove') {
+    readBody(req, res, 512, (body) => {
+      const sess = session();
+      if (!sess) return jsonBody(res, send, 401, { error: 'sessão expirada' });
+      if (!watchlist) return jsonBody(res, send, 404, { error: 'indisponível' });
+      let j = {}; try { j = JSON.parse(body); } catch { return jsonBody(res, send, 400, { error: 'json inválido' }); }
+      const removed = watchlist.remove(sess.ownerKey, String(j.nick || ''));
+      return jsonBody(res, send, removed ? 200 : 404, { ok: removed, entries: watchlist.list(sess.ownerKey) });
+    });
+    return true;
+  }
+
+  // --- selo público (auth) ---
+  if (req.method === 'POST' && path === '/app/api/badge') {
+    readBody(req, res, 512, (body) => {
+      const t = writeTarget(body);
+      if (t.err) return jsonBody(res, send, t.err[0], { error: t.err[1] });
+      const { server, j } = t;
+      store.updateServer(server, (s) => { s.publicBadge = !!j.on; }, { bump: false });
+      return jsonBody(res, send, 200, { ok: true, publicBadge: !!j.on });
+    });
+    return true;
+  }
+
+  return jsonBody(res, send, 404, { error: 'rota não encontrada' }), true;
+}
+
+/* ======================= página do site (HTML + JS) ======================= */
+const APP_PAGE = buildAppPage();
+function buildAppPage() {
+  const boot = JSON.stringify(CATALOG);
+  return `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>EagleEYE — Gerenciador</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@600;700&display=swap">
+<style>
+:root{--bg:#0b0f14;--panel:#121a24;--panel2:#0e151d;--line:#223041;--fg:#e8eef5;--mut:#8a98a7;--accent:#4aa3ff;--ok:#2ecc71;--warn:#f1c40f;--bad:#e74c3c;--orange:#e67e22;--lime:#a3e635;--fh:"Space Grotesk",system-ui,sans-serif;--fb:"Inter",system-ui,sans-serif;color-scheme:dark}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--fb);line-height:1.5;background-image:radial-gradient(900px 500px at 85% -10%,rgba(74,163,255,.1),transparent 60%)}
+.wrap{max-width:1040px;margin:0 auto;padding-block:18px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+a{color:var(--accent)}button{font-family:inherit}
+.logo{font-family:var(--fh);font-size:22px;font-weight:700}.logo .e{color:var(--accent)}
+header{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding-block:4px 14px;border-bottom:1px solid var(--line)}
+.sub{color:var(--mut);font-size:12px;letter-spacing:.06em;text-transform:uppercase}
+.right{margin-left:auto;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px;margin:14px 0;min-width:0}
+.card h2{margin:0 0 12px;font-size:12px;color:var(--mut);font-weight:600;letter-spacing:.08em;text-transform:uppercase}
+.login{max-width:440px;margin:7vh auto}
+input,select,textarea{width:100%;padding:12px;border-radius:10px;border:1px solid var(--line);background:#0e141b;color:var(--fg);font-size:15px}
+textarea{resize:vertical;min-height:62px}
+.btn{background:var(--accent);color:#04121f;border:0;border-radius:10px;padding:12px 18px;font-weight:700;cursor:pointer}
+.btn.sm{padding:8px 12px;font-size:13px}.btn.ghost{background:transparent;color:var(--fg);border:1px solid var(--line)}
+.btn[disabled]{opacity:.55;cursor:not-allowed}
+.code{letter-spacing:.5em;text-align:center;font-size:26px;font-family:var(--fh)}
+.msg{font-size:14px;margin:10px 0;padding:10px 12px;border-radius:10px;border:1px solid var(--line)}
+.msg.err{color:#ffd4d0;border-color:rgba(231,76,60,.4);background:rgba(231,76,60,.1)}
+.msg.ok{color:#cdefd9;border-color:rgba(46,204,113,.4);background:rgba(46,204,113,.1)}
+.mut{color:var(--mut)}.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.kpis{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(130px,1fr))}
+.kpi{background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--line);border-radius:12px;padding:14px}
+.kpi b{display:block;font-family:var(--fh);font-size:28px;font-variant-numeric:tabular-nums}.kpi span{color:var(--mut);font-size:13px}
+.pill{display:inline-block;padding:2px 9px;border-radius:999px;font-size:12px;font-weight:600;border:1px solid var(--line)}
+.g-A{color:var(--ok)}.g-B{color:var(--lime)}.g-C{color:var(--warn)}.g-D{color:var(--orange)}.g-F{color:var(--bad)}
+.dot{width:9px;height:9px;border-radius:50%;display:inline-block;margin-right:6px}.on{background:var(--ok)}.off{background:var(--bad)}
+.tabs{display:flex;gap:8px;flex-wrap:wrap;margin:4px 0 2px}
+.tab{padding:8px 12px;border-radius:999px;border:1px solid var(--line);background:transparent;color:var(--mut);cursor:pointer;font-size:13px}
+.tab.active{background:var(--accent);color:#04121f;border-color:transparent;font-weight:700}
+.prot{display:flex;gap:12px;align-items:flex-start;padding:12px 0;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.prot:last-child{border-bottom:0}.prot .info{flex:1;min-width:200px}.prot .name{font-weight:600}
+.prot .ctl{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.prot select,.prot input{width:auto;padding:7px 9px;font-size:13px}
+.sw{position:relative;width:46px;height:26px;flex:0 0 auto}
+.sw input{opacity:0;width:100%;height:100%;margin:0;cursor:pointer}
+.sw span{position:absolute;inset:0;background:#2a3a4c;border-radius:999px;transition:.15s;pointer-events:none}
+.sw span::after{content:"";position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:#fff;transition:.15s}
+.sw input:checked+span{background:var(--ok)}.sw input:checked+span::after{transform:translateX(20px)}
+table{width:100%;border-collapse:collapse;font-size:14px}th,td{text-align:left;padding:9px 7px;border-bottom:1px solid var(--line);white-space:nowrap}
+th{color:var(--mut);font-size:12px;text-transform:uppercase;letter-spacing:.04em}
+.a0{color:var(--warn)}.a1{color:var(--orange)}.a2{color:var(--bad);font-weight:600}
+.scroll{overflow-x:auto}.when{color:var(--mut);font-size:12.5px}
+.foot{color:var(--mut);font-size:12px;text-align:center;padding:20px 0}
+.achv{display:flex;gap:10px;flex-wrap:wrap}
+.achv .empty{color:var(--mut);font-size:13px}
+.badge2{display:flex;align-items:center;gap:8px;background:var(--panel2);border:1px solid var(--line);border-radius:999px;padding:6px 12px;font-size:13px}
+.badge2 .em{font-size:16px}.badge2 small{color:var(--mut)}
+.tops{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));margin-top:14px}
+.tops h3{margin:0 0 8px;font-size:12px;color:var(--mut);text-transform:uppercase;letter-spacing:.04em}
+.bar2{display:flex;align-items:center;gap:8px;margin:5px 0;font-size:13px}
+.bar2 .lbl{width:92px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bar2 .track{flex:1;height:7px;background:#243141;border-radius:5px;overflow:hidden}
+.bar2 .fill{height:100%;background:var(--accent);border-radius:5px}
+.bar2 .n{width:26px;text-align:right;font-variant-numeric:tabular-nums;color:var(--mut)}
+.watchbar{background:rgba(241,196,15,.12);border:1px solid rgba(241,196,15,.4);color:#ffe9a8;border-radius:12px;padding:10px 14px;margin:14px 0;font-size:14px}
+.row2{display:flex;align-items:center;gap:10px;padding:8px 2px;border-bottom:1px solid var(--line);font-size:14px}
+.row2:last-child{border-bottom:0}.row2 .pos{width:22px;font-family:var(--fh);color:var(--mut)}
+.row2 .nm{min-width:90px}.row2 .track{flex:1;height:8px;background:#243141;border-radius:5px;overflow:hidden}
+.row2 .fill{height:100%;background:var(--ok);border-radius:5px}.row2 .sc{width:50px;text-align:right;color:var(--mut)}
+.hide{display:none!important}
+.toast{position:fixed;left:50%;bottom:calc(16px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:#0e151d;border:1px solid var(--line);border-radius:10px;padding:10px 16px;z-index:30;opacity:0;transition:.2s}
+.toast.show{opacity:1}
+</style></head><body>
+
+<div class="wrap">
+ <!-- LOGIN -->
+ <section id="screen-login">
+  <div class="login card">
+   <div class="logo">🦅 Eagle<span class="e">EYE</span></div>
+   <div class="sub">Gerenciador de servidores</div>
+   <div id="step-token">
+    <p class="mut">Informe o <b>token de acesso</b> do servidor (aparece no console ao ligar). Você receberá um código de 6 dígitos para confirmar.</p>
+    <input id="token" placeholder="EE-XXXXXX-XXXX-XXXX-XXXX-XXXX" autocomplete="off" maxlength="40">
+    <div id="m1"></div>
+    <div class="row" style="margin-top:10px"><button class="btn" id="btn-start">Enviar código</button></div>
+   </div>
+   <div id="step-code" class="hide">
+    <p class="mut">Enviamos um código <b id="via"></b>. Ele vale <b id="ttl">5:00</b>.</p>
+    <input id="code" class="code" placeholder="000000" inputmode="numeric" maxlength="6" autocomplete="one-time-code">
+    <div id="m2"></div>
+    <div class="row" style="margin-top:10px"><button class="btn" id="btn-verify">Entrar</button><button class="btn ghost sm" id="btn-back">Trocar token</button></div>
+   </div>
+  </div>
+  <div class="foot">EagleEYE Anti-Cheat</div>
+ </section>
+
+ <!-- APP -->
+ <section id="screen-app" class="hide">
+  <header>
+   <div><div class="logo">🦅 Eagle<span class="e">EYE</span></div><div class="sub">Gerenciador</div></div>
+   <div class="right">
+    <select id="srvsel" style="width:auto"></select>
+    <button class="btn ghost sm" id="btn-logout">Sair</button>
+    <button class="btn ghost sm" id="btn-logout-all" title="Encerra a sessão em todos os dispositivos">Sair de tudo</button>
+   </div>
+  </header>
+
+  <div class="card"><div class="kpis" id="kpis"></div></div>
+
+  <div id="watchbar" class="watchbar hide"></div>
+
+  <div class="card hide" id="rankcard">
+   <h2>Ranking — servidor mais limpo</h2>
+   <div id="rank"></div>
+  </div>
+
+  <div class="card">
+   <div class="row" style="justify-content:space-between">
+    <h2 style="margin:0">Anti-cheat</h2>
+    <label class="row" style="gap:8px"><span id="globlbl" class="mut">—</span><span class="sw"><input type="checkbox" id="glob"><span></span></span></label>
+   </div>
+   <div id="actinfo" class="mut" style="font-size:13px;margin-top:6px"></div>
+  </div>
+
+  <div class="card">
+   <h2>Conquistas</h2>
+   <div id="achv" class="achv"></div>
+  </div>
+
+  <div class="card">
+   <h2>Estatísticas — detecções por hora (24h)</h2>
+   <canvas id="chart" height="150" style="width:100%;display:block"></canvas>
+   <div id="tops" class="tops"></div>
+  </div>
+
+  <div class="card">
+   <h2>Proteções</h2>
+   <div class="tabs" id="tabs"></div>
+   <div id="prots"></div>
+  </div>
+
+  <div class="card">
+   <h2>Aviso no jogo</h2>
+   <div class="row"><input id="ann" placeholder="Mensagem para todos no servidor (sem acentos)" maxlength="120" style="flex:1"><button class="btn sm" id="btn-ann">Enviar</button></div>
+  </div>
+
+  <div class="card">
+   <h2>Webhook de saída — receba os alertas no seu Discord</h2>
+   <div class="row">
+    <input id="wh-url" placeholder="https://discord.com/api/webhooks/..." style="flex:1;min-width:200px" maxlength="200">
+    <select id="wh-min" style="width:auto"><option value="0">avisos+</option><option value="1" selected>kick+ban</option><option value="2">só ban</option></select>
+    <button class="btn sm" id="btn-wh">Salvar</button>
+   </div>
+   <div class="mut" style="font-size:12.5px;margin-top:6px">Só webhooks do Discord. Deixe vazio e salve para desligar. <span id="wh-state"></span></div>
+  </div>
+
+  <div class="card">
+   <h2>Histórico de jogador</h2>
+   <div class="row"><input id="pq" placeholder="nick exato do jogo" style="flex:1" maxlength="24"><button class="btn sm" id="btn-pq">Buscar</button></div>
+   <div id="pres" style="margin-top:12px"></div>
+  </div>
+
+  <div class="card">
+   <h2>Blacklist — ban cruzado nos seus servidores</h2>
+   <div class="row">
+    <input id="bl-nick" placeholder="nick" style="flex:1;min-width:110px" maxlength="24">
+    <input id="bl-ip" placeholder="IP (opcional)" style="flex:1;min-width:110px" maxlength="15">
+    <input id="bl-reason" placeholder="motivo (opcional)" style="flex:2;min-width:130px" maxlength="100">
+    <button class="btn sm" id="btn-bl">Adicionar</button>
+   </div>
+   <div class="mut" style="font-size:12.5px;margin-top:6px">Quem entra aqui é banido em <b>todos os seus servidores</b> (por IP) e expulso ao conectar (por nick).</div>
+   <div id="bllist" style="margin-top:12px"></div>
+  </div>
+
+  <div class="card">
+   <h2>Procurados — vigie um jogador</h2>
+   <div class="row">
+    <input id="wl-nick" placeholder="nick" style="flex:1;min-width:120px" maxlength="24">
+    <input id="wl-note" placeholder="anotação (opcional)" style="flex:2;min-width:140px" maxlength="100">
+    <button class="btn sm" id="btn-wl">Adicionar</button>
+   </div>
+   <div class="mut" style="font-size:12.5px;margin-top:6px">Não bane — avisa quando a pessoa <b>entra</b> ou é detectada em qualquer servidor seu.</div>
+   <div id="wllist" style="margin-top:12px"></div>
+  </div>
+
+  <div class="card">
+   <h2>Detecções recentes (24h)</h2>
+   <div class="scroll"><table id="recent"><tbody></tbody></table></div>
+  </div>
+
+  <div class="card">
+   <h2>Reputação dos jogadores</h2>
+   <div class="scroll"><table id="worst"><tbody></tbody></table></div>
+  </div>
+
+  <div class="foot">EagleEYE Anti-Cheat · as mudanças chegam ao servidor em segundos</div>
+ </section>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+var CAT=${boot};
+var S={session:localStorage.getItem('ee_sess')||'',challenge:'',ttl:0,cat:CAT.protections[0]?CAT.protections[0].cat:'jogador',data:null,cur:null,ttlTimer:0};
+var $=function(id){return document.getElementById(id)};
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
+function toast(t){var el=$('toast');el.textContent=t;el.classList.add('show');clearTimeout(el._t);el._t=setTimeout(function(){el.classList.remove('show')},2200)}
+function api(path,opts){opts=opts||{};opts.headers=opts.headers||{};if(S.session)opts.headers['Authorization']='Bearer '+S.session;if(opts.body)opts.headers['Content-Type']='application/json';return fetch(path,opts).then(function(r){return r.json().then(function(j){return{status:r.status,j:j}})})}
+
+/* ---- login ---- */
+function showLogin(){$('screen-app').classList.add('hide');$('screen-login').classList.remove('hide')}
+function showApp(){$('screen-login').classList.add('hide');$('screen-app').classList.remove('hide');load();loadBlacklist();loadWatchlist()}
+$('btn-start').onclick=function(){
+ var tok=$('token').value.trim();if(!tok){return}
+ $('btn-start').disabled=true;$('m1').innerHTML='';
+ api('/app/login/start',{method:'POST',body:JSON.stringify({token:tok})}).then(function(r){
+  $('btn-start').disabled=false;
+  if(r.status!==200){$('m1').innerHTML='<div class="msg err">'+esc(r.j.error)+'</div>';return}
+  S.challenge=r.j.challengeId;$('via').textContent=r.j.via;
+  $('step-token').classList.add('hide');$('step-code').classList.remove('hide');$('code').focus();
+  startTtl(r.j.expiresInMs||300000);
+ }).catch(function(){$('btn-start').disabled=false;$('m1').innerHTML='<div class="msg err">Falha de conexão.</div>'})
+};
+$('btn-back').onclick=function(){$('step-code').classList.add('hide');$('step-token').classList.remove('hide');clearInterval(S.ttlTimer)};
+$('btn-verify').onclick=function(){
+ var code=$('code').value.trim();if(code.length<6){return}
+ $('btn-verify').disabled=true;$('m2').innerHTML='';
+ api('/app/login/verify',{method:'POST',body:JSON.stringify({challengeId:S.challenge,code:code})}).then(function(r){
+  $('btn-verify').disabled=false;
+  if(r.status!==200){$('m2').innerHTML='<div class="msg err">'+esc(r.j.error)+'</div>';return}
+  S.session=r.j.session;try{localStorage.setItem('ee_sess',S.session)}catch(e){}
+  clearInterval(S.ttlTimer);showApp();
+ }).catch(function(){$('btn-verify').disabled=false;$('m2').innerHTML='<div class="msg err">Falha de conexão.</div>'})
+};
+$('code').addEventListener('keydown',function(e){if(e.key==='Enter')$('btn-verify').click()});
+$('token').addEventListener('keydown',function(e){if(e.key==='Enter')$('btn-start').click()});
+function startTtl(ms){var end=Date.now()+ms;clearInterval(S.ttlTimer);S.ttlTimer=setInterval(function(){
+ var left=Math.max(0,Math.round((end-Date.now())/1000));var m=Math.floor(left/60),s=left%60;
+ $('ttl').textContent=m+':'+(s<10?'0':'')+s;if(left<=0){clearInterval(S.ttlTimer);$('m2').innerHTML='<div class="msg err">Código expirado. Volte e peça um novo.</div>'}
+},500)}
+
+/* ---- logout ---- */
+function doLogout(all){api('/app/logout',{method:'POST',body:JSON.stringify({all:!!all})});S.session='';try{localStorage.removeItem('ee_sess')}catch(e){}showLogin();location.hash=''}
+$('btn-logout').onclick=function(){doLogout(false)};
+$('btn-logout-all').onclick=function(){if(confirm('Encerrar a sessão em TODOS os dispositivos?'))doLogout(true)};
+
+/* ---- app ---- */
+function load(){api('/app/api/state').then(function(r){
+ if(r.status===401){S.session='';try{localStorage.removeItem('ee_sess')}catch(e){}showLogin();return}
+ S.data=r.j;
+ var sel=$('srvsel');var keep=S.cur;sel.innerHTML=r.j.servers.map(function(s){return '<option value="'+esc(s.id)+'">'+esc(s.name)+(s.online?'':' (offline)')+'</option>'}).join('');
+ if(!r.j.servers.length){sel.innerHTML='<option>nenhum servidor</option>'}
+ S.cur=(keep&&r.j.servers.some(function(s){return s.id===keep}))?keep:(r.j.servers[0]&&r.j.servers[0].id);
+ if(S.cur)sel.value=S.cur;renderAll();
+}).catch(function(){})}
+$('srvsel').onchange=function(){S.cur=this.value;renderAll()};
+function curServer(){return (S.data&&S.data.servers||[]).filter(function(s){return s.id===S.cur})[0]}
+
+function renderAll(){var s=curServer();if(!s){$('kpis').innerHTML='<div class="kpi"><b>0</b><span>servidores</span></div>';return}
+ $('kpis').innerHTML=[['<span class="dot '+(s.online?'on':'off')+'"></span>'+(s.online?'online':'offline'),'estado'],
+  [s.online?s.players+'/'+s.maxPlayers:'—','jogadores'],
+  ['<span class="pill g-'+esc(s.gradeLetter)+'">'+esc(s.grade)+'</span>','segurança'],
+  [Object.values(s.protections).filter(function(p){return p.enabled}).length+'/'+Object.keys(s.protections).length,'proteções ativas']
+ ].map(function(k){return '<div class="kpi"><b>'+k[0]+'</b><span>'+k[1]+'</span></div>'}).join('');
+ $('glob').checked=!!s.global;$('globlbl').textContent=s.global?'ligado':'desligado';
+ $('actinfo').textContent=s.activated?'':'⏳ Ative o servidor no Discord (/ac meuservidor) antes de ligar o anti-cheat.';
+ renderAchv();renderTabs();renderProts();renderRecent();renderWorst();loadStats();renderRank();renderWatchbar();renderWebhook();
+}
+window.addEventListener('resize',function(){if(S.data)loadStats()});
+
+function renderRank(){var d=S.data;var card=$('rankcard');if(!d||!d.ranking||!d.ranking.length){card.classList.add('hide');return}
+ card.classList.remove('hide');var max=d.ranking[0].cleanScore||1;
+ $('rank').innerHTML=d.ranking.map(function(s,i){return '<div class="row2"><span class="pos">'+(i+1)+'º</span><span class="nm">'+esc(s.name)+'</span><span class="track"><span class="fill" style="width:'+Math.round(100*s.cleanScore/Math.max(1,max))+'%"></span></span><span class="sc">'+s.cleanScore+'/100</span></div>'}).join('')}
+function renderWatchbar(){var d=S.data;var el=$('watchbar');var w=(d&&d.watchedOnline)||[];
+ if(!w.length){el.classList.add('hide');return}
+ el.classList.remove('hide');el.innerHTML='👁️ <b>Procurado(s) online agora:</b> '+w.map(function(x){return esc(x.nick)+' <span class="mut">('+esc(x.server)+')</span>'}).join(' · ')}
+function renderWebhook(){var s=curServer();if(!s)return;$('wh-url').value=s.webhookUrl||'';$('wh-min').value=String(s.webhookMinAction);
+ $('wh-state').textContent=s.webhookUrl?'• ligado':'• desligado'}
+$('btn-wh').onclick=function(){var url=$('wh-url').value.trim(),min=parseInt($('wh-min').value,10);
+ api('/app/api/webhook',{method:'POST',body:JSON.stringify({serverId:S.cur,url:url,minAction:min})}).then(function(r){
+  if(r.status!==200){toast('⚠️ '+(r.j.error||'erro'));return}
+  var s=curServer();if(s){s.webhookUrl=r.j.webhookUrl;s.webhookMinAction=r.j.webhookMinAction}renderWebhook();toast(url?'✅ webhook salvo':'✅ webhook desligado')})}
+
+/* ---- procurados ---- */
+function loadWatchlist(){api('/app/api/watchlist').then(function(r){if(r.status===200)renderWatchlist(r.j.entries||[])})}
+function renderWatchlist(list){if(!list.length){$('wllist').innerHTML='<div class="mut">Nenhum jogador vigiado.</div>';return}
+ $('wllist').innerHTML='<div class="scroll"><table><tbody>'+list.map(function(e){
+  return '<tr><td>👁️ <b>'+esc(e.nick)+'</b></td><td class="when">'+esc(e.note||'')+'</td><td class="when">'+ago(e.at)+'</td><td><button class="btn ghost sm wl-rm" data-n="'+esc(e.nick)+'">remover</button></td></tr>'}).join('')+'</tbody></table></div>';
+ Array.prototype.forEach.call($('wllist').querySelectorAll('.wl-rm'),function(b){b.onclick=function(){
+  api('/app/api/watchlist/remove',{method:'POST',body:JSON.stringify({nick:b.getAttribute('data-n')})}).then(function(r){if(r.status===200){renderWatchlist(r.j.entries||[]);toast('✅ removido')}})}})}
+$('btn-wl').onclick=function(){var nick=$('wl-nick').value.trim(),note=$('wl-note').value.trim();if(!nick){toast('informe o nick');return}
+ api('/app/api/watchlist',{method:'POST',body:JSON.stringify({nick:nick,note:note})}).then(function(r){
+  if(r.status!==200){toast('⚠️ '+(r.j.error||'erro'));return}$('wl-nick').value='';$('wl-note').value='';renderWatchlist(r.j.entries||[]);toast('👁️ vigiando')})}
+function renderTabs(){$('tabs').innerHTML=CAT.categories.map(function(c){return '<button class="tab'+(c.key===S.cat?' active':'')+'" data-k="'+c.key+'">'+c.emoji+' '+esc(c.name)+'</button>'}).join('');
+ Array.prototype.forEach.call($('tabs').children,function(b){b.onclick=function(){S.cat=b.getAttribute('data-k');renderTabs();renderProts()}})}
+function renderProts(){var s=curServer();if(!s)return;
+ var list=CAT.protections.filter(function(p){return p.cat===S.cat});
+ $('prots').innerHTML=list.map(function(p){var st=s.protections[p.key]||{enabled:false,action:1,tolerance:1,value:0};
+  return '<div class="prot"><label class="sw"><input type="checkbox" data-k="'+p.key+'" class="en"'+(st.enabled?' checked':'')+'><span></span></label>'+
+   '<div class="info"><div class="name">'+esc(p.name)+'</div><div class="mut" style="font-size:13px">'+esc(p.desc)+'</div></div>'+
+   '<div class="ctl"><select class="ac" data-k="'+p.key+'">'+CAT.actions.map(function(a,i){return '<option value="'+i+'"'+(st.action===i?' selected':'')+'>'+a+'</option>'}).join('')+'</select>'+
+   '<input class="tol" data-k="'+p.key+'" type="number" min="1" max="100" value="'+st.tolerance+'" title="tolerância (detecções em 60s)" style="width:68px">'+
+   (p.valueLabel?'<input class="val" data-k="'+p.key+'" type="number" min="0" value="'+st.value+'" title="'+esc(p.valueLabel)+'" style="width:84px">':'')+
+   '</div></div>'}).join('');
+ bind('.en','change',function(el){saveProt(el.getAttribute('data-k'),{enabled:el.checked})});
+ bind('.ac','change',function(el){saveProt(el.getAttribute('data-k'),{action:parseInt(el.value,10)})});
+ bind('.tol','change',function(el){saveProt(el.getAttribute('data-k'),{tolerance:parseInt(el.value,10)})});
+ bind('.val','change',function(el){saveProt(el.getAttribute('data-k'),{value:parseInt(el.value,10)})});
+}
+function bind(sel,ev,fn){Array.prototype.forEach.call($('prots').querySelectorAll(sel),function(el){el.addEventListener(ev,function(){fn(el)})})}
+function saveProt(key,patch){var body=Object.assign({serverId:S.cur,key:key},patch);
+ api('/app/api/protection',{method:'POST',body:JSON.stringify(body)}).then(function(r){
+  if(r.status!==200){toast('⚠️ '+(r.j.error||'erro'));load();return}
+  var s=curServer();if(s)s.protections[key]=r.j.protection;toast('✅ salvo');renderProtsKpi()})}
+function renderProtsKpi(){var s=curServer();if(s)$('kpis').children[3].querySelector('b').textContent=Object.values(s.protections).filter(function(p){return p.enabled}).length+'/'+Object.keys(s.protections).length}
+$('glob').onchange=function(){var on=this.checked;
+ api('/app/api/global',{method:'POST',body:JSON.stringify({serverId:S.cur,on:on})}).then(function(r){
+  if(r.status!==200){toast('⚠️ '+(r.j.error||'erro'));$('glob').checked=!on;return}
+  var s=curServer();if(s)s.global=on;$('globlbl').textContent=on?'ligado':'desligado';toast('✅ '+(on?'ligado':'desligado'))})}
+$('btn-ann').onclick=function(){var m=$('ann').value.trim();if(!m)return;
+ api('/app/api/announce',{method:'POST',body:JSON.stringify({serverId:S.cur,message:m})}).then(function(r){
+  if(r.status!==200){toast('⚠️ '+(r.j.error||'erro'));return}$('ann').value='';toast('📢 enviado')})}
+var ACT=['aviso','kick','ban'];
+function renderRecent(){var rows=(S.data.recent||[]).slice(0,25);
+ $('recent').querySelector('tbody').innerHTML=rows.length?('<tr><th>Quando</th><th>Jogador</th><th>Proteção</th><th>Ação</th><th>Servidor</th></tr>'+rows.map(function(r){
+  return '<tr><td class="when">'+ago(r.time)+'</td><td>'+esc(r.name)+'</td><td>'+esc(r.key||r.code)+'</td><td class="a'+r.action+'">'+(ACT[r.action]||'?')+'</td><td class="when">'+esc(r.server)+'</td></tr>'}).join('')):'<tr><td class="mut" style="padding:16px">Nenhuma detecção nas últimas 24h. 🎉</td></tr>'}
+function renderWorst(){var rows=S.data.worst||[];
+ $('worst').querySelector('tbody').innerHTML=rows.length?('<tr><th>Jogador</th><th>Reputação</th><th>Situação</th><th>Det.</th><th>Bans</th></tr>'+rows.map(function(w){
+  return '<tr><td>'+esc(w.name)+'</td><td>'+w.emoji+' '+w.score+'/100</td><td>'+esc(w.label)+'</td><td>'+w.dets+'</td><td>'+w.bans+'</td></tr>'}).join('')):'<tr><td class="mut" style="padding:16px">Sem histórico ainda.</td></tr>'}
+function ago(ms){if(!ms)return'—';var s=Math.floor((Date.now()-ms)/1000);if(s<60)return s+'s';var m=Math.floor(s/60);if(m<60)return m+'min';var h=Math.floor(m/60);if(h<24)return h+'h';return Math.floor(h/24)+'d'}
+
+/* nome da proteção por key/código */
+var PKEY={},PID={};CAT.protections.forEach(function(p){PKEY[p.key]=p.name;PID[p.id]=p.name});
+function protName(key,code){return PKEY[key]||PID[code]||key||code}
+function tfull(ms){if(!ms)return'—';try{return new Date(ms).toLocaleString()}catch(e){return ago(ms)}}
+
+/* ---- histórico de jogador ---- */
+$('btn-pq').onclick=function(){
+ var nick=$('pq').value.trim();if(!nick||!S.cur)return;
+ $('pres').innerHTML='<span class="mut">buscando…</span>';
+ api('/app/api/player?serverId='+encodeURIComponent(S.cur)+'&nick='+encodeURIComponent(nick)).then(function(r){
+  if(r.status!==200){$('pres').innerHTML='<div class="msg err">'+esc(r.j.error||'erro')+'</div>';return}
+  var i=r.j.info,rep=r.j.rep;
+  if(!i.total&&!(i.bans&&i.bans.length)&&!(rep&&rep.known)){$('pres').innerHTML='<div class="mut">Nenhum registro para <b>'+esc(nick)+'</b>.</div>';return}
+  var byp=(i.byProtection||[]).map(function(x){return esc(protName(null,x[0]))+': <b>'+x[1]+'</b>'}).join(' · ')||'—';
+  var ips=(i.ips||[]).length?i.ips.map(function(x){return '<code>'+esc(x)+'</code>'}).join(' '):'—';
+  var bans=(i.bans||[]).length?i.bans.map(function(b){return '#'+b.id+' '+esc(protName(null,b.code))+' '+ago(b.time)+(b.unbannedAt?' (desfeito)':'')}).join('<br>'):'nenhum';
+  var rec=(i.recent||[]).map(function(d){return '<tr><td class="when">'+ago(d.time)+'</td><td>'+esc(protName(d.key,d.code))+'</td><td class="a'+d.action+'">'+(ACT[d.action]||'?')+'</td><td class="when">'+esc(d.detail||'-')+'</td></tr>'}).join('');
+  $('pres').innerHTML=
+   '<div style="font-weight:600;font-size:16px;margin-bottom:8px">🧍 '+esc(nick)+'</div>'+
+   (rep?'<div class="row" style="margin-bottom:10px"><span class="pill" style="color:inherit">'+rep.emoji+' reputação '+rep.score+'/100 — '+esc(rep.label)+'</span></div>':'')+
+   '<div class="mut" style="font-size:13px">Detecções: <b>'+i.total+'</b> · primeira '+tfull(i.first)+' · última '+tfull(i.last)+'</div>'+
+   '<div style="margin:8px 0;font-size:13px"><b>Por proteção:</b> '+byp+'</div>'+
+   '<div style="margin:8px 0;font-size:13px"><b>IPs:</b> '+ips+'</div>'+
+   '<div style="margin:8px 0;font-size:13px"><b>Bans:</b> '+bans+'</div>'+
+   (rec?'<div class="scroll" style="margin-top:8px"><table><tr><th>Quando</th><th>Proteção</th><th>Ação</th><th>Detalhe</th></tr>'+rec+'</table></div>':'');
+ }).catch(function(){$('pres').innerHTML='<div class="msg err">Falha de conexão.</div>'})
+};
+$('pq').addEventListener('keydown',function(e){if(e.key==='Enter')$('btn-pq').click()});
+
+/* ---- blacklist ---- */
+function loadBlacklist(){api('/app/api/blacklist').then(function(r){if(r.status===200)renderBlacklist(r.j.entries||[])})}
+function renderBlacklist(list){
+ if(!list.length){$('bllist').innerHTML='<div class="mut">Sua lista negra está vazia.</div>';return}
+ $('bllist').innerHTML='<div class="scroll"><table><tbody>'+list.map(function(e){
+  var alvo=e.kind==='ip'?('IP <code>'+esc(e.value)+'</code>'):('nick <b>'+esc(e.value)+'</b>');
+  return '<tr><td>🚫 '+alvo+'</td><td class="when">'+esc(e.reason||'')+'</td><td class="when">'+ago(e.at)+'</td>'+
+   '<td><button class="btn ghost sm bl-rm" data-k="'+esc(e.kind)+'" data-v="'+esc(e.value)+'">remover</button></td></tr>'}).join('')+'</tbody></table></div>';
+ Array.prototype.forEach.call($('bllist').querySelectorAll('.bl-rm'),function(b){b.onclick=function(){
+  api('/app/api/blacklist/remove',{method:'POST',body:JSON.stringify({kind:b.getAttribute('data-k'),value:b.getAttribute('data-v')})}).then(function(r){
+   if(r.status===200){renderBlacklist(r.j.entries||[]);toast('✅ removido')}else toast('⚠️ '+(r.j.error||'erro'))})}})
+}
+$('btn-bl').onclick=function(){
+ var nick=$('bl-nick').value.trim(),ip=$('bl-ip').value.trim(),reason=$('bl-reason').value.trim();
+ if(!nick&&!ip){toast('informe nick ou IP');return}
+ api('/app/api/blacklist',{method:'POST',body:JSON.stringify({nick:nick,ip:ip,reason:reason})}).then(function(r){
+  if(r.status!==200){toast('⚠️ '+(r.j.error||'erro'));return}
+  $('bl-nick').value='';$('bl-ip').value='';$('bl-reason').value='';
+  renderBlacklist(r.j.entries||[]);toast('🚫 adicionado em '+r.j.applied+' servidor(es)')})
+};
+
+/* ---- conquistas ---- */
+function renderAchv(){var s=curServer();var el=$('achv');if(!s){el.innerHTML='';return}
+ var a=s.achievements||[];
+ el.innerHTML=a.length?a.map(function(x){return '<span class="badge2"><span class="em">'+x.emoji+'</span> '+esc(x.title)+' <small>'+esc(x.detail||'')+'</small></span>'}).join(''):'<span class="empty">Ainda sem conquistas — elas aparecem com o tempo protegido e cheaters barrados.</span>'}
+
+/* ---- estatísticas + gráfico ---- */
+function cssv(n){return getComputedStyle(document.documentElement).getPropertyValue(n).trim()||'#888'}
+function loadStats(){var s=curServer();if(!s)return;
+ api('/app/api/stats?serverId='+encodeURIComponent(S.cur)).then(function(r){if(r.status===200){drawChart(r.j.stats.hourly);renderTops(r.j.stats)}})}
+function drawChart(buckets){
+ var cv=$('chart');if(!cv||!buckets)return;
+ var dpr=window.devicePixelRatio||1;var W=cv.clientWidth||600,H=150;
+ cv.width=W*dpr;cv.height=H*dpr;var g=cv.getContext('2d');g.setTransform(dpr,0,0,dpr,0,0);g.clearRect(0,0,W,H);
+ var pad={l:26,r:6,t:8,b:16};var cw=W-pad.l-pad.r,ch=H-pad.t-pad.b;
+ var max=1;buckets.forEach(function(b){if(b.count>max)max=b.count});
+ var grid=cssv('--line'),mut=cssv('--mut');
+ g.strokeStyle=grid;g.fillStyle=mut;g.font='10px system-ui';g.lineWidth=1;
+ // linhas de grade + rótulos do eixo Y (0, meio, max)
+ [0,0.5,1].forEach(function(f){var y=pad.t+ch-ch*f;g.globalAlpha=.5;g.beginPath();g.moveTo(pad.l,y);g.lineTo(W-pad.r,y);g.stroke();g.globalAlpha=1;g.fillText(String(Math.round(max*f)),2,y+3)});
+ var n=buckets.length,bw=cw/n,gap=Math.min(3,bw*0.2);
+ var cw_=cssv('--warn'),ck=cssv('--orange'),cb=cssv('--bad');
+ for(var i=0;i<n;i++){var b=buckets[i];var x=pad.l+i*bw+gap/2,w=bw-gap;var y=pad.t+ch;
+  [[b.warn,cw_],[b.kick,ck],[b.ban,cb]].forEach(function(seg){if(seg[0]<=0)return;var h=ch*(seg[0]/max);y-=h;g.fillStyle=seg[1];g.fillRect(x,y,w,h)})}
+ // rótulos de hora (a cada 6)
+ g.fillStyle=mut;for(var j=0;j<n;j+=6){var d=new Date(buckets[j].t);g.fillText((d.getHours()<10?'0':'')+d.getHours()+'h',pad.l+j*bw,H-4)}
+}
+function renderTops(st){
+ function rows(list,max,fmt){max=max||1;return list.map(function(x){var v=fmt(x);return '<div class="bar2"><span class="lbl">'+esc(v.l)+'</span><span class="track"><span class="fill" style="width:'+Math.round(100*v.n/max)+'%"></span></span><span class="n">'+v.n+'</span></div>'}).join('')||'<span class="mut" style="font-size:13px">—</span>'}
+ var mp=(st.topProtections[0]||{}).count||1, mo=(st.topOffenders[0]||{}).count||1;
+ $('tops').innerHTML=
+  '<div><h3>Proteções que mais agiram</h3>'+rows(st.topProtections,mp,function(p){return {l:p.name,n:p.count}})+'</div>'+
+  '<div><h3>Jogadores mais detectados</h3>'+rows(st.topOffenders,mo,function(o){return {l:o.name,n:o.count}})+'</div>';
+}
+
+/* boot */
+if(S.session){showApp()}else{showLogin()}
+setInterval(function(){if(S.session&&!$('screen-app').classList.contains('hide'))load()},10000);
+</script></body></html>`;
+}
+
+module.exports = { handleWebApp, scopedServers, serverView, CATALOG };

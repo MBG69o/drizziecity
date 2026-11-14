@@ -1,0 +1,6 @@
+ee_secrets.h
+secrets.json
+build/
+*.o
+*.so
+*.dll

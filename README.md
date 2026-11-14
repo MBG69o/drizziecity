@@ -114,3 +114,7 @@ Se não souber qual é, envie um sample da tabela Accounts (hash + salt) para an
 ## Licença
 
 Privado
+
+## Anti-Cheat (SA-MP / open.mp) configurável pelo Discord
+
+Veja [`eagleeye/README.md`](eagleeye/README.md): include Pawn (`eagleeye.inc` / `eagleeye_fs.inc`) + bot do Discord com comandos `/ac` para ativar/desativar proteções.
