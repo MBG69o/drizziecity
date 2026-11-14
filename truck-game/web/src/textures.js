@@ -406,6 +406,118 @@ export const tex = {
     return t;
   }),
 
+
+  // Rodovia: 18 m (2 faixas de 3,5 m + acostamentos), repetição a cada 18 m
+  highway: () => memo('highway', () => {
+    const s = SIZE;
+    const [c, ctx] = canvas(s, s);
+    asphaltBase(ctx, s, 23, '#3a3c3f');
+    const m = s / 18;
+    // acostamentos mais claros
+    ctx.fillStyle = 'rgba(150,150,150,0.18)';
+    ctx.fillRect(0, 0, 2 * m, s);
+    ctx.fillRect(16 * m, 0, 2 * m, s);
+    ctx.fillStyle = 'rgba(20,20,20,0.2)';
+    for (const x of [4.2, 6.6, 11.4, 13.8]) ctx.fillRect(x * m - m * 0.5, 0, m, s);
+    ctx.fillStyle = '#f2f2f2';
+    ctx.fillRect(1.9 * m, 0, 0.15 * m, s);
+    ctx.fillRect(15.95 * m, 0, 0.15 * m, s);
+    ctx.fillStyle = '#e8b923';
+    ctx.fillRect(8.82 * m, 0, 0.14 * m, s * 0.5);
+    ctx.fillRect(9.04 * m, 0, 0.14 * m, s);
+    // rachaduras e remendos
+    const r = rng(24);
+    ctx.strokeStyle = 'rgba(15,15,15,0.35)';
+    ctx.lineWidth = 1.2;
+    for (let i = 0; i < 14; i++) {
+      let x = r() * s, y = r() * s;
+      ctx.beginPath(); ctx.moveTo(x, y);
+      for (let k = 0; k < 6; k++) { x += (r() - 0.5) * 30; y += r() * 20; ctx.lineTo(x, y); }
+      ctx.stroke();
+    }
+    for (let i = 0; i < 3; i++) { ctx.fillStyle = 'rgba(25,25,27,0.35)'; ctx.fillRect(2 * m + r() * 12 * m, r() * s, 1.5 * m + r() * m, 1 * m + r() * m); }
+    return finish(c);
+  }),
+
+  roadSign: (title, sub, bg) => memo('rs' + title + sub + bg, () => {
+    const w = 1024, h = 410;
+    const [c, ctx] = canvas(w, h);
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 14;
+    ctx.strokeRect(20, 20, w - 40, h - 40);
+    ctx.fillStyle = '#fff';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    let fs = 120;
+    ctx.font = `700 ${fs}px sans-serif`;
+    while (ctx.measureText(title).width > w - 120) { fs -= 6; ctx.font = `700 ${fs}px sans-serif`; }
+    ctx.fillText(title, w / 2, h * 0.42);
+    ctx.font = '600 64px sans-serif';
+    ctx.fillText(sub, w / 2, h * 0.76);
+    return finish(c, false);
+  }),
+
+  speedSign: (v) => memo('spd' + v, () => {
+    const s = 256;
+    const [c, ctx] = canvas(s, s);
+    ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.arc(s / 2, s / 2, s / 2, 0, 7); ctx.fill();
+    ctx.strokeStyle = '#d0021b';
+    ctx.lineWidth = 28;
+    ctx.beginPath(); ctx.arc(s / 2, s / 2, s / 2 - 16, 0, 7); ctx.stroke();
+    ctx.fillStyle = '#111';
+    ctx.font = '800 110px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(String(v), s / 2, s / 2 + 6);
+    return finish(c, false);
+  }),
+
+  clouds: () => memo('clouds', () => {
+    const w = 1024, h = 512;
+    const [c, ctx] = canvas(w, h);
+    ctx.clearRect(0, 0, w, h);
+    const r = rng(555);
+    for (let i = 0; i < 70; i++) {
+      const x = r() * w, y = h * 0.25 + r() * h * 0.55, rad = 30 + r() * 90;
+      for (let k = 0; k < 7; k++) {
+        const ox = x + (r() - 0.5) * rad * 1.8, oy = y + (r() - 0.5) * rad * 0.4, rr = rad * (0.4 + r() * 0.6);
+        const g = ctx.createRadialGradient(ox, oy, 0, ox, oy, rr);
+        g.addColorStop(0, 'rgba(255,255,255,0.55)');
+        g.addColorStop(1, 'rgba(255,255,255,0)');
+        ctx.fillStyle = g;
+        ctx.fillRect(ox - rr, oy - rr, rr * 2, rr * 2);
+        // repete na emenda horizontal
+        if (ox < rr) { ctx.save(); ctx.translate(w, 0); ctx.fillRect(ox - rr, oy - rr, rr * 2, rr * 2); ctx.restore(); }
+      }
+    }
+    const t = finish(c);
+    t.wrapT = THREE.ClampToEdgeWrapping;
+    return t;
+  }),
+
+  // Painel corrugado de baú/carreta
+  panel: () => memo('panel', () => {
+    const s = 512;
+    const [c, ctx] = canvas(s, s);
+    const n = 32;
+    for (let i = 0; i < n; i++) {
+      const g = ctx.createLinearGradient((i * s) / n, 0, ((i + 1) * s) / n, 0);
+      g.addColorStop(0, '#d9dcdf'); g.addColorStop(0.5, '#ffffff'); g.addColorStop(1, '#c8cbce');
+      ctx.fillStyle = g;
+      ctx.fillRect((i * s) / n, 0, s / n, s);
+    }
+    ctx.fillStyle = 'rgba(0,0,0,0.25)';
+    ctx.fillRect(0, 0, s, 6); ctx.fillRect(0, s - 6, s, 6);
+    const d = ctx.createLinearGradient(0, s, 0, s * 0.6);
+    d.addColorStop(0, 'rgba(110,92,70,0.35)'); d.addColorStop(1, 'rgba(110,92,70,0)');
+    ctx.fillStyle = d; ctx.fillRect(0, 0, s, s);
+    noise(ctx, s, s, 8, 600);
+    return finish(c);
+  }),
+
   warehouse: () => memo('warehouse', () => {
     const s = SIZE / 2;
     const [c, ctx] = canvas(s, s);
@@ -638,9 +750,9 @@ export const tex = {
   foliage: () => memo('foliage', () => {
     const s = 256;
     const [c, ctx] = canvas(s, s);
-    ctx.fillStyle = '#3d6b2a';
+    ctx.fillStyle = '#c8c8c8';
     ctx.fillRect(0, 0, s, s);
-    speckle(ctx, s, s, 2200, ['#5b8f3a', '#2c5220', '#7aaa4a', '#24451a'], 5, 411);
+    speckle(ctx, s, s, 2600, ['#ffffff', '#8a8a8a', '#e6e6e6', '#6e6e6e'], 5, 411);
     return finish(c);
   }),
 };

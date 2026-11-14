@@ -1,11 +1,11 @@
 // Drizzie Truck — núcleo do jogo: renderização, controles, fretes, progressão e HUD.
 import * as THREE from 'three';
-import { HALF, GRID, BLOCK, ROAD_W, roadCoord, zoneOf, LOCATIONS, LOC, TRUCKS, TRUCK, CARGOS, CARGO, xpForLevel, MAX_LEVEL } from './data.js';
+import { BLOCK, ROAD_W, HW_HALF, CITIES, cx1, cz1, zoneOf, LOCATIONS, LOC, TRUCKS, TRUCK, CARGOS, CARGO, xpForLevel, MAX_LEVEL, WORLD, SEA_Z, RIVER_W } from './data.js';
 import { configureTextures, tex } from './textures.js';
 import { World } from './world.js';
-import { Rig, buildTruck } from './truck.js';
+import { Rig, setTruckQuality } from './truck.js';
 import { Traffic } from './traffic.js';
-import { findRoute } from './route.js';
+import { findRoute, buildGraph } from './route.js';
 import { Audio } from './audio.js';
 
 const $ = (id) => document.getElementById(id);
@@ -15,9 +15,9 @@ const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
 // ---------------- Save ----------------
 const DEFAULTS = {
-  money: 3000, xp: 0, level: 1, owned: ['urbano'], truck: 'urbano', job: null, pos: null, name: 'Motorista', clock: 18.6,
+  money: 3000, xp: 0, level: 1, owned: ['urbano'], truck: 'urbano', job: null, pos: null, name: 'Motorista', clock: 15.5,
   stats: { deliveries: 0, km: 0, earned: 0, tons: 0, crashes: 0 },
-  settings: { quality: 'auto', volume: 0.7, fps: false, steer: 'wheel', camera: 0, time: 'cycle', gearbox: 'manual' },
+  settings: { quality: 'auto', volume: 0.7, fps: false, steer: 'wheel', camera: 0, time: 'cycle', gearbox: 'manual', gauge: 'analog', accent: 'amber', hud: 'normal' },
 };
 function loadSave() {
   try {
@@ -36,9 +36,9 @@ function save() {
 
 // ---------------- Qualidade gráfica ----------------
 const QUALITY = {
-  low: { pr: 1.0, minPr: 0.75, shadows: false, shadowSize: 0, tex: 512, aniso: 2, traffic: 10, fogNear: 160, fogFar: 560, far: 900 },
-  medium: { pr: 1.5, minPr: 0.85, shadows: true, shadowSize: 1024, tex: 1024, aniso: 4, traffic: 16, fogNear: 240, fogFar: 820, far: 1500 },
-  high: { pr: 2.0, minPr: 1.0, shadows: true, shadowSize: 2048, tex: 1024, aniso: 8, traffic: 24, fogNear: 320, fogFar: 1300, far: 2600 },
+  low: { pr: 1.0, minPr: 0.75, shadows: false, shadowSize: 0, tex: 512, aniso: 2, traffic: 10, fogNear: 150, fogFar: 650, far: 900, trees: 5000 },
+  medium: { pr: 1.5, minPr: 0.85, shadows: true, shadowSize: 1024, tex: 1024, aniso: 4, traffic: 16, fogNear: 260, fogFar: 1050, far: 1500, trees: 9000 },
+  high: { pr: 2.0, minPr: 1.0, shadows: true, shadowSize: 2048, tex: 1024, aniso: 8, traffic: 22, fogNear: 380, fogFar: 1600, far: 2600, trees: 14000 },
 };
 function detectQuality() {
   let r = '';
@@ -61,7 +61,7 @@ const Q = QUALITY[qName];
 
 // ---------------- Globais ----------------
 let renderer, scene, camera, world, rig, traffic, sun, sky, hemi, stars, headSpot;
-let show = null; // showroom
+let pmrem = null, envScene = null, envNight = -1, clouds = null;
 let night = 0;
 const audio = new Audio();
 audio.volume = S.settings.volume;
@@ -103,6 +103,7 @@ async function boot() {
   renderer.shadowMap.type = qName === 'high' ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap;
   const maxA = renderer.capabilities.getMaxAnisotropy();
   configureTextures(Q.tex, Math.min(maxA, Q.aniso));
+  setTruckQuality(qName);
 
   scene = new THREE.Scene();
   const skyCol = new THREE.Color(0xbcd6ea);
@@ -129,6 +130,7 @@ async function boot() {
   tex.road(); tex.intersection(); tex.grass(); tex.facade(0); tex.facade(1); tex.facade(2); tex.facade(3);
   await step(45, 'Construindo a cidade…');
   world = new World(scene, Q);
+  buildGraph(world);
   await step(70, 'Ligando o motor…');
   rig = new Rig(scene, TRUCK[S.truck] || TRUCKS[0], Q.shadows);
   if (qName !== 'low') {
@@ -142,7 +144,7 @@ async function boot() {
     rig.onModel(rig.model);
   }
   placeAtStart();
-  traffic = new Traffic(scene, Q.traffic);
+  traffic = new Traffic(scene, Q.traffic, world);
   buildMarkers();
   await step(85, 'Desenhando o mapa…');
   buildMapCanvas();
@@ -150,7 +152,7 @@ async function boot() {
   jobs = genJobs();
   setupInput();
   setupUI();
-  buildShowroom();
+  if (qName !== 'low') { pmrem = new THREE.PMREMGenerator(renderer); buildEnvScene(); }
   applyTime(S.clock);
   await step(100, 'Pronto!');
   renderer.compile(scene, camera);
@@ -165,7 +167,7 @@ const C_DAY = new THREE.Color(0xbcd6ea), C_DUSK = new THREE.Color(0xe39a6b), C_N
 const _c1 = new THREE.Color();
 function applyTime(h) {
   const mode = S.settings.time;
-  if (mode === 'day') h = 12; else if (mode === 'night') h = 23; else if (mode === 'dusk') h = 18.3;
+  if (mode === 'day') h = 12; else if (mode === 'night') h = 23; else if (mode === 'dusk') h = 17.7;
   const elev = Math.sin(((h - 6) / 12) * Math.PI); // >0 de dia
   const day = clamp(elev * 2.4 + 0.25, 0, 1);
   const dusk = clamp(1 - Math.abs(elev) * 4, 0, 1) * (elev > -0.25 ? 1 : 0);
@@ -183,6 +185,8 @@ function applyTime(h) {
   stars.material.opacity = clamp(night * 1.3 - 0.3, 0, 1);
   stars.visible = stars.material.opacity > 0.01;
   renderer.toneMappingExposure = 1.0 + night * 0.25;
+  clouds.material.color.setRGB(1, 1, 1).lerp(new THREE.Color(0.12, 0.14, 0.2), night).lerp(new THREE.Color(1.1, 0.75, 0.6), dusk * 0.7);
+  updateEnv();
   world.setNight(night);
   traffic.setNight(night);
   const want = lightsManual !== null ? lightsManual : night > 0.35;
@@ -204,91 +208,64 @@ function buildStars() {
   sky.add(stars);
 }
 
-// ---------------- Showroom ----------------
-function buildShowroom() {
-  const sc = new THREE.Scene();
-  sc.background = new THREE.Color(0x06101c);
-  sc.fog = new THREE.Fog(0x06101c, 30, 70);
-  const cam2 = new THREE.PerspectiveCamera(38, window.innerWidth / window.innerHeight, 0.3, 200);
-  // piso brilhante (reflexo falso: modelo espelhado sob piso semitransparente)
-  const floor = new THREE.Mesh(new THREE.CircleGeometry(40, 48), new THREE.MeshPhongMaterial({ color: 0x0d2033, shininess: 120, specular: 0x4aa3d8, transparent: true, opacity: 0.86 }));
-  floor.rotation.x = -Math.PI / 2;
-  sc.add(floor);
-  const back = new THREE.Mesh(new THREE.CylinderGeometry(24, 24, 22, 40, 1, true, Math.PI * 0.55, Math.PI * 0.9), new THREE.MeshBasicMaterial({ map: tex.backdrop(), side: THREE.BackSide }));
-  back.position.y = 10;
-  sc.add(back);
-  // faixas de neon
-  const neonM = new THREE.MeshBasicMaterial({ color: 0xdff6ff });
-  const glowM = new THREE.MeshBasicMaterial({ map: tex.glow(), color: 0x5fc8ff, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending });
-  for (const y of [2.1, 6.4]) {
-    const bar = new THREE.Mesh(new THREE.BoxGeometry(60, 0.18, 0.1), neonM);
-    bar.position.set(0, y, -14);
-    sc.add(bar);
-    const gl = new THREE.Mesh(new THREE.PlaneGeometry(64, 3.2), glowM);
-    gl.position.set(0, y, -13.9);
-    sc.add(gl);
+// ---------------- Reflexos (mapa de ambiente) ----------------
+function buildEnvScene() {
+  envScene = new THREE.Scene();
+  const g = new THREE.SphereGeometry(10, 24, 12);
+  const col = [];
+  const p = g.attributes.position;
+  for (let i = 0; i < p.count; i++) col.push(1, 1, 1);
+  g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  envScene.userData.sky = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide }));
+  envScene.add(envScene.userData.sky);
+}
+const _ec = new THREE.Color(), _eg = new THREE.Color();
+function updateEnv() {
+  if (!pmrem || Math.abs(night - envNight) < 0.08) return;
+  envNight = night;
+  const g = envScene.userData.sky.geometry, p = g.attributes.position, c = g.attributes.color;
+  const top = new THREE.Color(0x4a86c5).lerp(new THREE.Color(0x070b16), night);
+  const hor = scene.background.clone();
+  const gnd = new THREE.Color(0x4f5a3a).lerp(new THREE.Color(0x07090c), night);
+  for (let i = 0; i < p.count; i++) {
+    const y = p.getY(i) / 10;
+    if (y >= 0) _ec.copy(hor).lerp(top, Math.min(1, y * 1.6));
+    else _ec.copy(hor).lerp(gnd, Math.min(1, -y * 3));
+    // "sol" quente para brilho no capô
+    if (night < 0.5 && y > 0.3 && p.getX(i) > 4 && p.getZ(i) > 2) _ec.lerp(_eg.setRGB(2.2, 2.0, 1.7), 0.5);
+    c.setXYZ(i, _ec.r, _ec.g, _ec.b);
   }
-  const ring = new THREE.Mesh(new THREE.RingGeometry(6.4, 6.6, 64), new THREE.MeshBasicMaterial({ color: 0x3fb5ff, transparent: true, opacity: 0.5 }));
-  ring.rotation.x = -Math.PI / 2;
-  ring.position.y = 0.02;
-  sc.add(ring);
-  sc.add(new THREE.HemisphereLight(0x9fd3ff, 0x0b1626, 1.1));
-  const key = new THREE.DirectionalLight(0xffffff, 2.4);
-  key.position.set(8, 10, 10);
-  sc.add(key);
-  const rim = new THREE.DirectionalLight(0x5fc8ff, 2.2);
-  rim.position.set(-6, 5, -10);
-  sc.add(rim);
-  const fill = new THREE.PointLight(0xff3050, 30, 25);
-  fill.position.set(-7, 2, 4);
-  sc.add(fill);
-  const turn = new THREE.Group();
-  sc.add(turn);
-  show = { scene: sc, cam: cam2, turn, idx: Math.max(0, TRUCKS.findIndex((t) => t.id === S.truck)), yaw: -0.6, drag: null };
-  setShowTruck(show.idx);
+  c.needsUpdate = true;
+  const rt = pmrem.fromScene(envScene, 0.02);
+  if (scene.environment) scene.environment.dispose();
+  scene.environment = rt.texture;
 }
 
-function setShowTruck(i) {
-  show.idx = (i + TRUCKS.length) % TRUCKS.length;
-  const def = TRUCKS[show.idx];
-  show.turn.clear();
-  const md = buildTruck(def);
-  md.blob.visible = false;
-  const len = md.zf - md.rearEnd;
-  md.root.position.z = -(md.zf + md.rearEnd) / 2;
-  const holder = new THREE.Group();
-  holder.add(md.root);
-  const mirror = md.root.clone();
-  mirror.scale.y = -1;
-  holder.add(mirror);
-  show.turn.add(holder);
-  show.len = len;
-  renderShowInfo();
+// ---------------- Menu inicial (cena 3D na garagem) ----------------
+function titleCamera(dt) {
+  cam.tt = (cam.tt || 0) + dt;
+  const t = cam.tt * 0.08 + cam.orbit;
+  const md = rig.model;
+  const fx = Math.sin(rig.h), fz = Math.cos(rig.h);
+  const cx = rig.x + fx * md.wb * 0.4, cz = rig.z + fz * md.wb * 0.4;
+  const dist = 11 + (rig.trailer ? 6 : 0);
+  const ang = rig.h + 0.7 + Math.sin(t) * 0.9;
+  camera.position.set(cx + Math.sin(ang) * dist, 1.6 + Math.sin(t * 0.7) * 0.6, cz + Math.cos(ang) * dist);
+  // olha um pouco à direita do caminhão para dar espaço ao menu
+  const rx = Math.cos(ang), rz = -Math.sin(ang);
+  camera.lookAt(cx - rx * 3.2, 1.9, cz - rz * 3.2);
+  camera.fov = 50;
+  camera.updateProjectionMatrix();
+  if (Q.shadows) { sun.target.position.set(rig.x, 0, rig.z); sun.position.set(rig.x + 150, 170, rig.z + 95); }
+  sky.position.copy(camera.position);
 }
 
-function renderShowInfo() {
-  const t = TRUCKS[show.idx];
-  const owned = S.owned.includes(t.id), cur = S.truck === t.id;
-  $('tiname').textContent = t.name;
-  $('tispecs').innerHTML = `<b>${t.hp}</b> cv • <b>${t.cap}</b> t • <b>${t.vmax}</b> km/h • ${t.rigid ? 'Rígido baú' : 'Cavalo ' + t.cfg}`;
-  let b;
-  if (cur) b = '<span class="tibtn"><span>EM USO ✓</span></span>';
-  else if (owned) b = `<button class="tibtn" data-act="use" data-arg="${t.id}"><span>USAR ESTE</span></button>`;
-  else if (t.level > S.level) b = `<span class="tibtn lock"><span>🔒 NÍVEL ${t.level}</span></span>`;
-  else b = `<button class="tibtn buy" data-act="buy" data-arg="${t.id}" ${S.money < t.price ? 'disabled style="opacity:.5"' : ''}><span>COMPRAR ${fmt(t.price)}</span></button>`;
-  $('tiaction').innerHTML = b;
-}
-
-function updateShowroom(dt) {
-  if (!show.drag) show.yaw += dt * 0.25;
-  show.turn.rotation.y = show.yaw;
-  const w = window.innerWidth, h = window.innerHeight;
-  show.cam.aspect = w / h;
-  const d = 11 + show.len * 1.0;
-  // caminhão à direita do centro, deixando espaço para o painel esquerdo
-  show.cam.position.set(-d * 0.2, 3.0, d);
-  show.cam.lookAt(-d * 0.2 - d * 0.1, 1.6, 0);
-  show.cam.updateProjectionMatrix();
+function buildClouds() {
+  const g = new THREE.SphereGeometry(Q.far * 0.85, 32, 8, 0, Math.PI * 2, 0, Math.PI * 0.42);
+  clouds = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ map: tex.clouds(), transparent: true, depthWrite: false, fog: false, side: THREE.BackSide, opacity: 0.9 }));
+  clouds.material.map.repeat.set(3, 1);
+  clouds.renderOrder = -0.5;
+  sky.add(clouds);
 }
 
 function buildSky() {
@@ -308,12 +285,16 @@ function buildSky() {
   sky.renderOrder = -1;
   scene.add(sky);
   buildStars();
+  buildClouds();
 }
 
 function placeAtStart() {
+  rig.world = world;
   if (S.pos && isFinite(S.pos.x) && world.resolveCircle({ x: S.pos.x, z: S.pos.z }, 1.5, _o) <= 0) { rig.place(S.pos.x, S.pos.z, S.pos.h); return; }
   const g = world.depots.garagem.zone;
   rig.place(g.x - 8, g.z, Math.PI / 2);
+  rig.world = world;
+  rig.sync();
 }
 
 function buildMarkers() {
@@ -582,15 +563,14 @@ function setupInput() {
   // arrastar na tela gira a câmera
   const cv = $('gl');
   let drag = null;
-  cv.addEventListener('pointerdown', (e) => { drag = { x: e.clientX, id: e.pointerId }; if (state === 'title') show.drag = true; });
+  cv.addEventListener('pointerdown', (e) => { drag = { x: e.clientX, id: e.pointerId }; });
   window.addEventListener('pointermove', (e) => {
     if (!drag || e.pointerId !== drag.id) return;
-    if (state === 'title') { show.yaw += (e.clientX - drag.x) * 0.01; drag.x = e.clientX; return; }
     cam.orbit += (e.clientX - drag.x) * 0.008;
     drag.x = e.clientX;
     cam.orbitT = 1.8;
   });
-  const end = (e) => { if (drag && e.pointerId === drag.id) { drag = null; if (show) show.drag = null; } };
+  const end = (e) => { if (drag && e.pointerId === drag.id) drag = null; };
   window.addEventListener('pointerup', end);
   window.addEventListener('pointercancel', end);
 
@@ -668,6 +648,7 @@ function cycleCamera() {
 // ---------------- Câmera ----------------
 const _p = { x: 0, z: 0 }, _o = { x: 0, z: 0 };
 function updateCamera(dt, instant = false) {
+  if (Math.hypot(cam.pos.x - rig.x, cam.pos.z - rig.z) > 150) instant = true;
   const md = rig.model;
   if (cam.orbitT > 0) cam.orbitT -= dt;
   else cam.orbit *= Math.max(0, 1 - dt * 2.5);
@@ -680,9 +661,9 @@ function updateCamera(dt, instant = false) {
   const fx = Math.sin(rig.h), fz = Math.cos(rig.h);
   if (cam.mode === 2) {
     const ex = rig.x + fx * (md.zf - 0.7) - Math.cos(rig.h) * 0.45, ez = rig.z + fz * (md.zf - 0.7) + Math.sin(rig.h) * 0.45;
-    camera.position.set(ex, (rig.def.id === 'urbano' ? 2.3 : 2.75), ez);
+    camera.position.set(ex, rig.y + (rig.def.id === 'urbano' ? 2.3 : 2.75), ez);
     const lx = Math.sin(cam.yaw), lz = Math.cos(cam.yaw);
-    camera.lookAt(ex + lx * 20, 2.0, ez + lz * 20);
+    camera.lookAt(ex + lx * 20, rig.y + 2.0 + Math.sin(rig.pitch) * 20, ez + lz * 20);
     camera.fov = 70;
   } else {
     const len = rig.trailer ? rig.trailer.Lt : 0;
@@ -694,16 +675,17 @@ function updateCamera(dt, instant = false) {
     // aproxima a câmera se ficar dentro de um prédio
     for (let i = 0; i < 6; i++) {
       _p.x = px - bx * dist; _p.z = pz - bz * dist;
-      if (world.resolveCircle(_p, 0.6, _o) <= 0 || hgt > 30) break;
+      if (world.resolveCircle(_p, 0.6, _o, true) <= 0 || hgt > 30) break;
       dist *= 0.8;
     }
     const tx = px - bx * dist, tz = pz - bz * dist;
     const kp = instant ? 1 : 1 - Math.exp(-dt * 8);
     cam.pos.x += (tx - cam.pos.x) * kp;
     cam.pos.z += (tz - cam.pos.z) * kp;
-    cam.pos.y += (hgt - cam.pos.y) * kp;
+    const ty = rig.y + hgt;
+    cam.pos.y += (ty - cam.pos.y) * kp;
     camera.position.copy(cam.pos);
-    camera.lookAt(px, cam.mode === 1 ? 1.5 : 1.3, pz);
+    camera.lookAt(px, rig.y + (cam.mode === 1 ? 1.5 : 1.3), pz);
     camera.fov = 58 + Math.min(8, rig.speedKmh * 0.08);
   }
   camera.updateProjectionMatrix();
@@ -716,96 +698,77 @@ function updateCamera(dt, instant = false) {
 }
 
 // ---------------- Mapa ----------------
-let mapCanvas, mapScale;
-const MAP_PAD = 70;
+let MP = null; // camadas vetoriais do mapa (coordenadas do mundo)
 function buildMapCanvas() {
-  const size = 1024;
-  mapCanvas = document.createElement('canvas');
-  mapCanvas.width = mapCanvas.height = size;
-  const ctx = mapCanvas.getContext('2d');
-  const W = 2 * (HALF + MAP_PAD);
-  mapScale = size / W;
-  const m = (v) => (v + HALF + MAP_PAD) * mapScale;
-  ctx.fillStyle = '#3f5d36';
-  ctx.fillRect(0, 0, size, size);
-  ctx.fillStyle = '#2d6f93';
-  ctx.fillRect(0, m(HALF + 60), size, size);
-  const zc = { downtown: '#8b95a3', residential: '#a8a294', park: '#4f8a3a', farm: '#86803f', industrial: '#8d8473', port: '#7b8790' };
-  for (let bx = 0; bx < GRID; bx++)
-    for (let bz = 0; bz < GRID; bz++) {
-      ctx.fillStyle = zc[zoneOf(bx, bz)];
-      ctx.fillRect(m(roadCoord(bx) + 10), m(roadCoord(bz) + 10), (BLOCK - 20) * mapScale, (BLOCK - 20) * mapScale);
-    }
-  for (const L of LOCATIONS) {
-    const d = world.depots[L.id];
-    const [x0, z0, x1, z1] = d.lot;
-    ctx.fillStyle = '#cfc9bd';
-    ctx.fillRect(m(x0), m(z0), (x1 - x0) * mapScale, (z1 - z0) * mapScale);
+  const P = () => new Path2D();
+  MP = { blocks: {}, lots: P(), roads: P(), hw: P(), river: P(), fields: P(), hills: P() };
+  const zc = { downtown: '#8b95a3', residential: '#a8a294', town: '#b4ab98', park: '#4f8a3a', industrial: '#8d8473', port: '#7b8790' };
+  for (const c of CITIES) {
+    for (let bx = 0; bx < c.nx; bx++)
+      for (let bz = 0; bz < c.nz; bz++) {
+        const z = zoneOf(c, bx, bz);
+        (MP.blocks[zc[z]] = MP.blocks[zc[z]] || P()).rect(c.x0 + bx * BLOCK + 10, c.z0 + bz * BLOCK + 10, BLOCK - 20, BLOCK - 20);
+      }
+    for (let i = 0; i <= c.nx; i++) { MP.roads.moveTo(c.x0 + i * BLOCK, c.z0); MP.roads.lineTo(c.x0 + i * BLOCK, cz1(c)); }
+    for (let j = 0; j <= c.nz; j++) { MP.roads.moveTo(c.x0, c.z0 + j * BLOCK); MP.roads.lineTo(cx1(c), c.z0 + j * BLOCK); }
   }
-  ctx.strokeStyle = '#2b2d31';
-  ctx.lineWidth = ROAD_W * mapScale;
-  ctx.lineCap = 'square';
-  for (let i = 0; i <= GRID; i++) {
-    const c = m(roadCoord(i));
-    ctx.beginPath(); ctx.moveTo(c, m(-HALF)); ctx.lineTo(c, m(HALF)); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(m(-HALF), c); ctx.lineTo(m(HALF), c); ctx.stroke();
-  }
-  ctx.strokeStyle = 'rgba(232,185,35,0.55)';
-  ctx.lineWidth = 1;
-  for (let i = 0; i <= GRID; i++) {
-    const c = m(roadCoord(i));
-    ctx.beginPath(); ctx.moveTo(c, m(-HALF)); ctx.lineTo(c, m(HALF)); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(m(-HALF), c); ctx.lineTo(m(HALF), c); ctx.stroke();
-  }
+  for (const L of LOCATIONS) { const [x0, z0, x1, z1] = world.depots[L.id].lot; MP.lots.rect(x0, z0, x1 - x0, z1 - z0); }
+  for (const h of world.hws) { MP.hw.moveTo(h.x[0], h.z[0]); for (let i = 1; i < h.n; i += 2) MP.hw.lineTo(h.x[i], h.z[i]); MP.hw.lineTo(h.x[h.n - 1], h.z[h.n - 1]); }
+  const R = world.river;
+  MP.river.moveTo(R.x[0], R.z[0]);
+  for (let i = 1; i < R.n; i++) MP.river.lineTo(R.x[i], R.z[i]);
+  for (const f of world.fields) MP.fields.rect(f.x0, f.z0, f.x1 - f.x0, f.z1 - f.z0);
+  for (const h of world.hills) { MP.hills.moveTo(h.x + h.r * 0.85, h.z); MP.hills.arc(h.x, h.z, h.r * 0.85, 0, Math.PI * 2); }
 }
 
-function mapIcon(ctx, x, y, color, r, label) {
+function drawWorldMap(ctx, k) {
+  ctx.fillStyle = '#3d5a34';
+  ctx.fillRect(WORLD.x0 - 3000, WORLD.z0 - 3000, 12000, 12000);
+  ctx.fillStyle = '#34502d'; ctx.fill(MP.hills);
+  ctx.fillStyle = '#9a9356'; ctx.fill(MP.fields);
+  ctx.fillStyle = '#2d6f93'; ctx.fillRect(WORLD.x0 - 3000, SEA_Z, 12000, 4000);
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  ctx.strokeStyle = '#2d6f93'; ctx.lineWidth = Math.max(RIVER_W, 3 / k); ctx.stroke(MP.river);
+  for (const c in MP.blocks) { ctx.fillStyle = c; ctx.fill(MP.blocks[c]); }
+  ctx.fillStyle = '#cfc9bd'; ctx.fill(MP.lots);
+  ctx.strokeStyle = '#26282c'; ctx.lineWidth = Math.max(ROAD_W, 3 / k); ctx.lineCap = 'square'; ctx.stroke(MP.roads);
+  ctx.lineCap = 'round';
+  ctx.strokeStyle = '#1d1f22'; ctx.lineWidth = Math.max(HW_HALF * 2 + 4, 4.5 / k); ctx.stroke(MP.hw);
+  ctx.strokeStyle = '#4a4d52'; ctx.lineWidth = Math.max(HW_HALF * 2, 3 / k); ctx.stroke(MP.hw);
+}
+
+function mapIcon(ctx, x, y, color, r) {
   ctx.fillStyle = color;
   ctx.strokeStyle = '#fff';
-  ctx.lineWidth = 2;
+  ctx.lineWidth = r * 0.3;
   ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.fill(); ctx.stroke();
-  if (label) {
-    ctx.font = `700 ${r * 1.1}px sans-serif`;
-    ctx.fillStyle = '#fff';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(label, x, y + 1);
-  }
 }
 
 function drawMinimap() {
   const cv = $('minimap'), ctx = cv.getContext('2d');
   const W = cv.width, H = cv.height;
-  const zoom = 1.25;
+  const k = 0.75; // px por metro
   ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.fillStyle = '#3f5d36';
-  ctx.fillRect(0, 0, W, H);
   ctx.translate(W / 2, H * 0.62);
   ctx.rotate(Math.PI + rig.h);
-  ctx.scale(zoom, zoom);
-  const m = (v) => (v + HALF + MAP_PAD) * mapScale;
-  ctx.translate(-m(rig.x), -m(rig.z));
-  ctx.imageSmoothingEnabled = true;
-  ctx.drawImage(mapCanvas, 0, 0);
+  ctx.scale(k, k);
+  ctx.translate(-rig.x, -rig.z);
+  drawWorldMap(ctx, k);
   if (route && S.job) {
-    ctx.strokeStyle = '#ffb703';
-    ctx.lineWidth = 7 / zoom;
-    ctx.lineJoin = 'round';
+    ctx.strokeStyle = accentHex();
+    ctx.lineWidth = 8 / k;
     ctx.beginPath();
-    route.path.forEach((p, i) => (i ? ctx.lineTo(m(p.x), m(p.z)) : ctx.moveTo(m(p.x), m(p.z))));
+    route.path.forEach((p, i) => (i ? ctx.lineTo(p.x, p.z) : ctx.moveTo(p.x, p.z)));
     ctx.stroke();
   }
+  const tgt = currentTarget();
   for (const L of LOCATIONS) {
     const d = world.depots[L.id];
-    const tgt = currentTarget();
-    mapIcon(ctx, m(d.zone.x), m(d.zone.z), tgt === d ? '#ffb703' : L.id === 'garagem' ? '#2f6fde' : 'rgba(30,30,30,0.85)', (tgt === d ? 9 : 6) / zoom);
+    mapIcon(ctx, d.zone.x, d.zone.z, tgt === d ? accentHex() : L.id === 'garagem' ? '#2f6fde' : 'rgba(30,30,30,0.85)', (tgt === d ? 9 : 6) / k);
   }
-  for (const c of traffic.cars) {
-    ctx.fillStyle = 'rgba(255,255,255,0.65)';
-    ctx.fillRect(m(c.x) - 1.5, m(c.z) - 1.5, 3, 3);
-  }
+  ctx.fillStyle = 'rgba(255,255,255,0.7)';
+  for (const c of traffic.cars) if (c.mode) ctx.fillRect(c.x - 2 / k, c.z - 2 / k, 4 / k, 4 / k);
   ctx.setTransform(1, 0, 0, 1, 0, 0);
-  // jogador
   ctx.translate(W / 2, H * 0.62);
   ctx.fillStyle = '#3ee07a';
   ctx.strokeStyle = '#0b1a10';
@@ -818,38 +781,40 @@ function drawMinimap() {
 function openMap() {
   const bm = $('bigmap'), cv = $('bigmapc');
   bm.classList.remove('hidden');
-  const s = Math.min(window.innerWidth * 0.96, window.innerHeight * 0.94);
   const dpr = Math.min(2, window.devicePixelRatio || 1);
-  cv.width = cv.height = s * dpr;
-  cv.style.width = cv.style.height = s + 'px';
+  const ww = window.innerWidth * 0.96, wh = window.innerHeight * 0.92;
+  const Wm = WORLD.x1 - WORLD.x0, Hm = WORLD.z1 - WORLD.z0;
+  const sc = Math.min(ww / Wm, wh / Hm);
+  cv.width = Wm * sc * dpr; cv.height = Hm * sc * dpr;
+  cv.style.width = Wm * sc + 'px'; cv.style.height = Hm * sc + 'px';
   const ctx = cv.getContext('2d');
-  const k = cv.width / mapCanvas.width;
-  ctx.drawImage(mapCanvas, 0, 0, cv.width, cv.height);
-  const m = (v) => (v + HALF + MAP_PAD) * mapScale * k;
+  const k = sc * dpr;
+  ctx.setTransform(k, 0, 0, k, -WORLD.x0 * k, -WORLD.z0 * k);
+  drawWorldMap(ctx, k);
   if (route && S.job) {
-    ctx.strokeStyle = '#ffb703';
-    ctx.lineWidth = 5 * dpr;
+    ctx.strokeStyle = accentHex(); ctx.lineWidth = 5 / k;
     ctx.beginPath();
-    route.path.forEach((p, i) => (i ? ctx.lineTo(m(p.x), m(p.z)) : ctx.moveTo(m(p.x), m(p.z))));
+    route.path.forEach((p, i) => (i ? ctx.lineTo(p.x, p.z) : ctx.moveTo(p.x, p.z)));
     ctx.stroke();
   }
   const tgt = currentTarget();
+  ctx.textAlign = 'center';
+  const label = (txt, x, y, size, color = '#fff') => {
+    ctx.font = `700 ${size / k}px sans-serif`;
+    ctx.lineWidth = 3 / k; ctx.strokeStyle = 'rgba(0,0,0,0.85)';
+    ctx.strokeText(txt, x, y); ctx.fillStyle = color; ctx.fillText(txt, x, y);
+  };
+  for (const c of CITIES) label(c.name.toUpperCase(), (c.x0 + cx1(c)) / 2, c.z0 - 40, 15 * dpr, '#ffe08a');
+  for (const h of world.hws) { const m = (h.n / 2) | 0; label(h.id, h.x[m], h.z[m] - 20, 10 * dpr, '#cfe8ff'); }
   for (const L of LOCATIONS) {
     const d = world.depots[L.id];
-    const x = m(d.zone.x), y = m(d.zone.z);
-    mapIcon(ctx, x, y, tgt === d ? '#ffb703' : L.id === 'garagem' ? '#2f6fde' : '#222', 8 * dpr);
-    ctx.font = `700 ${11 * dpr}px sans-serif`;
-    ctx.textAlign = 'center';
-    ctx.lineWidth = 3 * dpr;
-    ctx.strokeStyle = 'rgba(0,0,0,0.8)';
-    ctx.strokeText(L.name, x, y - 14 * dpr);
-    ctx.fillStyle = '#fff';
-    ctx.fillText(L.name, x, y - 14 * dpr);
+    mapIcon(ctx, d.zone.x, d.zone.z, tgt === d ? accentHex() : L.id === 'garagem' ? '#2f6fde' : '#222', 6 * dpr / k);
+    label(L.name, d.zone.x, d.zone.z - 14 * dpr / k, 10 * dpr);
   }
   ctx.save();
-  ctx.translate(m(rig.x), m(rig.z));
+  ctx.translate(rig.x, rig.z);
   ctx.rotate(Math.PI + rig.h);
-  ctx.scale(dpr, dpr);
+  ctx.scale(dpr / k, dpr / k);
   ctx.fillStyle = '#3ee07a'; ctx.strokeStyle = '#000'; ctx.lineWidth = 2;
   ctx.beginPath(); ctx.moveTo(0, -12); ctx.lineTo(9, 10); ctx.lineTo(0, 5); ctx.lineTo(-9, 10); ctx.closePath(); ctx.fill(); ctx.stroke();
   ctx.restore();
@@ -867,8 +832,10 @@ function setupUI() {
     if (a === 'jobs' || a === 'garage' || a === 'settings') openModal(a);
     else if (a === 'menu' || a === 'pause') openModal('settings');
     else if (a === 'rename') { const n = prompt('Nome do motorista:', S.name); if (n && n.trim()) { S.name = n.trim().slice(0, 18); save(); showTitle(); } }
-    else if (a === 'prevtruck') setShowTruck(show.idx - 1);
-    else if (a === 'nexttruck') setShowTruck(show.idx + 1);
+    else if (a === 'map') openMap();
+    else if (a === 'gauge') { S.settings.gauge = arg; save(); renderTab('settings'); }
+    else if (a === 'accent') { S.settings.accent = arg; applyTheme(); save(); renderTab('settings'); }
+    else if (a === 'hudsize') { S.settings.hud = arg; applyTheme(); save(); renderTab('settings'); }
     else if (a === 'gearbox') { S.settings.gearbox = arg; $('gearsel').classList.toggle('hidden', arg === 'auto'); save(); renderTab('settings'); }
     else if (a === 'timemode') { S.settings.time = arg; save(); applyTime(S.clock); renderTab('settings'); }
     else if (a === 'tomenu') { closeModal(); save(); showTitle(); }
@@ -894,6 +861,7 @@ function setupUI() {
     if (e.target.id === 'vol') { S.settings.volume = +e.target.value; audio.setVolume(S.settings.volume); save(); }
   });
   applySteerMode();
+  applyTheme();
   setGear('D');
   $('gearsel').classList.toggle('hidden', S.settings.gearbox === 'auto');
   $('play').addEventListener('click', () => {
@@ -919,21 +887,18 @@ function applySteerMode() {
 
 function showTitle() {
   state = 'title';
+  cam.tt = 0;
   $('hud').classList.add('hidden');
   $('title').classList.remove('hidden');
   $('pname').textContent = S.name;
-  $('plvl').textContent = `Nv ${S.level} / XP ${S.xp}`;
-  const next = CARGOS.find((c) => c.lvl > S.level);
-  const rows = [
-    ['📦', 'Entregas feitas', S.stats.deliveries],
-    ['🛣️', 'Distância rodada', S.stats.km.toFixed(1) + ' km'],
-    ['⚖️', 'Toneladas levadas', S.stats.tons.toFixed(0) + ' t'],
-    ['💰', 'Total faturado', fmt(S.stats.earned)],
-    ['🔓', next ? `Próxima: ${next.name}` : 'Todas as cargas', next ? `Nv ${next.lvl}` : '✓'],
-  ];
-  $('perf').innerHTML = rows.map((r) => `<div class="prow"><span class="n">${r[0]}</span><span class="l">${r[1]}</span><span class="v">${r[2]}</span></div>`).join('');
-  $('strip').innerHTML = `<div><span>Saldo</span><b>${fmt(S.money)}</b></div><div><span>Nível</span><b>${S.level}</b></div><div><span>Caminhões</span><b>${S.owned.length}</b></div><div><span>Gráficos</span><b>${qName === 'low' ? 'Leve' : qName === 'medium' ? 'Médio' : 'Ultra'}</b></div>`;
-  if (show) setShowTruck(Math.max(0, TRUCKS.findIndex((t) => t.id === S.truck)));
+  $('plvl').textContent = `Nível ${S.level} • ${S.xp}/${xpForLevel(S.level)} XP`;
+  $('tmoney').textContent = fmt(S.money);
+  const t = rig.def;
+  $('tiname').textContent = t.name;
+  $('tispecs').innerHTML = `<span>${t.hp} cv</span><span>${t.cap} t</span><span>${t.vmax} km/h</span><span>${t.rigid ? 'Rígido' : 'Cavalo ' + t.cfg}</span>`;
+  const j = S.job;
+  $('tjob').innerHTML = j ? `${CARGO[j.cargo].icon} ${CARGO[j.cargo].name} → <b>${LOC[j.phase === 'pickup' ? j.from : j.to].name}</b>` : 'Nenhum frete ativo';
+  $('tstats').innerHTML = `<div><b>${S.stats.deliveries}</b><small>entregas</small></div><div><b>${S.stats.km.toFixed(0)}</b><small>km</small></div><div><b>${S.stats.tons.toFixed(0)}</b><small>toneladas</small></div><div><b>${S.owned.length}</b><small>caminhões</small></div>`;
 }
 
 function openModal(tab) {
@@ -1070,21 +1035,41 @@ function settingsHTML() {
       ${seg('gearbox', S.settings.gearbox, [['manual', 'D / N / R'], ['auto', 'Automático']])}</div>
     <div class="set"><div><b>Horário</b><br><small style="opacity:.7">Ciclo de dia e noite com faróis e iluminação urbana</small></div>
       ${seg('timemode', S.settings.time, [['cycle', 'Ciclo'], ['day', 'Dia'], ['dusk', 'Entardecer'], ['night', 'Noite']])}</div>
+    <div class="set"><div><b>Velocímetro</b><br><small style="opacity:.7">Estilo dos mostradores do painel</small></div>
+      ${seg('gauge', S.settings.gauge, [['analog', 'Analógico'], ['digital', 'Digital'], ['sport', 'Esportivo'], ['classic', 'Clássico']])}</div>
+    <div class="set"><div><b>Cor do painel</b><br><small style="opacity:.7">Cor de destaque da interface</small></div>
+      ${seg('accent', S.settings.accent, [['amber', 'Âmbar'], ['blue', 'Azul'], ['green', 'Verde'], ['red', 'Vermelho'], ['purple', 'Roxo']])}</div>
+    <div class="set"><div><b>Tamanho dos controles</b></div>
+      ${seg('hudsize', S.settings.hud, [['small', 'Pequeno'], ['normal', 'Normal'], ['large', 'Grande']])}</div>
     <div class="set"><b>Volume</b><input id="vol" type="range" min="0" max="1" step="0.05" value="${S.settings.volume}"></div>
     <div class="set"><b>Mostrar FPS</b>${seg('fps', S.settings.fps ? 1 : 0, [[1, 'Sim'], [0, 'Não']])}</div>
     <div class="set"><div><b>Desatolar</b><br><small style="opacity:.7">Leva o caminhão de volta para a rua mais próxima</small></div><button class="btn alt" data-act="rescue" style="margin:0">Reposicionar</button></div>
     <div class="set"><div><b>Controles no teclado</b><br><small style="opacity:.7">WASD/setas • Espaço freio • E motor • R ré • N neutro • P freio de mão • L faróis • H buzina • C câmera • M mapa</small></div></div>
-    <div class="set"><b>Menu principal</b><button class="btn alt" data-act="tomenu" style="margin:0">Voltar ao showroom</button></div>
+    <div class="set"><b>Menu principal</b><button class="btn alt" data-act="tomenu" style="margin:0">Voltar ao menu</button></div>
     <div class="set"><b>Apagar progresso</b><button class="btn danger" data-act="reset" style="margin:0">Resetar</button></div>`;
 }
 
 function rescue() {
-  const ix = clamp(Math.round((rig.x + HALF) / BLOCK), 0, GRID), iz = clamp(Math.round((rig.z + HALF) / BLOCK), 0, GRID);
-  const x = roadCoord(ix), z = roadCoord(iz);
-  const dx = Math.abs(rig.x - x), dz = Math.abs(rig.z - z);
-  if (dx < dz) rig.place(x + 5, clamp(rig.z, -HALF, HALF), 0);
-  else rig.place(clamp(rig.x, -HALF, HALF), z - 5, Math.PI / 2);
+  // volta para a via mais próxima
+  const q = world.hw(rig.x, rig.z);
+  if (q && !world.inArea(rig.x, rig.z, 0)) {
+    const h = q.o;
+    rig.place(q.x - h.dz[q.i] * 3.5, q.z + h.dx[q.i] * 3.5, Math.atan2(h.dx[q.i], h.dz[q.i]));
+  } else {
+    const p = { x: rig.x, z: rig.z };
+    for (let i = 0; i < 40; i++) { const pen = world.resolveCircle(p, 2.5, _o); if (pen <= 0) break; p.x += _o.x * 1.2 + (Math.random() - 0.5); p.z += _o.z * 1.2 + (Math.random() - 0.5); }
+    rig.place(p.x, p.z, rig.h);
+  }
   updateCamera(0, true);
+}
+
+const ACCENTS = { amber: '#f5a623', blue: '#2f8cff', green: '#22b573', red: '#e3243b', purple: '#9b5cff' };
+const accentHex = () => ACCENTS[S.settings.accent] || ACCENTS.amber;
+function applyTheme() {
+  const a = accentHex();
+  document.documentElement.style.setProperty('--red', a);
+  document.documentElement.style.setProperty('--red2', a);
+  document.documentElement.style.setProperty('--hud', { small: 0.82, normal: 1, large: 1.18 }[S.settings.hud] || 1);
 }
 
 function toast(html, ms = 2600) {
@@ -1096,22 +1081,64 @@ function toast(html, ms = 2600) {
 }
 
 // ---------------- HUD ----------------
+let hudT = 0;
 function drawGauge(id, val, max, majors, label, center, sub, redFrom) {
   const cv = $(id), ctx = cv.getContext('2d');
   const W = cv.width, c = W / 2, R = W * 0.46;
+  const st = S.settings.gauge, acc = accentHex();
   ctx.clearRect(0, 0, W, W);
   const a0 = Math.PI * 0.75, a1 = Math.PI * 2.25;
   const ang = (v) => a0 + (a1 - a0) * clamp(v / max, 0, 1);
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  if (st === 'digital') {
+    // painel digital: segmentos + número grande
+    ctx.fillStyle = 'rgba(6,10,16,0.88)';
+    ctx.beginPath(); ctx.arc(c, c, R, 0, 7); ctx.fill();
+    ctx.lineWidth = 3; ctx.strokeStyle = acc; ctx.stroke();
+    const n = 24, f = clamp(val / max, 0, 1);
+    for (let i = 0; i < n; i++) {
+      const a = a0 + ((a1 - a0) * (i + 0.5)) / n;
+      ctx.strokeStyle = i / n < f ? (redFrom && (i / n) * max >= redFrom ? '#ff3b4e' : acc) : 'rgba(255,255,255,0.1)';
+      ctx.lineWidth = W * 0.05;
+      ctx.beginPath(); ctx.arc(c, c, R * 0.8, a - 0.05, a + 0.05); ctx.stroke();
+    }
+    ctx.fillStyle = '#e8fff8';
+    ctx.font = `700 ${W * 0.24}px monospace`;
+    ctx.fillText(center, c, c);
+    ctx.font = `600 ${W * 0.06}px sans-serif`; ctx.fillStyle = acc;
+    ctx.fillText(sub, c, c + W * 0.17);
+    return;
+  }
+  if (st === 'sport') {
+    // anel de progresso grosso
+    ctx.fillStyle = 'rgba(10,12,16,0.85)';
+    ctx.beginPath(); ctx.arc(c, c, R, 0, 7); ctx.fill();
+    ctx.lineCap = 'round';
+    ctx.lineWidth = W * 0.09; ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+    ctx.beginPath(); ctx.arc(c, c, R * 0.78, a0, a1); ctx.stroke();
+    const g = ctx.createLinearGradient(0, W, W, 0);
+    g.addColorStop(0, acc); g.addColorStop(1, '#ff3b4e');
+    ctx.strokeStyle = g;
+    ctx.beginPath(); ctx.arc(c, c, R * 0.78, a0, ang(val)); ctx.stroke();
+    ctx.lineCap = 'butt';
+    ctx.fillStyle = '#fff';
+    ctx.font = `italic 900 ${W * 0.22}px sans-serif`;
+    ctx.fillText(center, c, c - W * 0.02);
+    ctx.font = `italic 700 ${W * 0.06}px sans-serif`; ctx.fillStyle = '#9aa7b4';
+    ctx.fillText(sub, c, c + W * 0.15);
+    return;
+  }
+  const classic = st === 'classic';
   ctx.beginPath(); ctx.arc(c, c, R, 0, 7);
   const bg = ctx.createRadialGradient(c, c, R * 0.2, c, c, R);
-  bg.addColorStop(0, 'rgba(30,34,40,0.95)'); bg.addColorStop(1, 'rgba(8,10,14,0.92)');
+  if (classic) { bg.addColorStop(0, '#f4efe2'); bg.addColorStop(1, '#d9d0bb'); }
+  else { bg.addColorStop(0, 'rgba(30,34,40,0.95)'); bg.addColorStop(1, 'rgba(8,10,14,0.92)'); }
   ctx.fillStyle = bg; ctx.fill();
-  ctx.lineWidth = W * 0.035; ctx.strokeStyle = '#c8102e'; ctx.stroke();
-  // arco vermelho de limite
-  if (redFrom) { ctx.beginPath(); ctx.arc(c, c, R * 0.86, ang(redFrom), a1); ctx.lineWidth = W * 0.03; ctx.strokeStyle = 'rgba(227,36,59,.8)'; ctx.stroke(); }
-  ctx.fillStyle = '#fff'; ctx.strokeStyle = '#fff';
-  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  ctx.font = `italic 800 ${W * 0.07}px sans-serif`;
+  ctx.lineWidth = W * 0.035; ctx.strokeStyle = classic ? '#b8bcc0' : acc; ctx.stroke();
+  if (redFrom) { ctx.beginPath(); ctx.arc(c, c, R * 0.86, ang(redFrom), a1); ctx.lineWidth = W * 0.03; ctx.strokeStyle = 'rgba(227,36,59,.85)'; ctx.stroke(); }
+  const ink = classic ? '#1b1b1b' : '#fff';
+  ctx.fillStyle = ink; ctx.strokeStyle = ink;
+  ctx.font = `${classic ? '' : 'italic '}800 ${W * 0.07}px ${classic ? 'serif' : 'sans-serif'}`;
   for (let v = 0; v <= max; v += majors / 2) {
     const a = ang(v), major = v % majors === 0;
     ctx.lineWidth = major ? 3 : 1.5;
@@ -1122,19 +1149,18 @@ function drawGauge(id, val, max, majors, label, center, sub, redFrom) {
     if (major) ctx.fillText(String(label(v)), c + Math.cos(a) * R * 0.6, c + Math.sin(a) * R * 0.6);
   }
   const a = ang(val);
-  ctx.strokeStyle = '#ff2a3d'; ctx.lineWidth = W * 0.025; ctx.lineCap = 'round';
+  ctx.strokeStyle = classic ? '#c0392b' : acc; ctx.lineWidth = W * 0.025; ctx.lineCap = 'round';
   ctx.beginPath(); ctx.moveTo(c - Math.cos(a) * R * 0.1, c - Math.sin(a) * R * 0.1); ctx.lineTo(c + Math.cos(a) * R * 0.86, c + Math.sin(a) * R * 0.86); ctx.stroke();
-  ctx.beginPath(); ctx.arc(c, c, R * 0.3, 0, 7); ctx.fillStyle = '#0b0d11'; ctx.fill();
-  ctx.lineWidth = 2; ctx.strokeStyle = 'rgba(255,255,255,.25)'; ctx.stroke();
+  ctx.lineCap = 'butt';
+  ctx.beginPath(); ctx.arc(c, c, R * 0.3, 0, 7); ctx.fillStyle = classic ? '#2b2b2b' : '#0b0d11'; ctx.fill();
   ctx.fillStyle = '#fff';
   ctx.font = `italic 900 ${W * 0.15}px sans-serif`;
   ctx.fillText(center, c, c - W * 0.01);
   ctx.font = `italic 700 ${W * 0.055}px sans-serif`;
-  ctx.fillStyle = '#9aa7b4';
-  ctx.fillText(sub, c, c + W * 0.1);
+  ctx.fillStyle = classic ? '#555' : '#9aa7b4';
+  ctx.fillText(sub, c, c + W * 0.1 + (classic ? W * 0.12 : 0));
 }
 
-let hudT = 0;
 function updateHUD(dt) {
   hudT -= dt;
   const sp = rig.speedKmh;
@@ -1196,9 +1222,14 @@ function loop(now) {
 
   readInput(dt);
   if (state === 'title') {
-    updateShowroom(dt);
+    timeT -= dt;
+    if (timeT <= 0) { timeT = 0.5; applyTime(S.clock); }
+    traffic.obstacles(obstacles);
+    traffic.update(dt, rig, rig._cs || []);
+    world.update(dt, t);
+    titleCamera(dt);
     audio.engine(0, 0, false);
-    renderer.render(show.scene, show.cam);
+    renderer.render(scene, camera);
     return;
   }
   if (S.settings.time === 'cycle' && state === 'drive') S.clock = (S.clock + dt / 50) % 24;
@@ -1219,7 +1250,8 @@ function loop(now) {
   updateNav(dt);
   updateCamera(dt);
   audio.engine(rig.rpm, input.throttle, rig.engineOn && state === 'drive');
-  updateHUD(dt); drawMinimap();
+  updateHUD(dt);
+  if ((frames & 1) === 0) drawMinimap();
   saveT += dt;
   if (saveT > 8) { saveT = 0; save(); }
   renderer.render(scene, camera);

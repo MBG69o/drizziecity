@@ -17,36 +17,32 @@
   <div id="loadmsg">Carregando…</div>
 </div>
 
-<!-- ============ SHOWROOM / MENU PRINCIPAL ============ -->
+<!-- ============ MENU PRINCIPAL (sobre a cena 3D) ============ -->
 <div id="title" class="hidden">
-  <div id="topbar">
-    <div class="avatar"><svg viewBox="0 0 64 64"><circle cx="32" cy="24" r="12" fill="#f1c9a5"/><path d="M20 22c0-9 6-14 12-14s13 5 12 14c-3-5-8-6-12-6s-9 1-12 6z" fill="#6b3f1f"/><path d="M10 64c2-14 11-20 22-20s20 6 22 20z" fill="#1d2633"/><path d="M27 44h10l-5 9z" fill="#c8102e"/></svg></div>
-    <div class="who"><b id="pname">Motorista</b><small id="plvl">Nv 1 / XP 0</small></div>
-    <button class="skew dark" data-act="rename"><span>Mudar nome</span></button>
-    <div class="tb-fill"></div>
-    <button class="skew light" data-act="garage"><span>Garagem</span></button>
-    <button class="skew light" data-act="settings"><span>Ajustes</span></button>
-  </div>
-
-  <div id="leftpanel">
-    <div class="lp-head"><b>Seu desempenho</b></div>
-    <div id="perf"></div>
-  </div>
-
-  <div id="truckinfo">
-    <div class="ti-row"><button class="navb" data-act="prevtruck">‹</button><div class="ti-name" id="tiname"></div><button class="navb" data-act="nexttruck">›</button></div>
-    <div class="ti-specs" id="tispecs"></div>
-    <div id="tiaction"></div>
-  </div>
-
-  <div id="bottombar">
-    <div class="badge"><svg viewBox="0 0 64 64"><circle cx="32" cy="32" r="30" fill="#0e1a2b"/><path d="M14 38h22V22H14zM36 28h8l6 7v3H36z" fill="#ffb703"/><circle cx="21" cy="42" r="4" fill="#e9eef3"/><circle cx="43" cy="42" r="4" fill="#e9eef3"/></svg></div>
-    <div class="company"><div class="cname">Drizzie Logística</div>
-      <div class="strip" id="strip"></div>
+  <div class="t-card">
+    <div class="t-brand"><div class="logo">DRIZZIE <span>TRUCK</span></div><div class="sub">Rotas &amp; Cargas</div></div>
+    <div class="t-driver">
+      <div class="t-ava">🧑‍✈️</div>
+      <div><b id="pname">Motorista</b><small id="plvl"></small></div>
+      <button class="t-edit" data-act="rename" title="Mudar nome">✎</button>
     </div>
+    <button id="play" class="t-main">▶&nbsp; Pegar a estrada</button>
+    <div class="t-grid">
+      <button data-act="jobs"><i>📋</i>Fretes</button>
+      <button data-act="garage"><i>🚚</i>Concessionária</button>
+      <button data-act="map"><i>🗺️</i>Mapa</button>
+      <button data-act="settings"><i>⚙️</i>Ajustes</button>
+    </div>
+    <div class="t-job" id="tjob"></div>
   </div>
-  <button id="play" class="drive"><span>DIRIGIR</span></button>
-  <div class="ver">v1.1.0</div>
+  <div class="t-top"><span class="chip-m" id="tmoney">R$ 0</span></div>
+  <div class="t-truck">
+    <small>SEU CAMINHÃO</small>
+    <div id="tiname"></div>
+    <div id="tispecs"></div>
+    <div class="t-stats" id="tstats"></div>
+  </div>
+  <div class="ver">v2.0.0</div>
 </div>
 
 <!-- ============ HUD ============ -->

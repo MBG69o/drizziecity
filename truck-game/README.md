@@ -31,11 +31,24 @@ Faça entregas pela cidade, suba de nível, compre caminhões mais fortes e libe
 * Física baseada em potência × massa: com 60 t o caminhão acelera e freia de forma bem diferente de vazio.
 * Bônus por entrega no prazo, multa por atraso, avarias, 30 níveis, estatísticas e salvamento automático.
 
+## Mundo
+
+* **3 cidades** — Drizzie City (metrópole), Vila Serrana (cidade do interior) e Porto Azul (litorânea com porto).
+* **Rodovias entre cidades** (BR-101, SP-280 e RS-030) com curvas, aclives/declives, aterros com taludes,
+  defensas metálicas, balizadores, placas de destino e de velocidade.
+* Estradas atravessando **mata fechada**, **pontes sobre o rio** com pilares, lavouras, morros com
+  aerogeradores e o mar ao sul. Locais de carga à beira da estrada (fazenda, serraria, pedreira, parque eólico).
+* GPS calcula a rota por ruas e rodovias entre as cidades; tráfego de carros, ônibus e caminhões.
+
 ## Gráficos e desempenho
 
 * **Ciclo de dia e noite**: entardecer, noite estrelada com luar, janelas dos prédios acesas, postes com
   iluminação no asfalto, faróis do caminhão e do tráfego (facho de luz real no modo Médio/Ultra).
-* **Showroom** com neon e piso refletivo na tela inicial; caminhões com pintura desgastada/poeira.
+* Menu inicial sobre a própria cena 3D (caminhão na garagem com câmera cinematográfica).
+* Caminhões cara-chata e bicudo modelados com cabine arredondada, grade, faróis, retrovisores, degraus,
+  tanques, escapamentos, quinta roda, mangueiras e rodas com pneu/aro em perfil real; pintura com verniz e
+  reflexos do ambiente (modos Médio/Ultra), poeira e desgaste.
+* Estilos de velocímetro (Analógico, Digital, Esportivo, Clássico), cor do painel e tamanho dos controles.
 * Interface em estilo simulador: volante, câmbio D/N/R, pedais, velocímetro e conta-giros analógicos.
 
 * Texturas **HD geradas proceduralmente** (asfalto, faixas, fachadas, concreto, grama…) com *mipmaps* e

@@ -1,195 +1,277 @@
-// Caminhões e implementos: modelos 3D procedurais + física arcade realista
-// (potência x massa, inércia, frenagem, articulação da carreta, colisões).
+// Caminhões e implementos realistas (cara-chata e bicudo) + física
+// potência x massa, aclives, articulação da carreta e colisões.
 import * as THREE from 'three';
+import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { Builder, mat, G } from './geo.js';
 import { tex } from './textures.js';
 import { trailerMass } from './data.js';
 
+let QUAL = 'medium';
+export function setTruckQuality(q) { QUAL = q; }
+
 let MATS = null;
 function mats() {
   if (MATS) return MATS;
-  const atlas = wheelAtlas();
+  const pbr = QUAL !== 'low';
+  const S = (o) => (pbr ? new THREE.MeshStandardMaterial(o) : new THREE.MeshPhongMaterial({ color: o.color, map: o.map, vertexColors: o.vertexColors, side: o.side, shininess: o.roughness < 0.3 ? 120 : 20, specular: o.metalness > 0.5 ? 0xffffff : 0x333333 }));
   MATS = {
-    chrome: new THREE.MeshPhongMaterial({ color: 0xe6e9ec, map: tex.metal(), shininess: 140, specular: 0xffffff }),
-    dark: new THREE.MeshLambertMaterial({ color: 0x23272b }),
-    glass: new THREE.MeshPhongMaterial({ color: 0x16222e, shininess: 160, specular: 0xbfd3e6 }),
+    chrome: S({ color: 0xf2f4f6, metalness: 1, roughness: 0.14, map: tex.metal() }),
+    alu: S({ color: 0xc9cdd1, metalness: 0.9, roughness: 0.3 }),
+    dark: S({ color: 0x1f2328, metalness: 0.1, roughness: 0.75, side: THREE.DoubleSide }),
+    steel: S({ color: 0x3b4148, metalness: 0.5, roughness: 0.5 }),
+    glass: S({ color: 0x0b1219, metalness: 0.3, roughness: 0.04 }),
+    rubber: S({ color: 0xffffff, map: tex.tire(), metalness: 0, roughness: 0.92 }),
+    rim: S({ color: 0xe8eaec, metalness: 0.85, roughness: 0.25 }),
     light: new THREE.MeshBasicMaterial({ color: 0xfff8e1 }),
     red: new THREE.MeshBasicMaterial({ color: 0xd63031 }),
     amber: new THREE.MeshBasicMaterial({ color: 0xffa21a }),
-    wheel: new THREE.MeshLambertMaterial({ map: atlas }),
-    flat: new THREE.MeshPhongMaterial({ vertexColors: true, shininess: 40, specular: 0x333333 }),
-    grill: new THREE.MeshPhongMaterial({ map: tex.grill(), shininess: 90, specular: 0x999999 }),
+    grill: S({ color: 0xffffff, map: tex.grill(), metalness: 0.7, roughness: 0.3 }),
+    flat: S({ vertexColors: true, metalness: 0.15, roughness: 0.55 }),
+    flatChrome: S({ vertexColors: true, metalness: 0.9, roughness: 0.2 }),
+    panel: S({ color: 0xffffff, map: tex.panel(), metalness: 0.2, roughness: 0.5 }),
+    blob: new THREE.MeshBasicMaterial({ map: tex.blob(), transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 }),
     glow: new THREE.SpriteMaterial({ map: tex.glow(), color: 0xfff3d6, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }),
     glowRed: new THREE.SpriteMaterial({ map: tex.glow(), color: 0xff2a1a, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }),
     beam: new THREE.MeshBasicMaterial({ map: tex.beam(), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, polygonOffset: true, polygonOffsetFactor: -3 }),
-    blob: new THREE.MeshBasicMaterial({ map: tex.blob(), transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 }),
   };
   return MATS;
 }
 
-function wheelAtlas() {
-  const c = document.createElement('canvas');
-  c.width = 512; c.height = 256;
-  const ctx = c.getContext('2d');
-  ctx.drawImage(tex.tire().image, 0, 0, 256, 256);
-  ctx.drawImage(tex.rim().image, 256, 0, 256, 256);
-  const t = new THREE.CanvasTexture(c);
-  t.colorSpace = THREE.SRGBColorSpace;
-  t.anisotropy = 4;
-  return t;
-}
-
-let WHEEL_GEO = null;
-function wheelGeo() {
-  if (WHEEL_GEO) return WHEEL_GEO;
-  const g = new THREE.CylinderGeometry(1, 1, 1, 22, 1);
-  const uv = g.attributes.uv, pos = g.attributes.position;
-  const side = 23 * 2;
-  for (let i = 0; i < uv.count; i++) {
-    if (i < side) uv.setXY(i, uv.getX(i) * 0.5, uv.getY(i));
-    else uv.setXY(i, 0.5 + (pos.getX(i) * 0.5 + 0.5) * 0.5, pos.getZ(i) * 0.5 + 0.5);
-  }
-  g.rotateZ(Math.PI / 2);
-  WHEEL_GEO = g;
-  return g;
-}
-
 function paintMat(color) {
+  if (QUAL === 'high') return new THREE.MeshPhysicalMaterial({ color, map: tex.paint(), metalness: 0.35, roughness: 0.35, clearcoat: 1, clearcoatRoughness: 0.08 });
+  if (QUAL === 'medium') return new THREE.MeshStandardMaterial({ color, map: tex.paint(), metalness: 0.35, roughness: 0.33 });
   return new THREE.MeshPhongMaterial({ color, map: tex.paint(), shininess: 90, specular: 0x888888 });
 }
 
-// Cria um eixo (par de rodas mescladas = 1 draw call)
-function axle(z, x, r, w) {
+// ---------- rodas com perfil real (pneu + aro) ----------
+const WHEEL_CACHE = {};
+function wheelParts(r, w) {
+  const k = r + '_' + w;
+  if (WHEEL_CACHE[k]) return WHEEL_CACHE[k];
+  const tp = [[r * 0.6, -w / 2], [r * 0.9, -w / 2], [r * 0.985, -w * 0.4], [r, -w * 0.25], [r, w * 0.25], [r * 0.985, w * 0.4], [r * 0.9, w / 2], [r * 0.6, w / 2]].map(([a, b]) => new THREE.Vector2(a, b));
+  const tire = new THREE.LatheGeometry(tp, 22);
+  const rp = [[0.001, w * 0.36], [r * 0.18, w * 0.38], [r * 0.24, w * 0.3], [r * 0.5, w * 0.26], [r * 0.6, w * 0.34], [r * 0.6, -w * 0.3]].map(([a, b]) => new THREE.Vector2(a, b));
+  const rim = new THREE.LatheGeometry(rp, 22);
+  const nut = new THREE.CylinderGeometry(0.03, 0.03, 0.06, 6);
+  const rb = new Builder();
+  rb.add(rim, mat(0, 0, 0));
+  for (let i = 0; i < 10; i++) {
+    const a = (i / 10) * Math.PI * 2;
+    rb.add(nut, mat(Math.cos(a) * r * 0.32, w * 0.36, Math.sin(a) * r * 0.32));
+  }
+  return (WHEEL_CACHE[k] = { tire, rim: rb.geometry() });
+}
+
+function grouped(parts) {
   const b = new Builder();
-  b.add(wheelGeo(), mat(x, 0, 0, 0, 0, 0, w, r, r));
-  b.add(wheelGeo(), mat(-x, 0, 0, 0, 0, 0, w, r, r));
-  const m = new THREE.Mesh(b.geometry(), mats().wheel);
+  const groups = [];
+  for (const [list, mi] of parts) {
+    const start = b.idx.length;
+    for (const [g, m] of list) b.add(g, m);
+    groups.push([start, b.idx.length - start, mi]);
+  }
+  const geo = b.geometry();
+  for (const [s, c, mi] of groups) if (c) geo.addGroup(s, c, mi);
+  return geo;
+}
+
+// eixo com rodas duplas/simples, aro voltado para fora
+function axleMesh(z, track, r, w, dual) {
+  const { tire, rim } = wheelParts(r, w);
+  const T = [], R = [];
+  for (const s of [-1, 1]) {
+    const rot = s > 0 ? -Math.PI / 2 : Math.PI / 2;
+    if (dual) {
+      T.push([tire, mat(s * (track / 2 + w * 0.52), 0, 0, 0, 0, rot)]);
+      T.push([tire, mat(s * (track / 2 - w * 0.52), 0, 0, 0, 0, rot)]);
+      R.push([rim, mat(s * (track / 2 + w * 0.52), 0, 0, 0, 0, rot)]);
+    } else {
+      T.push([tire, mat(s * track / 2, 0, 0, 0, 0, rot)]);
+      R.push([rim, mat(s * track / 2, 0, 0, 0, 0, rot)]);
+    }
+  }
+  const M = mats();
+  const m = new THREE.Mesh(grouped([[T, 0], [R, 1]]), [M.rubber, M.rim]);
   m.position.set(0, r, z);
   m.castShadow = true;
   return m;
 }
 
-function single(z, x, r, w) {
-  const m = new THREE.Mesh(wheelGeo(), mats().wheel);
-  m.scale.set(w, r, r);
+function steerWheel(z, x, r, w, side) {
+  const { tire, rim } = wheelParts(r, w);
+  const rot = side > 0 ? -Math.PI / 2 : Math.PI / 2;
+  const M = mats();
+  const inner = new THREE.Mesh(grouped([[[[tire, mat(0, 0, 0, 0, 0, rot)]], 0], [[[rim, mat(0, 0, 0, 0, 0, rot)]], 1]]), [M.rubber, M.rim]);
+  inner.castShadow = true;
   const g = new THREE.Group();
   g.position.set(x, r, z);
-  g.add(m);
-  m.castShadow = true;
+  g.add(inner);
   return g;
 }
 
-function meshesFrom(builders, target, cast = true) {
+function meshesFrom(builders, target) {
   for (const [b, m] of builders) {
-    const mesh = b.mesh(m, { cast });
+    const mesh = b.mesh(m, { cast: true });
     if (mesh) target.add(mesh);
   }
 }
 
-// ---------- Modelo do caminhão ----------
+const RBC = {};
+function RB(w, h, d, r) {
+  const k = [w, h, d, r].join('_');
+  return RBC[k] || (RBC[k] = new RoundedBoxGeometry(w, h, d, 2, r));
+}
+// para-lama em arco (meia casca de cilindro, metade de cima)
+const ARC = new THREE.CylinderGeometry(1, 1, 1, 14, 1, true, 0, Math.PI);
+
+// ---------- caminhão ----------
 export function buildTruck(def) {
   const M = mats();
   const root = new THREE.Group();
+  root.rotation.order = 'YXZ';
   const body = new THREE.Group();
   root.add(body);
-  const P = new Builder(), C = new Builder(), D = new Builder(), GL = new Builder(), LI = new Builder(), RE = new Builder(), AM = new Builder();
+  const P = new Builder(), C = new Builder(), D = new Builder(), GL = new Builder(), LI = new Builder(), RE = new Builder(), AM = new Builder(), GR = new Builder(), ST = new Builder(), AL = new Builder();
   const box = (b, w, h, d, x, y, z, rx = 0, ry = 0, rz = 0) => b.add(G.box(), mat(x, y, z, rx, ry, rz, w, h, d));
+  const rbox = (b, w, h, d, x, y, z, r = 0.1, rx = 0) => b.add(RB(w, h, d, r), mat(x, y, z, rx, 0, 0));
   const cyl = (b, rad, len, x, y, z, rx = 0, ry = 0, rz = 0, seg = 14) => b.add(G.cyl(seg), mat(x, y, z, rx, ry, rz, rad * 2, len, rad * 2));
+  const arc = (b, rad, wid, x, y, z) => b.add(ARC, mat(x, y, z, 0, 0, Math.PI / 2, rad, wid, rad));
 
-  const rigid = def.rigid;
-  const small = def.id === 'urbano';
-  const wb = small ? 3.3 : rigid ? 4.3 : def.axles >= 4 ? 4.6 : 3.9;
+  const rigid = def.rigid, small = def.id === 'urbano', conv = def.cab === 'conventional';
   const wr = small ? 0.42 : 0.53;
+  const wb = small ? 3.3 : rigid ? 4.3 : conv ? (def.axles >= 4 ? 5.6 : 5.2) : def.axles >= 4 ? 4.6 : 3.9;
   const cabW = small ? 2.15 : 2.5;
-  const zf = wb + (small ? 1.3 : 1.45);         // frente da cabine
-  const cabL = small ? 1.9 : 2.3;
-  const y0 = small ? 0.95 : 1.15;               // base da cabine
-  const ch = small ? 1.75 : 2.05;               // altura da cabine
+  const y0 = small ? 0.95 : 1.15;
+  const ch = small ? 1.75 : 2.05;
+  const zf = wb + (small ? 1.25 : conv ? 2.05 : 1.4);
+  let cabFront = zf;
+  const cabL = small ? 1.9 : 2.25;
+  const rearEnd = rigid ? -(small ? 1.4 : 2.0) : -1.45;
 
-  // Chassi
-  const rearEnd = rigid ? -(small ? 1.4 : 2.0) : -1.4;
-  box(D, 0.95, 0.32, zf - rearEnd - 0.3, 0, y0 - 0.25, (zf + rearEnd) / 2 - 0.1);
-  // Cabine
-  box(P, cabW, ch, cabL, 0, y0 + ch / 2, zf - cabL / 2);
+  // chassi
+  for (const s of [-1, 1]) box(ST, 0.12, 0.3, zf - rearEnd - 0.4, s * 0.45, y0 - 0.28, (zf + rearEnd) / 2 - 0.15);
+  for (let z = rearEnd + 0.4; z < wb; z += 1.1) box(ST, 0.9, 0.14, 0.12, 0, y0 - 0.28, z);
+
+  if (conv) {
+    // capô longo (bicudo)
+    const hoodL = 2.15;
+    cabFront = zf - hoodL - 0.1;
+    rbox(P, cabW * 0.74, 1.05, hoodL, 0, y0 + 0.5, zf - hoodL / 2 - 0.05, 0.22, 0.03);
+    box(C, cabW * 0.66, 1.15, 0.1, 0, y0 + 0.48, zf - 0.04);
+    box(GR, cabW * 0.56, 1.0, 0.05, 0, y0 + 0.48, zf + 0.02);
+    box(C, 0.3, 0.12, 0.12, 0, y0 + 1.12, zf - 0.1);
+    for (const s of [-1, 1]) {
+      arc(P, wr + 0.16, 0.6, s * (cabW / 2 - 0.28), wr + 0.02, wb);
+      box(P, 0.55, 0.06, 1.6, s * (cabW / 2 - 0.28), wr * 2 + 0.16, wb - 0.4, 0.15);
+      rbox(C, 0.5, 0.26, 0.12, s * (cabW / 2 - 0.42), y0 + 0.05, zf - 0.25, 0.05);
+      box(LI, 0.4, 0.17, 0.04, s * (cabW / 2 - 0.42), y0 + 0.05, zf - 0.18);
+      cyl(C, 0.22, 1.2, s * (cabW / 2 + 0.05), y0 + 1.1, cabFront + 0.1);
+      cyl(C, 0.06, 0.6, s * (cabW / 2 + 0.05), y0 + 1.9, cabFront + 0.1);
+    }
+    rbox(C, cabW + 0.1, 0.4, 0.32, 0, y0 - 0.2, zf + 0.12, 0.06);
+  } else {
+    box(GR, cabW * 0.66, ch * 0.36, 0.04, 0, y0 + ch * 0.33, zf + 0.01);
+    box(C, cabW * 0.7, 0.07, 0.06, 0, y0 + ch * 0.52, zf + 0.02);
+    box(C, 0.26, 0.26, 0.04, 0, y0 + ch * 0.42, zf + 0.05, 0, 0, Math.PI / 4);
+    rbox(D, cabW + 0.06, 0.42, 0.34, 0, y0 - 0.12, zf + 0.08, 0.08);
+    for (const s of [-1, 1]) {
+      rbox(C, 0.56, 0.26, 0.1, s * (cabW / 2 - 0.4), y0 + 0.22, zf + 0.02, 0.05);
+      box(LI, 0.46, 0.18, 0.04, s * (cabW / 2 - 0.4), y0 + 0.22, zf + 0.07);
+      box(AM, 0.14, 0.18, 0.04, s * (cabW / 2 - 0.08), y0 + 0.22, zf + 0.04);
+      cyl(LI, 0.07, 0.04, s * (cabW / 2 - 0.35), y0 - 0.14, zf + 0.26, Math.PI / 2, 0, 0, 10);
+      arc(D, wr + 0.12, 0.42, s * (cabW / 2 - 0.25), wr, wb);
+    }
+  }
+
+  // cabine
+  const cz = cabFront - cabL / 2;
+  rbox(P, cabW, ch, cabL, 0, y0 + ch / 2, cz, 0.14);
+  if (def.roof === 'high') rbox(P, cabW - 0.04, 1.0, cabL - 0.2, 0, y0 + ch + 0.42, cz - 0.08, 0.28);
+  else if (def.roof === 'mid') rbox(P, cabW - 0.06, 0.42, cabL - 0.3, 0, y0 + ch + 0.16, cz - 0.1, 0.18);
+  const sl = conv ? 1.5 : 0.9;
+  if (conv || !rigid) {
+    const sh = ch + (def.roof === 'high' ? 0.95 : 0.3);
+    rbox(P, cabW - 0.02, sh, sl, 0, y0 + sh / 2, cabFront - cabL - sl / 2 + 0.05, 0.16);
+  }
+  const wsY = y0 + ch * 0.7, wsH = ch * 0.42;
+  if (conv) for (const s of [-1, 1]) box(GL, cabW / 2 - 0.22, wsH, 0.05, s * (cabW / 4 - 0.02), wsY, cabFront + 0.01, -0.12);
+  else box(GL, cabW - 0.28, wsH, 0.05, 0, wsY, cabFront + 0.01, -0.05);
+  rbox(D, cabW - 0.16, 0.14, 0.42, 0, y0 + ch + 0.02, cabFront + 0.1, 0.05, -0.2);
+  for (let i = -2; i <= 2; i++) box(AM, 0.13, 0.07, 0.08, i * 0.34, y0 + ch + (def.roof === 'high' ? 0.94 : 0.13), cabFront - 0.15);
+  for (const s of [-1, 1]) {
+    box(GL, 0.04, ch * 0.36, cabL * 0.4, s * (cabW / 2 + 0.005), wsY + 0.02, cabFront - cabL * 0.3);
+    box(GL, 0.04, ch * 0.2, cabL * 0.12, s * (cabW / 2 + 0.005), wsY - 0.05, cabFront - cabL * 0.08);
+    box(D, 0.03, ch * 0.85, 0.025, s * (cabW / 2 + 0.006), y0 + ch * 0.45, cabFront - cabL * 0.66);
+    box(C, 0.04, 0.05, 0.22, s * (cabW / 2 + 0.02), y0 + ch * 0.5, cabFront - cabL * 0.6);
+    for (const k of [0, 1]) box(ST, 0.36, 0.05, 0.5, s * (cabW / 2 - 0.15), 0.5 + k * 0.38, cabFront - cabL * 0.35);
+    box(D, 0.08, 0.95, 0.6, s * (cabW / 2 - 0.02), 0.72, cabFront - cabL * 0.35);
+    box(C, 0.5, 0.05, 0.05, s * (cabW / 2 + 0.23), y0 + ch * 0.86, cabFront - 0.1);
+    box(C, 0.05, 0.75, 0.05, s * (cabW / 2 + 0.47), y0 + ch * 0.62, cabFront - 0.1);
+    rbox(D, 0.13, 0.62, 0.3, s * (cabW / 2 + 0.5), y0 + ch * 0.68, cabFront - 0.14, 0.04);
+    box(GL, 0.02, 0.52, 0.22, s * (cabW / 2 + 0.43), y0 + ch * 0.68, cabFront - 0.14);
+    rbox(D, 0.12, 0.26, 0.22, s * (cabW / 2 + 0.5), y0 + ch * 0.3, cabFront - 0.12, 0.04);
+    if (def.roof === 'high' && !rigid) box(P, 0.05, ch + 0.8, 0.55, s * (cabW / 2 - 0.02), y0 + (ch + 0.8) / 2 + 0.1, cabFront - cabL - sl - 0.2);
+    box(RE, 0.32, 0.18, 0.05, s * 0.88, y0 - 0.2, rearEnd - 0.02);
+    box(LI, 0.12, 0.18, 0.05, s * 0.6, y0 - 0.2, rearEnd - 0.02);
+    box(D, 0.62, 0.62, 0.03, s * 1.0, 0.55, def.axles >= 3 && !rigid ? -1.45 : -0.8);
+  }
   if (!small) {
-    box(P, cabW - 0.04, 0.75, cabL - 0.35, 0, y0 + ch + 0.36, zf - cabL / 2 - 0.15); // teto alto
-    box(P, cabW, 0.18, 0.5, 0, y0 + ch + 0.75, zf - 0.2, -0.25);                  // quebra-sol
+    const tz = wb - (conv ? 2.4 : 1.6);
+    cyl(AL, 0.34, 1.4, 1.02, 0.86, tz, Math.PI / 2);
+    for (const k of [-0.45, 0.45]) cyl(D, 0.355, 0.06, 1.02, 0.86, tz + k, Math.PI / 2);
+    box(D, 0.5, 0.5, 0.7, -1.0, 0.85, tz + 0.1);
+    cyl(ST, 0.17, 1.1, -0.95, 0.62, tz - 0.9, Math.PI / 2);
   }
   if (!rigid) {
-    box(P, cabW - 0.05, ch + 0.6, 1.2, 0, y0 + (ch + 0.6) / 2, zf - cabL - 0.55); // sleeper
-    box(P, cabW - 0.2, 0.7, 1.6, 0, y0 + ch + 0.95, zf - cabL - 0.3, 0.18);         // defletor
+    const ez = cabFront - cabL - sl - 0.25;
+    for (const s of conv ? [-1, 1] : [1]) {
+      cyl(C, 0.11, 3.0, s * (cabW / 2 - 0.12), y0 + ch + 0.25, ez);
+      cyl(C, 0.15, 1.0, s * (cabW / 2 - 0.12), y0 + ch - 0.6, ez);
+    }
+    box(AL, 1.3, 0.05, 0.55, 0, y0 + 0.05, ez - 0.1);
+    for (const [c, x] of [[0xc0392b, -0.18], [0x2e86de, 0.18]]) {
+      const t = new THREE.Mesh(new THREE.TorusGeometry(0.16, 0.025, 6, 16), new THREE.MeshLambertMaterial({ color: c }));
+      t.position.set(x, y0 + 0.5, ez - 0.05);
+      body.add(t);
+    }
+    box(ST, 1.35, 0.14, 1.3, 0, y0 - 0.02, 0.3);
+    box(AL, 1.2, 0.03, 1.1, 0, y0 + 0.06, 0.3);
+    for (const s of [-1, 1]) box(D, 0.7, 0.05, def.axles >= 3 ? 2.7 : 1.4, s * 0.98, wr * 2 + 0.14, 0);
   }
-  // Vidros
-  box(GL, cabW - 0.25, ch * 0.42, 0.06, 0, y0 + ch * 0.72, zf + 0.02, -0.08);
-  for (const s of [-1, 1]) {
-    box(GL, 0.05, ch * 0.38, cabL * 0.42, s * (cabW / 2 + 0.01), y0 + ch * 0.72, zf - cabL * 0.3);
-    // espelhos
-    box(D, 0.55, 0.06, 0.06, s * (cabW / 2 + 0.25), y0 + ch * 0.75, zf - 0.15);
-    box(D, 0.12, 0.55, 0.28, s * (cabW / 2 + 0.52), y0 + ch * 0.7, zf - 0.15);
-    // faróis e setas
-    box(LI, 0.5, 0.22, 0.05, s * (cabW / 2 - 0.42), y0 + 0.18, zf + 0.03);
-    box(AM, 0.18, 0.22, 0.05, s * (cabW / 2 - 0.1), y0 + 0.18, zf + 0.03);
-    // degraus / paralamas dianteiros
-    box(D, 0.36, 0.12, 1.3, s * (cabW / 2 - 0.25), wr * 2 + 0.08, wb);
-    box(P, 0.06, 0.4, cabL * 0.5, s * (cabW / 2 + 0.01), y0 + 0.2, zf - cabL * 0.25);
-    // lanternas traseiras
-    box(RE, 0.35, 0.18, 0.05, s * 0.9, y0 - 0.15, rearEnd - 0.02);
-    // tanque de combustível
-    if (!small) cyl(C, 0.33, 1.3, s * 1.05, 0.9, wb - 1.5, Math.PI / 2, 0, 0);
-    // escapamentos
-    if (!rigid) cyl(C, 0.1, 2.6, s * (cabW / 2 - 0.15), y0 + ch + 0.2, zf - cabL - 1.25);
-    // paralamas traseiros
-    box(D, 0.7, 0.08, def.axles >= 3 ? 2.6 : 1.4, s * 0.98, wr * 2 + 0.12, def.axles >= 3 ? 0 : 0);
-  }
-  // Grade e para-choque
-  const GR = new Builder();
-  box(GR, cabW * 0.62, ch * 0.42, 0.05, 0, y0 + ch * 0.32, zf + 0.03);
-  box(C, cabW * 0.66, 0.06, 0.06, 0, y0 + ch * 0.54, zf + 0.05);
-  box(C, cabW * 0.66, 0.06, 0.06, 0, y0 + ch * 0.1, zf + 0.05);
-  // para-lamas traseiros e lameiros
-  for (const s2 of [-1, 1]) box(D, 0.55, 0.6, 0.04, s2 * 0.95, wr + 0.2, (def.axles >= 3 ? -1.45 : -0.75));
-  box(C, cabW + 0.08, 0.32, 0.28, 0, y0 - 0.12, zf + 0.12);
-  // luzes de teto
-  for (let i = -2; i <= 2; i++) box(AM, 0.12, 0.08, 0.08, i * 0.35, y0 + ch + (small ? 0.04 : 0.78), zf - 0.05);
-  if (!rigid) box(D, 1.3, 0.14, 1.3, 0, y0 - 0.02, 0.3); // quinta roda
 
-  // Carroceria baú (caminhões rígidos)
   let hitchZ = 0.3;
   if (rigid) {
-    const bz1 = zf - cabL - 0.15, bz0 = rearEnd;
+    const bz1 = cabFront - cabL - 0.15, bz0 = rearEnd;
     const bh = small ? 2.3 : 2.7, bw = small ? 2.25 : 2.5;
-    box(P, bw, 0.08, bz1 - bz0, 0, y0 + 0.02, (bz0 + bz1) / 2);
+    box(ST, bw, 0.12, bz1 - bz0, 0, y0 + 0.02, (bz0 + bz1) / 2);
     const boxMat = new THREE.MeshLambertMaterial({ map: tex.cargoBox('#' + new THREE.Color(def.color === 0xf2f2f2 ? 0x2f6fde : def.color).getHexString(), 'DRIZZIE') });
     const side = new Builder();
-    const L = bz1 - bz0, yb = y0 + 0.06, yt = y0 + 0.06 + bh;
-    side.quad([bw / 2, yb, bz1], [bw / 2, yb, bz0], [bw / 2, yt, bz0], [bw / 2, yt, bz1], [1, 0, 0], [1, 0, 0, 0, 0, 1, 1, 1]);
-    side.quad([-bw / 2, yb, bz0], [-bw / 2, yb, bz1], [-bw / 2, yt, bz1], [-bw / 2, yt, bz0], [-1, 0, 0], [0, 0, 1, 0, 1, 1, 0, 1]);
-    const sm = side.mesh(boxMat, { cast: true });
-    body.add(sm);
+    const yb = y0 + 0.08, yt = y0 + 0.08 + bh;
+    side.quad([bw / 2 + 0.01, yb, bz1], [bw / 2 + 0.01, yb, bz0], [bw / 2 + 0.01, yt, bz0], [bw / 2 + 0.01, yt, bz1], [1, 0, 0], [1, 0, 0, 0, 0, 1, 1, 1]);
+    side.quad([-bw / 2 - 0.01, yb, bz0], [-bw / 2 - 0.01, yb, bz1], [-bw / 2 - 0.01, yt, bz1], [-bw / 2 - 0.01, yt, bz0], [-1, 0, 0], [0, 0, 1, 0, 1, 1, 0, 1]);
+    body.add(side.mesh(boxMat, { cast: true }));
     const W = new Builder(true);
     W.box(-bw / 2, yb, bz0, bw / 2, yt, bz1, 1, 0xf4f4f4);
-    W.quad([bw / 2 - 0.1, yb + 0.1, bz0 - 0.01], [0.02, yb + 0.1, bz0 - 0.01], [0.02, yt - 0.1, bz0 - 0.01], [bw / 2 - 0.1, yt - 0.1, bz0 - 0.01], [0, 0, -1], [0, 0, 1, 0, 1, 1, 0, 1], 0xdcdcdc);
-    W.quad([-0.02, yb + 0.1, bz0 - 0.01], [-bw / 2 + 0.1, yb + 0.1, bz0 - 0.01], [-bw / 2 + 0.1, yt - 0.1, bz0 - 0.01], [-0.02, yt - 0.1, bz0 - 0.01], [0, 0, -1], [0, 0, 1, 0, 1, 1, 0, 1], 0xdcdcdc);
-    const wm = W.mesh(M.flat, { cast: true });
-    // evita z-fighting entre as laterais com logo e a caixa
-    wm.scale.set(0.995, 1, 1);
-    body.add(wm);
+    for (const s of [-1, 1]) W.add(G.box(), mat(s * bw / 4, (yb + yt) / 2, bz0 - 0.02, 0, 0, 0, bw / 2 - 0.08, bh - 0.12, 0.02), 0xdcdcdc);
+    W.add(G.box(), mat(0, yt + 0.02, (bz0 + bz1) / 2, 0, 0, 0, bw + 0.04, 0.06, bz1 - bz0 + 0.04), 0xd0d3d6);
+    body.add(W.mesh(M.flat, { cast: true }));
+    for (const s of [-0.3, 0.3]) box(C, 0.04, bh - 0.3, 0.04, s, (yb + yt) / 2, bz0 - 0.04);
+    box(D, bw - 0.2, 0.12, 0.1, 0, 0.55, bz0 - 0.05);
     hitchZ = rearEnd;
   }
 
   const paint = paintMat(def.color);
-  meshesFrom([[P, paint], [C, M.chrome], [D, M.dark], [GL, M.glass], [LI, M.light], [RE, M.red], [AM, M.amber], [GR, M.grill]], body);
+  meshesFrom([[P, paint], [C, M.chrome], [D, M.dark], [GL, M.glass], [LI, M.light], [RE, M.red], [AM, M.amber], [GR, M.grill], [ST, M.steel], [AL, M.alu]], body);
 
-  // Luzes noturnas: brilho dos faróis, lanternas e facho no asfalto
   const night = new THREE.Group();
-  for (const s2 of [-1, 1]) {
+  for (const s of [-1, 1]) {
     const g = new THREE.Sprite(M.glow);
     g.scale.set(1.6, 1.6, 1);
-    g.position.set(s2 * (cabW / 2 - 0.42), y0 + 0.18, zf + 0.15);
+    g.position.set(s * (cabW / 2 - 0.42), conv ? y0 + 0.05 : y0 + 0.22, zf + 0.15);
     night.add(g);
     const rg = new THREE.Sprite(M.glowRed);
     rg.scale.set(0.9, 0.9, 1);
-    rg.position.set(s2 * 0.9, y0 - 0.15, rearEnd - 0.12);
+    rg.position.set(s * 0.88, y0 - 0.2, rearEnd - 0.12);
     night.add(rg);
   }
   const beam = new THREE.Mesh(new THREE.PlaneGeometry(9, 26), M.beam);
@@ -199,40 +281,33 @@ export function buildTruck(def) {
   night.visible = false;
   root.add(night);
 
-  // Rodas
-  const front = [];
-  const rear = [];
-  const fx = cabW / 2 - 0.3;
-  front.push(single(wb, fx, wr, 0.32), single(wb, -fx, wr, 0.32));
-  if (def.axles >= 4) front.push(single(wb - 1.5, fx, wr, 0.32), single(wb - 1.5, -fx, wr, 0.32));
+  const front = [], rear = [];
+  const fx = cabW / 2 - 0.3, fw = small ? 0.26 : 0.32;
+  front.push(steerWheel(wb, fx, wr, fw, 1), steerWheel(wb, -fx, wr, fw, -1));
+  if (def.axles >= 4) front.push(steerWheel(wb - 1.55, fx, wr, fw, 1), steerWheel(wb - 1.55, -fx, wr, fw, -1));
   for (const f of front) root.add(f);
-  const rz = def.axles >= 3 ? [0.68, -0.68] : [0];
-  for (const z of rz) {
-    const a = axle(z, small ? 0.78 : 0.92, wr, small ? 0.38 : 0.62);
+  for (const z of def.axles >= 3 ? [0.68, -0.68] : [0]) {
+    const a = axleMesh(z, small ? 1.45 : 1.75, wr, small ? 0.22 : 0.3, true);
     rear.push(a);
     root.add(a);
   }
-  // sombra falsa
   const blob = new THREE.Mesh(new THREE.PlaneGeometry(cabW + 1, zf - rearEnd + 1.5), M.blob);
   blob.rotation.x = -Math.PI / 2;
   blob.position.set(0, 0.05, (zf + rearEnd) / 2);
   root.add(blob);
-
-  body.traverse((o) => { if (o.isMesh) o.castShadow = true; });
-  return { root, body, front, rear, wb, wr, hitchZ, zf, rearEnd, paint, blob, cabW, night, y0 };
+  return { root, body, front, rear, wb, wr, hitchZ, zf, rearEnd, paint, blob, cabW, night, y0, cabFront, ch, conv };
 }
 
-// ---------- Modelo do implemento (carreta) ----------
+// ---------- carreta ----------
 export function buildTrailer(cargo) {
   const M = mats();
   const root = new THREE.Group();
-  const P = new Builder(true), D = new Builder(), C = new Builder(), RE = new Builder();
+  root.rotation.order = 'YXZ';
+  const P = new Builder(true), D = new Builder(), C = new Builder(true), RE = new Builder(), AM = new Builder(), PN = new Builder(), ST = new Builder();
   const box = (b, w, h, d, x, y, z, color, rx = 0, ry = 0, rz = 0) => b.add(G.box(), mat(x, y, z, rx, ry, rz, w, h, d), color);
   const cyl = (b, rad, len, x, y, z, rx, ry, rz, color, seg = 18) => b.add(G.cyl(seg), mat(x, y, z, rx, ry, rz, rad * 2, len, rad * 2), color);
-  const type = cargo.trailer;
-  const model = cargo.model;
-  const long = model === 'blade';
-  const Lt = long ? 20 : type === 'tank' ? 12.5 : type === 'bulk' ? 12 : type === 'lowboy' ? 14.5 : 13.6;
+  const type = cargo.trailer, model = cargo.model;
+  const Lt = model === 'blade' ? 20 : type === 'tank' ? 12.5 : type === 'bulk' ? 12 : type === 'lowboy' ? 14.5 : 13.6;
   const front = 1.0, back = -(Lt - front);
   const nAx = type === 'lowboy' ? (cargo.t > 60 ? 5 : 4) : 3;
   const axleSpacing = 1.35;
@@ -240,61 +315,74 @@ export function buildTrailer(cargo) {
   const deck = 1.35;
   const extra = [];
 
-  // chassi e pernas de apoio
-  box(D, 1.0, 0.3, Lt - 0.5, 0, deck - 0.3, (front + back) / 2);
   for (const s of [-1, 1]) {
+    box(ST, 0.14, 0.42, Lt - 0.6, s * 0.48, deck - 0.3, (front + back) / 2);
     box(D, 0.12, 1.0, 0.12, s * 0.9, 0.6, -1.6);
-    box(D, 0.08, 0.4, 5.5, s * 1.18, deck - 0.45, back + 7.5); // proteção lateral
-    box(RE, 0.35, 0.16, 0.05, s * 1.0, deck - 0.35, back - 0.03);
+    box(D, 0.32, 0.06, 0.32, s * 0.9, 0.08, -1.6);
+    box(D, 0.06, 0.32, 5.5, s * 1.2, deck - 0.45, back + 7.6);
+    box(RE, 0.38, 0.16, 0.05, s * 1.0, deck - 0.4, back - 0.03);
+    for (let z = front - 1.5; z > back + 1; z -= 3) box(AM, 0.04, 0.08, 0.12, s * 1.28, deck - 0.1, z);
   }
-  box(D, 2.4, 0.18, 0.1, 0, deck - 0.65, back - 0.05); // para-choque traseiro
+  box(D, 2.4, 0.16, 0.12, 0, deck - 0.75, back - 0.06);
+  for (let z = front - 1; z > back + 1; z -= 1.2) box(ST, 0.96, 0.1, 0.1, 0, deck - 0.3, z);
 
   if (type === 'box') {
     const h = 2.75, y = deck + h / 2;
-    box(P, 2.55, h, Lt, 0, y, (front + back) / 2, 0xf6f6f6);
+    PN.add(G.box(), mat(0, y, (front + back) / 2, 0, 0, 0, 2.56, h, Lt));
     const logo = new THREE.MeshLambertMaterial({ map: tex.cargoBox('#d63031', 'DRIZZIE') });
-    const s = new Builder();
-    const yb = deck + 0.05, yt = deck + h - 0.05, w = 1.281;
-    s.quad([w, yb, front - 0.1], [w, yb, back + 0.1], [w, yt, back + 0.1], [w, yt, front - 0.1], [1, 0, 0], [1, 0, 0, 0, 0, 1, 1, 1]);
-    s.quad([-w, yb, back + 0.1], [-w, yb, front - 0.1], [-w, yt, front - 0.1], [-w, yt, back + 0.1], [-1, 0, 0], [0, 0, 1, 0, 1, 1, 0, 1]);
-    extra.push(s.mesh(logo, { cast: false }));
-    box(D, 0.03, h - 0.2, 0.03, 0, y, back - 0.01);
+    const sb = new Builder();
+    const yb = deck + 0.3, yt = deck + h - 0.25, w = 1.29;
+    const z0 = front - 1.5, z1 = back + 1.5;
+    sb.quad([w, yb, z0], [w, yb, z1], [w, yt, z1], [w, yt, z0], [1, 0, 0], [1, 0, 0, 0, 0, 1, 1, 1]);
+    sb.quad([-w, yb, z1], [-w, yb, z0], [-w, yt, z0], [-w, yt, z1], [-1, 0, 0], [0, 0, 1, 0, 1, 1, 0, 1]);
+    extra.push(sb.mesh(logo, { cast: false }));
+    for (const s of [-1, 1]) box(P, 1.22, h - 0.15, 0.04, s * 0.63, y, back - 0.02, 0xe6e8ea);
+    for (const x of [-0.95, -0.35, 0.35, 0.95]) box(C, 0.04, h - 0.3, 0.05, x, y, back - 0.06, 0xbfc5ca);
+    box(P, 2.56, 0.12, Lt, 0, deck + h + 0.06, (front + back) / 2, 0xd0d3d6);
   } else if (type === 'tank') {
-    const silo = model === 'silo';
-    const col = silo ? 0xb8bcc0 : 0xdfe4e8;
-    cyl(C, 1.25, Lt - 1.2, 0, deck + 1.3, (front + back) / 2, Math.PI / 2, 0, 0, col, 24);
+    const col = model === 'silo' ? 0xb8bcc0 : 0xe8ecef;
+    cyl(C, 1.25, Lt - 1.2, 0, deck + 1.3, (front + back) / 2, Math.PI / 2, 0, 0, col, 28);
     C.add(G.sphere(), mat(0, deck + 1.3, front - 0.6, 0, 0, 0, 2.5, 2.5, 0.8), col);
     C.add(G.sphere(), mat(0, deck + 1.3, back + 0.6, 0, 0, 0, 2.5, 2.5, 0.8), col);
-    for (let i = 0; i < 3; i++) box(D, 0.6, 0.15, 0.6, 0, deck + 2.6, front - 3 - i * 3.3);
-    box(P, 0.9, 0.6, 0.03, 1.0, deck + 1.3, back + 0.12, cargo.hazard ? 0xff8c00 : 0x2e86de, 0, 0, 0);
-    box(P, 0.12, 0.25, Lt - 2, 0, deck + 2.6, (front + back) / 2, 0x7f8c8d);
+    for (let z = front - 1.6; z > back + 1; z -= 2.2) cyl(P, 1.27, 0.08, 0, deck + 1.3, z, Math.PI / 2, 0, 0, 0x9aa0a6, 28);
+    for (let i = 0; i < 3; i++) cyl(P, 0.3, 0.2, 0, deck + 2.6, front - 3 - i * 3.3, 0, 0, 0, 0x7f8c8d, 12);
+    box(P, 0.6, 0.06, Lt - 2.4, 0, deck + 2.62, (front + back) / 2, 0x6d7a84);
+    for (const s of [-1, 1]) box(P, 0.03, 0.2, Lt - 2.4, s * 0.3, deck + 2.75, (front + back) / 2, 0xffd400);
+    box(P, 0.9, 0.6, 0.03, 1.0, deck + 1.3, back + 0.1, cargo.hazard ? 0xff8c00 : 0x2e86de);
+    box(P, 0.5, 2.4, 0.06, 0, deck + 1.3, back + 0.05, 0x7f8c8d);
   } else if (type === 'bulk') {
     const h = 2.1;
     box(P, 2.5, 0.12, Lt, 0, deck + 0.06, (front + back) / 2, 0x2c6e9e);
     for (const s of [-1, 1]) box(P, 0.08, h, Lt, s * 1.21, deck + h / 2, (front + back) / 2, 0x2c6e9e);
     box(P, 2.5, h, 0.08, 0, deck + h / 2, front - 0.04, 0x2c6e9e);
     box(P, 2.5, h, 0.08, 0, deck + h / 2, back + 0.04, 0x2c6e9e);
-    for (let i = 0; i < 8; i++) box(D, 0.06, h, 0.06, 1.26, deck + h / 2, front - 1 - i * 1.5);
+    for (let i = 0; i < 8; i++) for (const s of [-1, 1]) box(D, 0.06, h, 0.08, s * 1.26, deck + h / 2, front - 1 - i * 1.5);
     P.add(G.sphere(), mat(0, deck + h - 0.15, (front + back) / 2, 0, 0, 0, 2.3, 0.9, Lt - 0.5), 0xc9a45c);
   } else if (type === 'flatbed') {
     box(P, 2.5, 0.22, Lt, 0, deck, (front + back) / 2, 0x6d4c2f);
+    box(P, 2.5, 1.2, 0.1, 0, deck + 0.7, front - 0.05, 0x34495e);
     const top = deck + 0.11;
+    const straps = (y) => { for (let z = front - 1.8; z > back + 1; z -= 2.6) box(P, 2.56, 0.02, 0.05, 0, y, z, 0xf1c40f); };
     if (model === 'logs') {
       for (let row = 0; row < 3; row++)
         for (let i = 0; i < 4 - row; i++) {
           const x = (i - (3 - row) / 2) * 0.6;
           cyl(P, 0.3, Lt - 1.2, x, top + 0.3 + row * 0.52, (front + back) / 2, Math.PI / 2, 0, 0, row % 2 ? 0x8e5b32 : 0x7a4a26, 10);
+          for (const e of [front - 0.6, back + 0.6]) cyl(P, 0.29, 0.02, x, top + 0.3 + row * 0.52, e, Math.PI / 2, 0, 0, 0xd8b07a, 10);
         }
-      for (let i = 0; i < 5; i++) box(D, 0.08, 2.2, 0.08, 1.2, top + 1.1, front - 1 - i * 2.8), box(D, 0.08, 2.2, 0.08, -1.2, top + 1.1, front - 1 - i * 2.8);
+      for (let i = 0; i < 5; i++) for (const s of [-1, 1]) box(D, 0.08, 2.2, 0.08, s * 1.2, top + 1.1, front - 1 - i * 2.8);
     } else if (model === 'container') {
       const ct = new THREE.Mesh(G.box(), new THREE.MeshLambertMaterial({ map: tex.container(0x2471a3) }));
       ct.scale.set(2.44, 2.59, 12.19);
       ct.position.set(0, top + 1.3, (front + back) / 2);
       extra.push(ct);
+      straps(top + 2.62);
     } else if (model === 'coils') {
       for (let i = 0; i < 4; i++) {
-        cyl(C, 0.85, 1.6, 0, top + 0.86, front - 2 - i * 3.0, 0, 0, Math.PI / 2, 0xbfc5ca, 22);
+        cyl(C, 0.85, 1.6, 0, top + 0.86, front - 2 - i * 3.0, 0, 0, Math.PI / 2, 0xbfc5ca, 24);
+        cyl(P, 0.3, 1.62, 0, top + 0.86, front - 2 - i * 3.0, 0, 0, Math.PI / 2, 0x222222, 12);
         box(D, 1.6, 0.25, 1.4, 0, top + 0.12, front - 2 - i * 3.0);
+        box(P, 0.05, 1.8, 1.7, 0, top + 0.9, front - 2 - i * 3.0, 0xf1c40f);
       }
     } else if (model === 'beams') {
       for (let r = 0; r < 3; r++)
@@ -304,34 +392,40 @@ export function buildTrailer(cargo) {
           box(P, 0.5, 0.05, Lt - 0.6, x, y - 0.17, z, 0x5d6d7e);
           box(P, 0.06, 0.34, Lt - 0.6, x, y, z, 0x4a5a6a);
         }
+      straps(top + 1.4);
     }
   } else if (type === 'lowboy') {
-    // pescoço de ganso + plataforma rebaixada
     const low = 0.95;
-    box(P, 2.6, 0.3, 3.4, 0, deck, front - 1.6, 0x34495e);
-    box(P, 2.9, 0.3, Lt - 5.5, 0, low, (front - 3.4 + back + 2.1) / 2, 0x34495e);
-    box(P, 2.6, 0.3, 2.1, 0, deck - 0.1, back + 1.05, 0x34495e);
+    box(P, 2.6, 0.3, 3.4, 0, deck, front - 1.6, 0xc0392b);
+    box(P, 2.9, 0.3, Lt - 5.5, 0, low, (front - 3.4 + back + 2.1) / 2, 0xc0392b);
+    box(P, 2.6, 0.3, 2.1, 0, deck - 0.1, back + 1.05, 0xc0392b);
+    for (const s of [-1, 1]) box(P, 0.6, 1.6, 0.12, s * 0.8, deck + 0.7, back + 0.2, 0xc0392b, 0.5);
+    for (const s of [-1, 1]) box(P, 1.0, 0.6, 0.03, s * 0.7, deck + 0.6, back - 0.1, 0xffffff);
     const y = low + 0.15;
     const mz = (front - 3.4 + back + 2.1) / 2;
     if (model === 'tractor') {
       box(P, 1.3, 1.2, 3.2, 0, y + 1.3, mz + 0.3, 0x2e8b3a);
       box(P, 1.4, 1.5, 1.4, 0, y + 2.3, mz - 0.9, 0x2e8b3a);
-      box(D, 1.3, 1.0, 1.3, 0, y + 3.1, mz - 0.9);
+      box(P, 1.3, 1.0, 1.3, 0, y + 3.1, mz - 0.9, 0x1c2833);
       for (const s of [-1, 1]) {
-        cyl(D, 0.95, 0.6, s * 1.1, y + 0.95, mz - 1.0, 0, 0, Math.PI / 2, 0x222222);
-        cyl(D, 0.55, 0.4, s * 0.95, y + 0.55, mz + 1.5, 0, 0, Math.PI / 2, 0x222222);
+        cyl(P, 0.95, 0.6, s * 1.1, y + 0.95, mz - 1.0, 0, 0, Math.PI / 2, 0x222222);
+        cyl(P, 0.55, 0.62, s * 1.1, y + 0.95, mz - 1.0, 0, 0, Math.PI / 2, 0xf1c40f);
+        cyl(P, 0.55, 0.4, s * 0.95, y + 0.55, mz + 1.5, 0, 0, Math.PI / 2, 0x222222);
       }
     } else if (model === 'excavator') {
-      box(D, 0.7, 0.9, 4.8, 1.05, y + 0.45, mz, 0x222);
-      box(D, 0.7, 0.9, 4.8, -1.05, y + 0.45, mz, 0x222);
+      for (const s of [-1, 1]) {
+        box(D, 0.7, 0.9, 4.8, s * 1.05, y + 0.45, mz);
+        for (let k = 0; k < 5; k++) cyl(P, 0.22, 0.72, s * 1.05, y + 0.25, mz - 1.8 + k * 0.9, 0, 0, Math.PI / 2, 0x555555, 10);
+      }
       box(P, 2.6, 1.2, 3.6, 0, y + 1.5, mz - 0.6, 0xf1c40f);
       box(P, 1.0, 1.4, 1.2, -0.7, y + 2.8, mz + 0.4, 0xf1c40f);
+      box(P, 0.9, 1.0, 0.04, -0.7, y + 2.9, mz + 1.01, 0x1c2833);
       box(P, 0.5, 0.5, 4.0, 0.5, y + 2.6, mz + 2.4, 0xf1c40f, -0.35);
       box(P, 0.45, 0.45, 2.8, 0.5, y + 2.0, mz + 4.6, 0xf1c40f, 0.9);
       box(D, 1.0, 0.8, 0.8, 0.5, y + 1.0, mz + 5.2);
     } else if (model === 'transformer') {
       box(P, 2.6, 3.0, 4.2, 0, y + 1.5, mz, 0x7f8c8d);
-      for (let i = 0; i < 9; i++) box(P, 0.08, 2.4, 1.0, 1.36, y + 1.5, mz - 1.8 + i * 0.45, 0x95a5a6), box(P, 0.08, 2.4, 1.0, -1.36, y + 1.5, mz - 1.8 + i * 0.45, 0x95a5a6);
+      for (let i = 0; i < 9; i++) for (const s of [-1, 1]) box(P, 0.08, 2.4, 1.0, s * 1.36, y + 1.5, mz - 1.8 + i * 0.45, 0x95a5a6);
       for (let i = 0; i < 3; i++) cyl(P, 0.18, 1.3, (i - 1) * 0.8, y + 3.6, mz + 1, 0, 0, 0, 0x8b4513, 10);
     } else if (model === 'blade') {
       const len = 30;
@@ -345,24 +439,22 @@ export function buildTrailer(cargo) {
       box(C, 0.25, 3.0, 0.25, 1.2, y + 2, mz + 2.2, 0xbdc3c7);
       box(C, 0.25, 3.0, 0.25, -1.2, y + 2, mz + 2.2, 0xbdc3c7);
     }
-    // faixas de carga indivisível
     box(P, 2.3, 0.35, 0.03, 0, deck + 0.9, back - 0.06, 0xffc107);
   }
 
-  meshesFrom([[P, M.flat], [D, M.dark], [C, M.chrome], [RE, M.red]], root);
+  meshesFrom([[P, M.flat], [D, M.dark], [C, M.flatChrome], [RE, M.red], [AM, M.amber], [PN, M.panel], [ST, M.steel]], root);
   for (const e of extra) if (e) { e.castShadow = true; root.add(e); }
-
   const axles = [];
   for (let i = 0; i < nAx; i++) {
-    const a = axle(back + 1.6 + i * axleSpacing, 0.92, 0.5, 0.62);
+    const a = axleMesh(back + 1.6 + i * axleSpacing, 1.75, 0.5, 0.28, true);
     axles.push(a);
     root.add(a);
   }
   const night = new THREE.Group();
-  for (const s2 of [-1, 1]) {
+  for (const s of [-1, 1]) {
     const rg = new THREE.Sprite(M.glowRed);
     rg.scale.set(0.9, 0.9, 1);
-    rg.position.set(s2 * 1.0, deck - 0.35, back - 0.15);
+    rg.position.set(s * 1.0, deck - 0.4, back - 0.15);
     night.add(rg);
   }
   night.visible = false;
@@ -372,19 +464,17 @@ export function buildTrailer(cargo) {
   blob.position.set(0, 0.05, (front + back) / 2);
   root.add(blob);
   root.traverse((o) => { if (o.isMesh && o !== blob) o.castShadow = true; });
-  blob.castShadow = false;
   return { root, axles, Lk: -axC, Lt, front, back, blob, night };
 }
 
-// ---------- Física do conjunto ----------
+// ---------- física ----------
 const tmp = { x: 0, z: 0 };
-const pt = { x: 0, z: 0 };
 
 export class Rig {
   constructor(scene, def, shadows) {
     this.scene = scene;
     this.shadows = shadows;
-    this.x = 0; this.z = 0; this.h = 0;
+    this.x = 0; this.z = 0; this.h = 0; this.y = 0; this.pitch = 0; this.tpitch = 0;
     this.v = 0; this.steer = 0; this.acc = 0;
     this.trailer = null; this.th = 0;
     this.cargo = null;
@@ -440,9 +530,7 @@ export class Rig {
     return t * 1000;
   }
 
-  get speedKmh() {
-    return Math.abs(this.v) * 3.6;
-  }
+  get speedKmh() { return Math.abs(this.v) * 3.6; }
 
   place(x, z, h) {
     this.x = x; this.z = z; this.h = h; this.th = h;
@@ -450,7 +538,6 @@ export class Rig {
     this.sync();
   }
 
-  // Centro aproximado do conjunto (usado para checar a área de entrega)
   center(out) {
     const fx = Math.sin(this.h), fz = Math.cos(this.h);
     if (this.trailer) {
@@ -466,6 +553,7 @@ export class Rig {
   }
 
   update(dt, inp, world, obstacles) {
+    this.world = world;
     const def = this.def;
     const m = this.mass;
     const P = def.hp * 735.5 * 2.3;
@@ -474,7 +562,6 @@ export class Rig {
     let F = 0;
     const brake = inp.brake, thr = inp.throttle;
 
-    // câmbio: D (frente), N (neutro), R (ré). Em modo automático, segurar o freio parado engata a ré.
     if (inp.gear === 'auto') {
       this.stopT = brake > 0.1 && Math.abs(v) < 0.4 && thr < 0.1 ? (this.stopT || 0) + dt : 0;
       if (this.stopT > 0.3) this.reverse = true;
@@ -496,13 +583,14 @@ export class Rig {
       if (brake > 0 && v > 0) F -= brake * m * 6.5;
     }
     if (inp.handbrake) F -= Math.sign(v) * m * 5;
+    // gravidade nos aclives: carga pesada sente a subida
+    const grade = Math.sin(this.pitch) * 0.6 + Math.sin(this.trailer ? this.tpitch : this.pitch) * 0.4;
+    const Fg = -m * 9.81 * grade;
     const cda = this.trailer ? (this.cargo.trailer === 'box' ? 9 : 7) : def.rigid ? 6.5 : 5;
     const drag = 0.5 * 1.2 * cda * v * Math.abs(v);
     const roll = (0.011 * m * 9.81 + (thr < 0.05 && brake < 0.05 ? m * 0.35 : 0)) * Math.sign(v);
-    let a = (F - drag) / m;
+    v += ((F + (Math.abs(v) > 0.2 || thr > 0 ? Fg : 0) - drag) / m) * dt;
     const rollA = roll / m;
-    v += a * dt;
-    // atrito não inverte o sentido
     if (Math.abs(rollA * dt) > Math.abs(v) && F === 0) v = 0;
     else v -= rollA * dt;
     const want = !drive ? 0 : !this.reverse ? (thr > 0 ? 1 : 0) : autoRev ? (brake > 0 ? -1 : 0) : (thr > 0 ? -1 : 0);
@@ -512,8 +600,8 @@ export class Rig {
     v = Math.max(v, -5);
     this.acc = (v - this.v) / Math.max(dt, 1e-3);
     this.v = v;
+    this.grade = grade;
 
-    // direção (ângulo máximo diminui com a velocidade)
     const maxSteer = 0.6 / (1 + (v * v) / 160);
     const target = inp.steer * maxSteer;
     const rate = inp.steer === 0 ? 2.6 : 1.7;
@@ -526,7 +614,6 @@ export class Rig {
     this.x += Math.sin(this.h) * v * dt;
     this.z += Math.cos(this.h) * v * dt;
 
-    // articulação da carreta
     if (this.trailer) {
       const hz = this.model.hitchZ;
       const rel = this.h - this.th;
@@ -540,13 +627,13 @@ export class Rig {
 
     this.collide(world, obstacles, dt);
 
-    // rotação das rodas e giro do motor
     this.wheelRot += (v * dt) / this.model.wr;
     const ratio = Math.abs(v) / vmax;
     const gear = Math.min(5, Math.floor(ratio * 6));
     const inGear = ratio * 6 - gear;
     this.gear = this.reverse ? 'R' : inp.gear === 'N' ? 'N' : Math.abs(v) < 0.3 ? (inp.gear === 'auto' ? 'N' : 'D') : String(gear + 1);
-    const rpmT = !this.engineOn ? 0 : Math.abs(v) < 0.3 || inp.gear === 'N' ? 0.18 + thr * 0.5 : 0.3 + inGear * 0.6 * (0.5 + thr * 0.5);
+    const load = Math.max(thr, grade > 0.02 ? 0.7 : 0);
+    const rpmT = !this.engineOn ? 0 : Math.abs(v) < 0.3 || inp.gear === 'N' ? 0.18 + thr * 0.5 : 0.3 + inGear * 0.6 * (0.5 + load * 0.5);
     this.rpm += (rpmT - this.rpm) * Math.min(1, dt * 6);
     this.sync();
   }
@@ -554,10 +641,8 @@ export class Rig {
   circles(out) {
     const md = this.model;
     const fx = Math.sin(this.h), fz = Math.cos(this.h);
-    const n = 0;
     out.length = 0;
-    const steps = [md.zf - 0.9, (md.zf + md.rearEnd) / 2, md.rearEnd + 0.9];
-    for (const s of steps) out.push({ x: this.x + fx * s, z: this.z + fz * s, r: md.cabW / 2 + 0.1, t: false });
+    for (const s of [md.zf - 0.9, (md.zf + md.rearEnd) / 2, md.rearEnd + 0.9]) out.push({ x: this.x + fx * s, z: this.z + fz * s, r: md.cabW / 2 + 0.1, t: false });
     if (this.trailer) {
       const hx = this.x + fx * md.hitchZ, hz = this.z + fz * md.hitchZ;
       const tx = Math.sin(this.th), tz = Math.cos(this.th);
@@ -565,20 +650,19 @@ export class Rig {
       for (let s = tr.front - 1.2; s > tr.back + 0.5; s -= 2.4) out.push({ x: hx + tx * s, z: hz + tz * s, r: 1.35, t: true });
       out.push({ x: hx + tx * (tr.back + 1.3), z: hz + tz * (tr.back + 1.3), r: 1.35, t: true });
     }
-    return n;
+    return out;
   }
 
   collide(world, obstacles, dt) {
     this.collCooldown -= dt;
     const cs = this._cs || (this._cs = []);
     this.circles(cs);
-    let px = 0, pz = 0, maxPen = 0, trailerHit = false;
+    let px = 0, pz = 0, maxPen = 0;
     for (const c of cs) {
       const pen = world.resolveCircle(c, c.r, tmp);
       if (pen > 0.01) {
         px += tmp.x * (c.t ? 0.6 : 1); pz += tmp.z * (c.t ? 0.6 : 1);
         if (pen > maxPen) maxPen = pen;
-        if (c.t) trailerHit = true;
       }
       for (const o of obstacles) {
         const dx = c.x - o.x, dz = c.z - o.z, rr = c.r + o.r;
@@ -595,34 +679,45 @@ export class Rig {
     if (maxPen > 0) {
       this.x += px; this.z += pz;
       const sp = Math.abs(this.v) * 3.6;
-      if (sp > 4 && this.collCooldown <= 0) {
+      if (sp > 4 && maxPen > 0.12 && this.collCooldown <= 0) {
         this.lastImpact = sp;
         this.collCooldown = 0.6;
       }
-      if (trailerHit && Math.abs(this.v) > 1) this.th += (Math.random() - 0.5) * 0.002;
-      this.v *= sp > 15 ? -0.12 : 0.6;
+      this.v *= sp > 15 && maxPen > 0.3 ? -0.12 : maxPen > 0.12 ? 0.6 : 0.97;
     }
   }
 
   sync() {
     const md = this.model;
-    md.root.position.set(this.x, 0, this.z);
-    md.root.rotation.y = this.h;
+    const fx = Math.sin(this.h), fz = Math.cos(this.h);
+    const W = this.world;
+    let yr = 0, yf = 0;
+    if (W) {
+      yr = W.heightAt(this.x, this.z);
+      yf = W.heightAt(this.x + fx * md.wb, this.z + fz * md.wb);
+    }
+    this.y = yr;
+    this.pitch = Math.atan2(yf - yr, md.wb);
+    md.root.position.set(this.x, yr, this.z);
+    md.root.rotation.set(-this.pitch, this.h, 0);
     for (let i = 0; i < md.front.length; i++) {
       const w = md.front[i];
       w.rotation.y = this.steer * (i < 2 ? 1 : 0.6);
       w.children[0].rotation.x = this.wheelRot;
     }
     for (const a of md.rear) a.rotation.x = this.wheelRot;
-    // inclinação da cabine
     const lat = (this.yaw || 0) * this.v;
     md.body.rotation.z += (Math.max(-0.05, Math.min(0.05, -lat * 0.012)) - md.body.rotation.z) * 0.2;
     md.body.rotation.x += (Math.max(-0.03, Math.min(0.03, -this.acc * 0.006)) - md.body.rotation.x) * 0.2;
     if (this.trailer) {
-      const fx = Math.sin(this.h), fz = Math.cos(this.h);
       const tr = this.trailer;
-      tr.root.position.set(this.x + fx * md.hitchZ, 0, this.z + fz * md.hitchZ);
-      tr.root.rotation.y = this.th;
+      const hx = this.x + fx * md.hitchZ, hz = this.z + fz * md.hitchZ;
+      const yh = yr + (yf - yr) * (md.hitchZ / md.wb);
+      const ax = hx - Math.sin(this.th) * tr.Lk, az = hz - Math.cos(this.th) * tr.Lk;
+      const ya = W ? W.heightAt(ax, az) : 0;
+      this.tpitch = Math.atan2(yh - ya, tr.Lk);
+      tr.root.position.set(hx, yh, hz);
+      tr.root.rotation.set(-this.tpitch, this.th, 0);
       const rot = this.wheelRot * (md.wr / 0.5);
       for (const a of tr.axles) a.rotation.x = rot;
     }
