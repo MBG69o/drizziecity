@@ -2,12 +2,14 @@
 import * as THREE from 'three';
 import { Builder, mat, G } from './geo.js';
 import { GRID, roadCoord, ROAD_W } from './data.js';
+import { tex } from './textures.js';
 
 const RH = ROAD_W / 2;
 const COLORS = [0xc0392b, 0x2980b9, 0xecf0f1, 0x2c3e50, 0x7f8c8d, 0xf1c40f, 0x27ae60, 0x8e44ad, 0xd35400, 0x111111];
 
 function carGeo(type, color) {
   const b = new Builder(true);
+  const lb = new Builder(true);
   const box = (w, h, d, x, y, z, c, rx = 0) => b.add(G.box(), mat(x, y, z, rx, 0, 0, w, h, d), c);
   const glass = 0x1c2833;
   let L = 4.4, W = 1.8;
@@ -26,15 +28,25 @@ function carGeo(type, color) {
     box(W + 0.02, 0.9, L - 1.5, 0, 2.3, -0.4, glass);
     box(W - 0.2, 1.2, 0.05, 0, 2.2, L / 2 + 0.01, glass);
   }
-  box(0.4, 0.15, 0.05, W / 2 - 0.3, 0.75, L / 2 + 0.01, 0xfff8e1);
-  box(0.4, 0.15, 0.05, -W / 2 + 0.3, 0.75, L / 2 + 0.01, 0xfff8e1);
-  box(0.4, 0.15, 0.05, W / 2 - 0.3, 0.8, -L / 2 - 0.01, 0xd63031);
-  box(0.4, 0.15, 0.05, -W / 2 + 0.3, 0.8, -L / 2 - 0.01, 0xd63031);
+  const lbox = (w, h, d, x, y, z, c) => lb.add(G.box(), mat(x, y, z, 0, 0, 0, w, h, d), c);
+  lbox(0.42, 0.16, 0.06, W / 2 - 0.3, 0.75, L / 2 + 0.01, 0xfff8e1);
+  lbox(0.42, 0.16, 0.06, -W / 2 + 0.3, 0.75, L / 2 + 0.01, 0xfff8e1);
+  lbox(0.42, 0.16, 0.06, W / 2 - 0.3, 0.8, -L / 2 - 0.01, 0xff2a1a);
+  lbox(0.42, 0.16, 0.06, -W / 2 + 0.3, 0.8, -L / 2 - 0.01, 0xff2a1a);
   const wr = type === 2 ? 0.55 : 0.34;
   for (const s of [-1, 1])
     for (const z of [L / 2 - (type === 2 ? 2.2 : 0.85), -L / 2 + (type === 2 ? 2.5 : 0.85)])
       b.add(G.cyl(10), mat(s * (W / 2 - 0.1), wr, z, 0, 0, Math.PI / 2, wr * 2, 0.26, wr * 2), 0x151515);
-  return { geo: b.geometry(), L };
+  // corpo + luzes em grupos (luzes sem sombreamento = acesas)
+  const n0 = b.idx.length;
+  const off = b.count;
+  for (let i = 0; i < lb.count * 3; i++) { b.pos.push(lb.pos[i]); b.nor.push(lb.nor[i]); b.col.push(lb.col[i]); }
+  for (let i = 0; i < lb.count * 2; i++) b.uv.push(lb.uv[i]);
+  for (const k of lb.idx) b.idx.push(k + off);
+  const geo = b.geometry();
+  geo.addGroup(0, n0, 0);
+  geo.addGroup(n0, lb.idx.length, 1);
+  return { geo, L, W };
 }
 
 function bez(p0, p1, p2, t, out) {
@@ -48,7 +60,10 @@ export class Traffic {
   constructor(scene, count) {
     this.scene = scene;
     this.cars = [];
-    const mtl = new THREE.MeshPhongMaterial({ vertexColors: true, shininess: 70, specular: 0x555555 });
+    const mtl = [new THREE.MeshPhongMaterial({ vertexColors: true, shininess: 70, specular: 0x555555 }), new THREE.MeshBasicMaterial({ vertexColors: true })];
+    this.beamMat = new THREE.MeshBasicMaterial({ map: tex.beam(), transparent: true, opacity: 0.7, depthWrite: false, blending: THREE.AdditiveBlending });
+    const beamG = new THREE.PlaneGeometry(6, 16);
+    beamG.rotateX(-Math.PI / 2);
     const geos = {};
     for (let i = 0; i < count; i++) {
       const type = i % 9 === 4 ? 2 : i % 3 === 1 ? 1 : 0;
@@ -57,8 +72,12 @@ export class Traffic {
       if (!geos[k]) geos[k] = carGeo(type, color);
       const mesh = new THREE.Mesh(geos[k].geo, mtl);
       mesh.castShadow = true;
+      const beam = new THREE.Mesh(beamG, this.beamMat);
+      beam.position.set(0, 0.09, geos[k].L / 2 + 8);
+      beam.visible = false;
+      mesh.add(beam);
       scene.add(mesh);
-      const car = { mesh, L: geos[k].L, type, off: type === 2 ? 7.5 : i % 2 ? 2.5 : 7.5, v: 0, vmax: type === 2 ? 11 : 12 + (i % 4), x: 0, z: 0, h: 0, stopT: 0 };
+      const car = { mesh, beam, L: geos[k].L, type, off: type === 2 ? 7.5 : i % 2 ? 2.5 : 7.5, v: 0, vmax: type === 2 ? 11 : 12 + (i % 4), x: 0, z: 0, h: 0, stopT: 0 };
       this.cars.push(car);
     }
     this.p = { x: 0, z: 0 };
@@ -165,6 +184,10 @@ export class Traffic {
       car.mesh.position.set(car.x, 0, car.z);
       car.mesh.rotation.y = car.h;
     }
+  }
+
+  setNight(n) {
+    for (const c of this.cars) c.beam.visible = n > 0.35;
   }
 
   // círculos de colisão para o caminhão do jogador

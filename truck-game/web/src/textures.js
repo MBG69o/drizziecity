@@ -324,62 +324,86 @@ export const tex = {
     return finish(c, false);
   }),
 
-  // Fachadas: 2 colunas x 2 andares por repetição
+  // Fachadas: 4 colunas x 4 andares por repetição + mapa de luzes noturnas
   facade: (style) => memo('facade' + style, () => {
-    const s = SIZE / 2;
+    const s = SIZE;
     const [c, ctx] = canvas(s, s);
+    const [ce, ex] = canvas(s / 2, s / 2);
+    ex.fillStyle = '#000';
+    ex.fillRect(0, 0, s / 2, s / 2);
     const r = rng(200 + style);
     const st = [
-      { wall: '#cfd6dc', win: ['#3a5a78', '#4a7090', '#2d4a66'], frame: '#8a959e', mw: 0.78, mh: 0.62 }, // escritório vidro
-      { wall: '#a8563d', win: ['#24323e', '#3b4d5c', '#d9c38a'], frame: '#e8e0d0', mw: 0.42, mh: 0.5 },   // tijolo
-      { wall: '#e3dccd', win: ['#2b3a47', '#3f5566', '#ccb57a'], frame: '#9c9483', mw: 0.5, mh: 0.48 },   // apartamentos
-      { wall: '#6f7f8c', win: ['#1d2d3c', '#2c4a64', '#7fa5c2'], frame: '#40505c', mw: 0.9, mh: 0.8 },    // torre espelhada
+      { wall: '#c9d0d6', win: ['#3a5a78', '#4a7090', '#2d4a66'], frame: '#7f8a93', mw: 0.78, mh: 0.62 },
+      { wall: '#9c4f39', win: ['#24323e', '#3b4d5c', '#2f3d48'], frame: '#ddd4c2', mw: 0.42, mh: 0.5 },
+      { wall: '#d9d2c3', win: ['#2b3a47', '#3f5566', '#33414d'], frame: '#948c7b', mw: 0.5, mh: 0.48 },
+      { wall: '#66757f', win: ['#1d2d3c', '#2c4a64', '#3a5f7d'], frame: '#3a4954', mw: 0.9, mh: 0.8 },
     ][style];
     ctx.fillStyle = st.wall;
     ctx.fillRect(0, 0, s, s);
     noise(ctx, s, s, 18, 210 + style);
     if (style === 1) {
-      ctx.strokeStyle = 'rgba(80,35,22,0.45)';
+      ctx.strokeStyle = 'rgba(70,30,20,0.4)';
       ctx.lineWidth = 1;
-      const bh = s / 48;
-      for (let y = 0; y < 48; y++) {
+      const bh = s / 96;
+      for (let y = 0; y < 96; y++) {
         ctx.beginPath(); ctx.moveTo(0, y * bh); ctx.lineTo(s, y * bh); ctx.stroke();
-        for (let x = 0; x < 16; x++) {
-          const xx = ((x + (y % 2) * 0.5) * s) / 16;
+        for (let x = 0; x < 32; x++) {
+          const xx = ((x + (y % 2) * 0.5) * s) / 32;
           ctx.beginPath(); ctx.moveTo(xx, y * bh); ctx.lineTo(xx, (y + 1) * bh); ctx.stroke();
         }
       }
     }
-    const cell = s / 2;
-    for (let fy = 0; fy < 2; fy++) {
-      for (let fx = 0; fx < 2; fx++) {
+    const N = 4, cell = s / N;
+    const lit = ['#ffd38a', '#ffe7b0', '#fff4d6', '#cfe3ff', '#ffc070'];
+    for (let fy = 0; fy < N; fy++) {
+      for (let fx = 0; fx < N; fx++) {
         const x0 = fx * cell, y0 = fy * cell;
         const ww = cell * st.mw, wh = cell * st.mh;
         const wx = x0 + (cell - ww) / 2, wy = y0 + (cell - wh) / 2 - cell * 0.04;
         ctx.fillStyle = st.frame;
-        ctx.fillRect(wx - 4, wy - 4, ww + 8, wh + 8);
+        ctx.fillRect(wx - 3, wy - 3, ww + 6, wh + 6);
         const g = ctx.createLinearGradient(wx, wy, wx + ww, wy + wh);
         const col = st.win[(r() * st.win.length) | 0];
         g.addColorStop(0, col);
-        g.addColorStop(0.55, '#9fb8cc');
-        g.addColorStop(0.6, col);
-        g.addColorStop(1, '#1a2530');
+        g.addColorStop(0.5, '#8fa8bc');
+        g.addColorStop(0.56, col);
+        g.addColorStop(1, '#141d26');
         ctx.fillStyle = g;
         ctx.fillRect(wx, wy, ww, wh);
         ctx.fillStyle = st.frame;
-        ctx.fillRect(wx + ww / 2 - 2, wy, 4, wh);
-        if (style !== 3) ctx.fillRect(wx, wy + wh * 0.35, ww, 3);
+        ctx.fillRect(wx + ww / 2 - 1.5, wy, 3, wh);
+        if (style !== 3) ctx.fillRect(wx, wy + wh * 0.35, ww, 2);
         if (style === 1 || style === 2) {
           ctx.fillStyle = 'rgba(0,0,0,0.25)';
-          ctx.fillRect(wx - 6, wy + wh + 4, ww + 12, 6);
+          ctx.fillRect(wx - 4, wy + wh + 3, ww + 8, 4);
+        }
+        if (r() < 0.42) {
+          const k = 0.5;
+          const eg = ex.createLinearGradient(0, wy * k, 0, (wy + wh) * k);
+          const lc = lit[(r() * lit.length) | 0];
+          eg.addColorStop(0, lc);
+          eg.addColorStop(1, '#6b4a20');
+          ex.fillStyle = eg;
+          ex.fillRect(wx * k, wy * k, ww * k, wh * k);
         }
       }
       if (style === 0 || style === 3) {
         ctx.fillStyle = st.frame;
-        ctx.fillRect(0, fy * cell + cell - 6, s, 6);
+        ctx.fillRect(0, fy * cell + cell - 4, s, 4);
       }
     }
-    return finish(c);
+    // sujeira escorrida
+    for (let i = 0; i < 40; i++) {
+      const x = r() * s, h = s * (0.05 + r() * 0.2), y = r() * s;
+      const g = ctx.createLinearGradient(0, y, 0, y + h);
+      g.addColorStop(0, 'rgba(40,35,30,0.12)');
+      g.addColorStop(1, 'rgba(40,35,30,0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(x, y, 2 + r() * 6, h);
+    }
+    const t = finish(c);
+    t.userData.emissive = finish(ce);
+    return t;
   }),
 
   warehouse: () => memo('warehouse', () => {
@@ -469,16 +493,91 @@ export const tex = {
     return finish(c, false);
   }),
 
+  // Pintura com desgaste e poeira (mais escura perto do chão)
   paint: () => memo('paint', () => {
-    const s = 256;
+    const s = 512;
     const [c, ctx] = canvas(s, s);
     const g = ctx.createLinearGradient(0, 0, 0, s);
     g.addColorStop(0, '#ffffff');
-    g.addColorStop(0.45, '#f0f0f0');
-    g.addColorStop(1, '#bdbdbd');
+    g.addColorStop(0.5, '#eeeeee');
+    g.addColorStop(1, '#c4c4c4');
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, s, s);
+    const r = rng(777);
+    // poeira subindo da parte de baixo (UV v=0 é a base)
+    const d = ctx.createLinearGradient(0, s, 0, s * 0.35);
+    d.addColorStop(0, 'rgba(110,92,70,0.55)');
+    d.addColorStop(1, 'rgba(110,92,70,0)');
+    ctx.fillStyle = d;
+    ctx.fillRect(0, 0, s, s);
+    for (let i = 0; i < 2600; i++) {
+      const y = s - Math.pow(r(), 1.8) * s;
+      ctx.fillStyle = `rgba(${90 + r() * 40},${75 + r() * 30},${55 + r() * 25},${0.06 + r() * 0.16})`;
+      ctx.beginPath(); ctx.arc(r() * s, y, 0.5 + r() * 3.5, 0, 7); ctx.fill();
+    }
+    // escorridos da chuva
+    for (let i = 0; i < 70; i++) {
+      const x = r() * s, y = r() * s * 0.4, h = s * (0.15 + r() * 0.5);
+      const gg = ctx.createLinearGradient(0, y, 0, y + h);
+      gg.addColorStop(0, 'rgba(80,70,55,0)');
+      gg.addColorStop(0.5, 'rgba(80,70,55,0.14)');
+      gg.addColorStop(1, 'rgba(80,70,55,0)');
+      ctx.fillStyle = gg;
+      ctx.fillRect(x, y, 1 + r() * 3, h);
+    }
+    noise(ctx, s, s, 8, 778);
     return finish(c);
+  }),
+
+  // Pátio do showroom: padrão geométrico escuro
+  backdrop: () => memo('backdrop', () => {
+    const w = 1024, h = 512;
+    const [c, ctx] = canvas(w, h);
+    const g = ctx.createLinearGradient(0, 0, 0, h);
+    g.addColorStop(0, '#08121f');
+    g.addColorStop(1, '#0e2a40');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, w, h);
+    const r = rng(901);
+    const S = 64;
+    for (let y = 0; y < h / S + 1; y++)
+      for (let x = 0; x < w / S + 1; x++) {
+        const ox = x * S + (y % 2) * S / 2, oy = y * S * 0.87;
+        ctx.fillStyle = `rgba(${40 + r() * 30},${90 + r() * 60},${130 + r() * 70},${0.05 + r() * 0.12})`;
+        ctx.beginPath();
+        ctx.moveTo(ox, oy); ctx.lineTo(ox + S / 2, oy + S * 0.87); ctx.lineTo(ox - S / 2, oy + S * 0.87); ctx.closePath();
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(120,200,255,0.06)';
+        ctx.stroke();
+      }
+    return finish(c, false);
+  }),
+
+  glow: () => memo('glow', () => {
+    const s = 128;
+    const [c, ctx] = canvas(s, s);
+    const g = ctx.createRadialGradient(s / 2, s / 2, 0, s / 2, s / 2, s / 2);
+    g.addColorStop(0, 'rgba(255,255,255,1)');
+    g.addColorStop(0.25, 'rgba(255,240,200,0.55)');
+    g.addColorStop(1, 'rgba(255,220,150,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, s, s);
+    return finish(c, false);
+  }),
+
+  // Facho do farol projetado no asfalto
+  beam: () => memo('beam', () => {
+    const w = 128, h = 256;
+    const [c, ctx] = canvas(w, h);
+    const g = ctx.createRadialGradient(w / 2, h, 0, w / 2, h, h);
+    g.addColorStop(0, 'rgba(255,245,220,0.85)');
+    g.addColorStop(0.5, 'rgba(255,240,210,0.35)');
+    g.addColorStop(1, 'rgba(255,240,210,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.moveTo(w * 0.42, h); ctx.lineTo(0, 0); ctx.lineTo(w, 0); ctx.lineTo(w * 0.58, h);
+    ctx.fill();
+    return finish(c, false);
   }),
 
   grill: () => memo('grill', () => {

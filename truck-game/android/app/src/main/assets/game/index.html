@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-<meta name="theme-color" content="#0d1117">
+<meta name="theme-color" content="#070b14">
 <title>Drizzie Truck</title>
 <link rel="stylesheet" href="style.css">
 </head>
@@ -17,78 +17,111 @@
   <div id="loadmsg">Carregando…</div>
 </div>
 
-<div id="hud" class="hidden">
-  <div id="profile" class="glass">
-    <div class="lvl"><b id="lvl">1</b><small>NÍVEL</small></div>
-    <div class="pinfo">
-      <div id="money">R$ 0</div>
-      <div class="xpbar"><i id="xpbar"></i></div>
-      <small id="xptext">0 / 200 XP</small>
+<!-- ============ SHOWROOM / MENU PRINCIPAL ============ -->
+<div id="title" class="hidden">
+  <div id="topbar">
+    <div class="avatar"><svg viewBox="0 0 64 64"><circle cx="32" cy="24" r="12" fill="#f1c9a5"/><path d="M20 22c0-9 6-14 12-14s13 5 12 14c-3-5-8-6-12-6s-9 1-12 6z" fill="#6b3f1f"/><path d="M10 64c2-14 11-20 22-20s20 6 22 20z" fill="#1d2633"/><path d="M27 44h10l-5 9z" fill="#c8102e"/></svg></div>
+    <div class="who"><b id="pname">Motorista</b><small id="plvl">Nv 1 / XP 0</small></div>
+    <button class="skew dark" data-act="rename"><span>Mudar nome</span></button>
+    <div class="tb-fill"></div>
+    <button class="skew light" data-act="garage"><span>Garagem</span></button>
+    <button class="skew light" data-act="settings"><span>Ajustes</span></button>
+  </div>
+
+  <div id="leftpanel">
+    <div class="lp-head"><b>Seu desempenho</b></div>
+    <div id="perf"></div>
+  </div>
+
+  <div id="truckinfo">
+    <div class="ti-row"><button class="navb" data-act="prevtruck">‹</button><div class="ti-name" id="tiname"></div><button class="navb" data-act="nexttruck">›</button></div>
+    <div class="ti-specs" id="tispecs"></div>
+    <div id="tiaction"></div>
+  </div>
+
+  <div id="bottombar">
+    <div class="badge"><svg viewBox="0 0 64 64"><circle cx="32" cy="32" r="30" fill="#0e1a2b"/><path d="M14 38h22V22H14zM36 28h8l6 7v3H36z" fill="#ffb703"/><circle cx="21" cy="42" r="4" fill="#e9eef3"/><circle cx="43" cy="42" r="4" fill="#e9eef3"/></svg></div>
+    <div class="company"><div class="cname">Drizzie Logística</div>
+      <div class="strip" id="strip"></div>
     </div>
   </div>
+  <button id="play" class="drive"><span>DIRIGIR</span></button>
+  <div class="ver">v1.1.0</div>
+</div>
 
-  <div id="jobpanel" class="glass">
+<!-- ============ HUD ============ -->
+<div id="hud" class="hidden">
+  <div id="mapwrap"><canvas id="minimap" width="300" height="300"></canvas><div id="dist"></div></div>
+  <div id="profile"><b id="lvl">Nv 1</b><span id="money">R$ 0</span><div class="xpbar"><i id="xpbar"></i></div></div>
+
+  <div id="jobpanel">
     <div id="jobtitle">Sem frete ativo</div>
-    <div id="jobsub">Abra a Central de Fretes 📋</div>
+    <div id="jobsub">Toque em 📋 para escolher uma carga</div>
   </div>
 
-  <div id="mapwrap"><canvas id="minimap" width="300" height="300"></canvas><div id="dist"></div></div>
   <div id="topbtns">
     <button class="rb" data-act="jobs" title="Fretes">📋</button>
-    <button class="rb" data-act="garage" title="Garagem">🚚</button>
-    <button class="rb" data-act="camera" title="Câmera">🎥</button>
-    <button class="rb" data-act="menu" title="Menu">☰</button>
+    <button class="rb" data-act="camera" title="Câmera"><svg viewBox="0 0 24 24"><path d="M3 7h12v10H3zM15 10l6-3v10l-6-3z" fill="none" stroke="currentColor" stroke-width="1.8"/></svg></button>
+    <button class="rb" data-act="menu" title="Menu"><svg viewBox="0 0 24 24"><circle cx="6" cy="12" r="1.8" fill="currentColor"/><circle cx="12" cy="12" r="1.8" fill="currentColor"/><circle cx="18" cy="12" r="1.8" fill="currentColor"/></svg></button>
+    <button class="rb" data-act="pause" title="Pausa"><svg viewBox="0 0 24 24"><path d="M8 5v14M16 5v14" stroke="currentColor" stroke-width="3"/></svg></button>
   </div>
 
-  <div id="steer">
-    <button id="left" class="pad arrow">◀</button>
-    <button id="right" class="pad arrow">▶</button>
+  <!-- volante -->
+  <div id="wheelwrap">
+    <button id="left" class="arrowb">⇦</button>
+    <div id="wheel"><svg viewBox="0 0 200 200">
+      <circle cx="100" cy="100" r="88" fill="none" stroke="rgba(255,255,255,.55)" stroke-width="5"/>
+      <circle cx="100" cy="100" r="74" fill="none" stroke="rgba(255,255,255,.25)" stroke-width="2"/>
+      <path d="M30 95 Q100 60 170 95 L160 112 Q100 88 40 112Z" fill="rgba(255,255,255,.08)" stroke="rgba(255,255,255,.5)" stroke-width="2"/>
+      <path d="M78 130 Q100 175 122 130" fill="none" stroke="rgba(255,255,255,.5)" stroke-width="2"/>
+      <rect x="72" y="88" width="56" height="40" rx="12" fill="rgba(0,0,0,.25)" stroke="rgba(255,255,255,.5)" stroke-width="2"/>
+      <path d="M86 104h20l8-6v20l-8-6H86z" fill="none" stroke="rgba(255,255,255,.7)" stroke-width="2"/>
+      <rect x="96" y="12" width="8" height="14" rx="2" fill="#c8102e"/>
+    </svg></div>
+    <button id="right" class="arrowb">⇨</button>
   </div>
+  <button id="lightsbtn" class="rb small2" title="Faróis"><svg viewBox="0 0 24 24"><path d="M10 6c-4 0-6 3-6 6s2 6 6 6c2 0 3-2 3-6s-1-6-3-6zM15 8h6M15 12h6M15 16h6" fill="none" stroke="currentColor" stroke-width="1.8"/></svg></button>
+
+  <!-- câmbio e pedais -->
+  <div id="gearsel"><button data-g="D">D</button><button data-g="N">N</button><button data-g="R">R</button></div>
   <div id="pedals">
-    <button id="horn" class="rb small">📯</button>
-    <button id="brake" class="pad pedal brake"><span>FREIO<br><small>segure p/ ré</small></span></button>
-    <button id="gas" class="pad pedal gas"><span>ACELERAR</span></button>
+    <button id="brake" class="pad pedal brake"><i></i></button>
+    <button id="gas" class="pad pedal gas"><i></i></button>
   </div>
+  <button id="enginebtn" class="hidden"><span>Ligar<br>Motor</span><i></i></button>
 
-  <div id="dash" class="glass">
-    <svg viewBox="0 0 200 120" id="gauge">
-      <path d="M20 110 A80 80 0 0 1 180 110" class="track"/>
-      <path d="M20 110 A80 80 0 0 1 180 110" class="rpm" id="rpmarc"/>
-    </svg>
-    <div id="speed">0</div>
-    <div class="unit">km/h</div>
-    <div id="gear">N</div>
-    <div id="load"></div>
+  <!-- painel inferior -->
+  <div id="dashbar">
+    <canvas id="spdg" width="280" height="280"></canvas>
+    <div id="icons">
+      <span id="ic-light" title="Faróis">◐</span>
+      <button id="ic-hand" title="Freio de mão">(P)</button>
+      <span id="ic-dmg" title="Avaria">⚠ <b id="dmg">0%</b></span>
+      <span id="ic-load"></span>
+    </div>
+    <canvas id="rpmg" width="280" height="280"></canvas>
   </div>
-  <div id="damage" class="glass hidden"><small>AVARIA</small><b id="dmg">0%</b></div>
 
   <div id="progress" class="hidden"><svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="42" class="bg"/><circle cx="50" cy="50" r="42" id="progarc"/></svg><span id="progtext">Carregando</span></div>
   <div id="toast"></div>
   <div id="fps" class="hidden"></div>
 </div>
 
+<!-- ============ MENUS ============ -->
 <div id="modal" class="hidden">
-  <div class="sheet glass">
+  <div class="sheet">
     <div class="tabs">
-      <button data-tab="jobs">📋 Fretes</button>
-      <button data-tab="garage">🚚 Garagem</button>
-      <button data-tab="profile">👤 Perfil</button>
-      <button data-tab="settings">⚙️ Ajustes</button>
+      <button data-tab="jobs">Fretes</button>
+      <button data-tab="garage">Garagem</button>
+      <button data-tab="profile">Perfil</button>
+      <button data-tab="settings">Ajustes</button>
       <button class="close" data-act="close">✕</button>
     </div>
     <div id="tabbody"></div>
   </div>
 </div>
 
-<div id="title" class="hidden">
-  <div class="logo big"><span>DRIZZIE</span> TRUCK</div>
-  <div class="sub">Rotas &amp; Cargas</div>
-  <div id="titlestats"></div>
-  <button id="play" class="cta">JOGAR</button>
-  <div class="hint">Faça entregas pela cidade, suba de nível e libere cargas de até 85 toneladas.</div>
-</div>
-
-<div id="popup" class="hidden"><div class="card glass" id="popcard"></div></div>
+<div id="popup" class="hidden"><div class="card pop" id="popcard"></div></div>
 <div id="bigmap" class="hidden"><canvas id="bigmapc"></canvas><button class="rb close2" data-act="closemap">✕</button></div>
 
 <script src="game.js"></script>

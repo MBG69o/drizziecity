@@ -93,7 +93,7 @@ export class World {
       roof: lam(tex.roof()),
       tiles: lam(tex.tiles()),
       wh: lam(tex.warehouse(), { vertexColors: true }),
-      f: [0, 1, 2, 3].map((i) => new THREE.MeshPhongMaterial({ map: tex.facade(i), shininess: i === 0 || i === 3 ? 60 : 8, specular: i === 0 || i === 3 ? 0x555555 : 0x111111 })),
+      f: [0, 1, 2, 3].map((i) => new THREE.MeshPhongMaterial({ map: tex.facade(i), emissiveMap: tex.facade(i).userData.emissive, emissive: 0xffffff, emissiveIntensity: 0, shininess: i === 0 || i === 3 ? 60 : 8, specular: i === 0 || i === 3 ? 0x555555 : 0x111111 })),
       flat: new THREE.MeshLambertMaterial({ vertexColors: true }),
       metal: new THREE.MeshPhongMaterial({ map: tex.metal(), vertexColors: true, shininess: 50, specular: 0x666666 }),
       cont: lam(tex.container(0xdddddd), { vertexColors: true }),
@@ -195,8 +195,8 @@ export class World {
 
   building(x0, z0, x1, z1, h, style) {
     const B = this.B;
-    const u = this.r() > 0.5 ? 0.5 : 0;
-    B.f[style].walls(x0, 0.2, z0, x1, h, z1, 8, 7, u);
+    const u = ((this.r() * 4) | 0) * 0.25;
+    B.f[style].walls(x0, 0.2, z0, x1, h, z1, 16, 14, u);
     B.roof.top(x0, z0, x1, z1, h, 6);
     // platibanda e casa de máquinas
     B.flat.walls(x0, h, z0, x1, h + 0.8, z1, 1, 1, 0, 0x8d8d8d);
@@ -391,7 +391,7 @@ export class World {
 
     // Edifício principal
     const mainBuilding = (h, tint = 0xffffff, styleFacade = -1) => {
-      if (styleFacade >= 0) B.f[styleFacade].walls(bx0, 0.03, bz0, bx1, h, bz1, 8, 7, 0);
+      if (styleFacade >= 0) B.f[styleFacade].walls(bx0, 0.03, bz0, bx1, h, bz1, 16, 14, 0);
       else B.wh.walls(bx0, 0.03, bz0, bx1, h, bz1, 6, 6, 0, tint);
       B.roof.top(bx0, bz0, bx1, bz1, h, 6);
       B.flat.walls(bx0, h, bz0, bx1, h + 0.6, bz1, 1, 1, 0, L.color);
@@ -580,10 +580,31 @@ export class World {
       const m4 = mat(l.x, 0, l.z, 0, ang, 0);
       poles.setMatrixAt(i, m4); arms.setMatrixAt(i, m4); heads.setMatrixAt(i, m4);
     });
-    for (const im of [poles, arms, heads]) {
+    // poças de luz no chão (só à noite) — 1 draw call para todos os postes
+    const pg = new THREE.PlaneGeometry(16, 16);
+    pg.rotateX(-Math.PI / 2);
+    pg.translate(0, 0.12, 3.5);
+    const pools = new THREE.InstancedMesh(pg, new THREE.MeshBasicMaterial({ map: tex.glow(), color: 0xffb35c, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending }), n);
+    this.lamps.forEach((l, i) => {
+      const rx = Math.round((l.x + HALF) / BLOCK) * BLOCK - HALF, rz = Math.round((l.z + HALF) / BLOCK) * BLOCK - HALF;
+      const ang = Math.abs(l.x - rx) < Math.abs(l.z - rz) ? (rx > l.x ? Math.PI / 2 : -Math.PI / 2) : (rz > l.z ? 0 : Math.PI);
+      pools.setMatrixAt(i, mat(l.x, 0, l.z, 0, ang, 0));
+    });
+    this.lampHeads = heads;
+    this.lampPools = pools;
+    pools.visible = false;
+    for (const im of [poles, arms, heads, pools]) {
       im.frustumCulled = false;
       this.scene.add(im);
     }
+  }
+
+  // 0 = dia, 1 = noite
+  setNight(n) {
+    for (const m of this.M.f) m.emissiveIntensity = Math.max(0, n * 1.1 - 0.1);
+    this.lampPools.visible = n > 0.05;
+    this.lampPools.material.opacity = n * 0.9;
+    this.lampHeads.material.color.setRGB(0.75 + n * 0.25, 0.72 + n * 0.2, 0.65 + n * 0.1);
   }
 
   update(dt, t) {

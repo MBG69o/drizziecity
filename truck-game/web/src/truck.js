@@ -18,6 +18,10 @@ function mats() {
     amber: new THREE.MeshBasicMaterial({ color: 0xffa21a }),
     wheel: new THREE.MeshLambertMaterial({ map: atlas }),
     flat: new THREE.MeshPhongMaterial({ vertexColors: true, shininess: 40, specular: 0x333333 }),
+    grill: new THREE.MeshPhongMaterial({ map: tex.grill(), shininess: 90, specular: 0x999999 }),
+    glow: new THREE.SpriteMaterial({ map: tex.glow(), color: 0xfff3d6, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }),
+    glowRed: new THREE.SpriteMaterial({ map: tex.glow(), color: 0xff2a1a, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }),
+    beam: new THREE.MeshBasicMaterial({ map: tex.beam(), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, polygonOffset: true, polygonOffsetFactor: -3 }),
     blob: new THREE.MeshBasicMaterial({ map: tex.blob(), transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 }),
   };
   return MATS;
@@ -138,8 +142,12 @@ export function buildTruck(def) {
     box(D, 0.7, 0.08, def.axles >= 3 ? 2.6 : 1.4, s * 0.98, wr * 2 + 0.12, def.axles >= 3 ? 0 : 0);
   }
   // Grade e para-choque
-  box(D, cabW * 0.62, ch * 0.42, 0.05, 0, y0 + ch * 0.32, zf + 0.03);
-  for (let i = 0; i < 5; i++) box(C, cabW * 0.6, 0.05, 0.04, 0, y0 + ch * 0.15 + i * 0.13, zf + 0.06);
+  const GR = new Builder();
+  box(GR, cabW * 0.62, ch * 0.42, 0.05, 0, y0 + ch * 0.32, zf + 0.03);
+  box(C, cabW * 0.66, 0.06, 0.06, 0, y0 + ch * 0.54, zf + 0.05);
+  box(C, cabW * 0.66, 0.06, 0.06, 0, y0 + ch * 0.1, zf + 0.05);
+  // para-lamas traseiros e lameiros
+  for (const s2 of [-1, 1]) box(D, 0.55, 0.6, 0.04, s2 * 0.95, wr + 0.2, (def.axles >= 3 ? -1.45 : -0.75));
   box(C, cabW + 0.08, 0.32, 0.28, 0, y0 - 0.12, zf + 0.12);
   // luzes de teto
   for (let i = -2; i <= 2; i++) box(AM, 0.12, 0.08, 0.08, i * 0.35, y0 + ch + (small ? 0.04 : 0.78), zf - 0.05);
@@ -170,7 +178,26 @@ export function buildTruck(def) {
   }
 
   const paint = paintMat(def.color);
-  meshesFrom([[P, paint], [C, M.chrome], [D, M.dark], [GL, M.glass], [LI, M.light], [RE, M.red], [AM, M.amber]], body);
+  meshesFrom([[P, paint], [C, M.chrome], [D, M.dark], [GL, M.glass], [LI, M.light], [RE, M.red], [AM, M.amber], [GR, M.grill]], body);
+
+  // Luzes noturnas: brilho dos faróis, lanternas e facho no asfalto
+  const night = new THREE.Group();
+  for (const s2 of [-1, 1]) {
+    const g = new THREE.Sprite(M.glow);
+    g.scale.set(1.6, 1.6, 1);
+    g.position.set(s2 * (cabW / 2 - 0.42), y0 + 0.18, zf + 0.15);
+    night.add(g);
+    const rg = new THREE.Sprite(M.glowRed);
+    rg.scale.set(0.9, 0.9, 1);
+    rg.position.set(s2 * 0.9, y0 - 0.15, rearEnd - 0.12);
+    night.add(rg);
+  }
+  const beam = new THREE.Mesh(new THREE.PlaneGeometry(9, 26), M.beam);
+  beam.rotation.x = -Math.PI / 2;
+  beam.position.set(0, 0.07, zf + 13);
+  night.add(beam);
+  night.visible = false;
+  root.add(night);
 
   // Rodas
   const front = [];
@@ -192,7 +219,7 @@ export function buildTruck(def) {
   root.add(blob);
 
   body.traverse((o) => { if (o.isMesh) o.castShadow = true; });
-  return { root, body, front, rear, wb, wr, hitchZ, zf, rearEnd, paint, blob, cabW };
+  return { root, body, front, rear, wb, wr, hitchZ, zf, rearEnd, paint, blob, cabW, night, y0 };
 }
 
 // ---------- Modelo do implemento (carreta) ----------
@@ -331,12 +358,22 @@ export function buildTrailer(cargo) {
     axles.push(a);
     root.add(a);
   }
+  const night = new THREE.Group();
+  for (const s2 of [-1, 1]) {
+    const rg = new THREE.Sprite(M.glowRed);
+    rg.scale.set(0.9, 0.9, 1);
+    rg.position.set(s2 * 1.0, deck - 0.35, back - 0.15);
+    night.add(rg);
+  }
+  night.visible = false;
+  root.add(night);
   const blob = new THREE.Mesh(new THREE.PlaneGeometry(3.4, Lt + 1.5), M.blob);
   blob.rotation.x = -Math.PI / 2;
   blob.position.set(0, 0.05, (front + back) / 2);
   root.add(blob);
   root.traverse((o) => { if (o.isMesh && o !== blob) o.castShadow = true; });
-  return { root, axles, Lk: -axC, Lt, front, back, blob };
+  blob.castShadow = false;
+  return { root, axles, Lk: -axC, Lt, front, back, blob, night };
 }
 
 // ---------- Física do conjunto ----------
@@ -356,6 +393,8 @@ export class Rig {
     this.collCooldown = 0;
     this.reverse = false;
     this.lastImpact = 0;
+    this.lightsOn = false;
+    this.engineOn = false;
     this.setTruck(def);
   }
 
@@ -365,6 +404,8 @@ export class Rig {
     this.model = buildTruck(def);
     this.model.blob.visible = !this.shadows;
     this.scene.add(this.model.root);
+    this.model.night.visible = this.lightsOn;
+    if (this.onModel) this.onModel(this.model);
     if (this.trailer && def.rigid) this.detach();
     this.sync();
   }
@@ -374,10 +415,17 @@ export class Rig {
     if (this.def.rigid) return;
     const tr = buildTrailer(cargo);
     tr.blob.visible = !this.shadows;
+    tr.night.visible = this.lightsOn;
     this.trailer = tr;
     this.th = this.h;
     this.scene.add(tr.root);
     this.sync();
+  }
+
+  setLights(on) {
+    this.lightsOn = on;
+    this.model.night.visible = on;
+    if (this.trailer) this.trailer.night.visible = on;
   }
 
   detach() {
@@ -426,19 +474,28 @@ export class Rig {
     let F = 0;
     const brake = inp.brake, thr = inp.throttle;
 
-    // câmbio automático: freio parado = ré
-    this.stopT = brake > 0.1 && Math.abs(v) < 0.4 && thr < 0.1 ? (this.stopT || 0) + dt : 0;
-    if (this.stopT > 0.3) this.reverse = true;
-    if (thr > 0.1 && v > -0.4) this.reverse = false;
+    // câmbio: D (frente), N (neutro), R (ré). Em modo automático, segurar o freio parado engata a ré.
+    if (inp.gear === 'auto') {
+      this.stopT = brake > 0.1 && Math.abs(v) < 0.4 && thr < 0.1 ? (this.stopT || 0) + dt : 0;
+      if (this.stopT > 0.3) this.reverse = true;
+      if (thr > 0.1 && v > -0.4) this.reverse = false;
+    } else this.reverse = inp.gear === 'R';
+    const drive = this.engineOn && inp.gear !== 'N';
+    const autoRev = inp.gear === 'auto' && this.reverse;
 
     if (!this.reverse) {
-      if (thr > 0 && v >= -0.3) F += thr * Math.min(P / Math.max(v, 3), m * 3.0, def.hp * 250);
-      if (thr > 0 && v < -0.3) F += thr * m * 6;
+      if (drive && thr > 0 && v >= -0.3) F += thr * Math.min(P / Math.max(v, 3), m * 3.0, def.hp * 250);
       if (brake > 0 && v > 0) F -= brake * m * (6.8 - Math.min(2.2, m / 40000));
-    } else {
-      if (brake > 0 && v > -4.5) F -= brake * Math.min(P / Math.max(-v, 3), m * 1.6);
+      if (brake > 0 && v < 0) F += brake * m * 6;
+    } else if (autoRev) {
+      if (drive && brake > 0 && v > -4.5) F -= brake * Math.min(P / Math.max(-v, 3), m * 1.6);
       if (thr > 0 && v < 0) F += thr * m * 6;
+    } else {
+      if (drive && thr > 0 && v > -5) F -= thr * Math.min(P / Math.max(-v, 3), m * 1.6);
+      if (brake > 0 && v < 0) F += brake * m * 6.5;
+      if (brake > 0 && v > 0) F -= brake * m * 6.5;
     }
+    if (inp.handbrake) F -= Math.sign(v) * m * 5;
     const cda = this.trailer ? (this.cargo.trailer === 'box' ? 9 : 7) : def.rigid ? 6.5 : 5;
     const drag = 0.5 * 1.2 * cda * v * Math.abs(v);
     const roll = (0.011 * m * 9.81 + (thr < 0.05 && brake < 0.05 ? m * 0.35 : 0)) * Math.sign(v);
@@ -448,8 +505,9 @@ export class Rig {
     // atrito não inverte o sentido
     if (Math.abs(rollA * dt) > Math.abs(v) && F === 0) v = 0;
     else v -= rollA * dt;
-    if (brake > 0 && !this.reverse && v < 0 && this.v >= 0) v = 0;
-    if (thr > 0 && this.reverse && v > 0) v = 0;
+    const want = !drive ? 0 : !this.reverse ? (thr > 0 ? 1 : 0) : autoRev ? (brake > 0 ? -1 : 0) : (thr > 0 ? -1 : 0);
+    if (v !== 0 && Math.sign(v) !== want && Math.sign(v) !== Math.sign(this.v)) v = 0;
+    if (inp.handbrake && Math.abs(v) < 0.3) v = 0;
     v = Math.min(v, vmax);
     v = Math.max(v, -5);
     this.acc = (v - this.v) / Math.max(dt, 1e-3);
@@ -487,8 +545,8 @@ export class Rig {
     const ratio = Math.abs(v) / vmax;
     const gear = Math.min(5, Math.floor(ratio * 6));
     const inGear = ratio * 6 - gear;
-    this.gear = this.reverse ? 'R' : Math.abs(v) < 0.3 ? 'N' : String(gear + 1);
-    const rpmT = Math.abs(v) < 0.3 ? 0.18 + thr * 0.3 : 0.3 + inGear * 0.6 * (0.5 + thr * 0.5);
+    this.gear = this.reverse ? 'R' : inp.gear === 'N' ? 'N' : Math.abs(v) < 0.3 ? (inp.gear === 'auto' ? 'N' : 'D') : String(gear + 1);
+    const rpmT = !this.engineOn ? 0 : Math.abs(v) < 0.3 || inp.gear === 'N' ? 0.18 + thr * 0.5 : 0.3 + inGear * 0.6 * (0.5 + thr * 0.5);
     this.rpm += (rpmT - this.rpm) * Math.min(1, dt * 6);
     this.sync();
   }

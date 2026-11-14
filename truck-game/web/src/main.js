@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { HALF, GRID, BLOCK, ROAD_W, roadCoord, zoneOf, LOCATIONS, LOC, TRUCKS, TRUCK, CARGOS, CARGO, xpForLevel, MAX_LEVEL } from './data.js';
 import { configureTextures, tex } from './textures.js';
 import { World } from './world.js';
-import { Rig } from './truck.js';
+import { Rig, buildTruck } from './truck.js';
 import { Traffic } from './traffic.js';
 import { findRoute } from './route.js';
 import { Audio } from './audio.js';
@@ -15,9 +15,9 @@ const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
 // ---------------- Save ----------------
 const DEFAULTS = {
-  money: 3000, xp: 0, level: 1, owned: ['urbano'], truck: 'urbano', job: null, pos: null,
+  money: 3000, xp: 0, level: 1, owned: ['urbano'], truck: 'urbano', job: null, pos: null, name: 'Motorista', clock: 18.6,
   stats: { deliveries: 0, km: 0, earned: 0, tons: 0, crashes: 0 },
-  settings: { quality: 'auto', volume: 0.7, fps: false, steer: 'buttons', camera: 0 },
+  settings: { quality: 'auto', volume: 0.7, fps: false, steer: 'wheel', camera: 0, time: 'cycle', gearbox: 'manual' },
 };
 function loadSave() {
   try {
@@ -60,7 +60,9 @@ const qName = S.settings.quality === 'auto' ? detectQuality() : S.settings.quali
 const Q = QUALITY[qName];
 
 // ---------------- Globais ----------------
-let renderer, scene, camera, world, rig, traffic, sun, sky;
+let renderer, scene, camera, world, rig, traffic, sun, sky, hemi, stars, headSpot;
+let show = null; // showroom
+let night = 0;
 const audio = new Audio();
 audio.volume = S.settings.volume;
 let state = 'loading';
@@ -69,8 +71,9 @@ let route = null, routeT = 0, nextWp = null;
 let marker, navArrow;
 let zoneTimer = 0;
 const obstacles = [];
-const ctl = { gas: false, brake: false, left: false, right: false, tilt: 0 };
-const input = { throttle: 0, brake: 0, steer: 0 };
+const ctl = { gas: false, brake: false, left: false, right: false, tilt: 0, wheel: 0, wheelHeld: false, gear: 'D', hand: false };
+const input = { throttle: 0, brake: 0, steer: 0, gear: 'D', handbrake: false };
+let lightsManual = null;
 const cam = { yaw: 0, orbit: 0, orbitT: 0, mode: S.settings.camera || 0, pos: new THREE.Vector3(), look: new THREE.Vector3() };
 let pr = Q.pr;
 
@@ -108,7 +111,8 @@ async function boot() {
   camera = new THREE.PerspectiveCamera(58, window.innerWidth / window.innerHeight, 0.5, Q.far);
 
   buildSky();
-  scene.add(new THREE.HemisphereLight(0xdbeeff, 0x5d6b45, 1.25));
+  hemi = new THREE.HemisphereLight(0xdbeeff, 0x5d6b45, 1.25);
+  scene.add(hemi);
   sun = new THREE.DirectionalLight(0xfff0d8, 2.6);
   sun.position.set(180, 260, 120);
   if (Q.shadows) {
@@ -127,6 +131,16 @@ async function boot() {
   world = new World(scene, Q);
   await step(70, 'Ligando o motor…');
   rig = new Rig(scene, TRUCK[S.truck] || TRUCKS[0], Q.shadows);
+  if (qName !== 'low') {
+    headSpot = new THREE.SpotLight(0xfff1d6, 0, 70, 0.55, 0.6, 1.2);
+    headSpot.target = new THREE.Object3D();
+    rig.onModel = (md) => {
+      md.root.add(headSpot, headSpot.target);
+      headSpot.position.set(0, md.y0 + 0.3, md.zf + 0.4);
+      headSpot.target.position.set(0, 0, md.zf + 22);
+    };
+    rig.onModel(rig.model);
+  }
   placeAtStart();
   traffic = new Traffic(scene, Q.traffic);
   buildMarkers();
@@ -136,12 +150,145 @@ async function boot() {
   jobs = genJobs();
   setupInput();
   setupUI();
+  buildShowroom();
+  applyTime(S.clock);
   await step(100, 'Pronto!');
   renderer.compile(scene, camera);
   $('loading').classList.add('hidden');
   showTitle();
   last = performance.now();
   requestAnimationFrame(loop);
+}
+
+// ---------------- Dia e noite ----------------
+const C_DAY = new THREE.Color(0xbcd6ea), C_DUSK = new THREE.Color(0xe39a6b), C_NIGHT = new THREE.Color(0x0a1120);
+const _c1 = new THREE.Color();
+function applyTime(h) {
+  const mode = S.settings.time;
+  if (mode === 'day') h = 12; else if (mode === 'night') h = 23; else if (mode === 'dusk') h = 18.3;
+  const elev = Math.sin(((h - 6) / 12) * Math.PI); // >0 de dia
+  const day = clamp(elev * 2.4 + 0.25, 0, 1);
+  const dusk = clamp(1 - Math.abs(elev) * 4, 0, 1) * (elev > -0.25 ? 1 : 0);
+  night = 1 - day;
+  // à noite o "sol" vira luar azulado
+  sun.intensity = 2.7 * day + 0.55 * night;
+  if (night > 0.6) sun.color.setHex(0x8fa8d8); else sun.color.setHSL(0.09, 0.6 + dusk * 0.3, 0.85 - dusk * 0.2);
+  hemi.intensity = 0.62 + 0.65 * day;
+  hemi.color.setHex(0xdbeeff).lerp(_c1.setHex(0x5a74a8), night);
+  hemi.groundColor.setHex(0x5d6b45).lerp(_c1.setHex(0x1c2230), night);
+  _c1.copy(C_NIGHT).lerp(C_DAY, day).lerp(C_DUSK, dusk * 0.55);
+  scene.background.copy(_c1);
+  scene.fog.color.copy(_c1);
+  sky.material.color.setRGB(0.07, 0.09, 0.16).lerp(new THREE.Color(1, 1, 1), day).lerp(new THREE.Color(1.15, 0.72, 0.55), dusk * 0.6);
+  stars.material.opacity = clamp(night * 1.3 - 0.3, 0, 1);
+  stars.visible = stars.material.opacity > 0.01;
+  renderer.toneMappingExposure = 1.0 + night * 0.25;
+  world.setNight(night);
+  traffic.setNight(night);
+  const want = lightsManual !== null ? lightsManual : night > 0.35;
+  if (rig.lightsOn !== want) rig.setLights(want);
+  if (headSpot) headSpot.intensity = rig.lightsOn ? 60 * (0.35 + night) : 0;
+}
+
+function buildStars() {
+  const n = 900, pos = [];
+  const R = Q.far * 0.9;
+  for (let i = 0; i < n; i++) {
+    const u = Math.random() * Math.PI * 2, v = Math.random() * 0.9 + 0.08;
+    const cv = Math.sqrt(1 - v * v);
+    pos.push(Math.cos(u) * cv * R, v * R, Math.sin(u) * cv * R);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  stars = new THREE.Points(g, new THREE.PointsMaterial({ color: 0xffffff, size: 2, sizeAttenuation: false, transparent: true, opacity: 0, fog: false, depthWrite: false }));
+  sky.add(stars);
+}
+
+// ---------------- Showroom ----------------
+function buildShowroom() {
+  const sc = new THREE.Scene();
+  sc.background = new THREE.Color(0x06101c);
+  sc.fog = new THREE.Fog(0x06101c, 30, 70);
+  const cam2 = new THREE.PerspectiveCamera(38, window.innerWidth / window.innerHeight, 0.3, 200);
+  // piso brilhante (reflexo falso: modelo espelhado sob piso semitransparente)
+  const floor = new THREE.Mesh(new THREE.CircleGeometry(40, 48), new THREE.MeshPhongMaterial({ color: 0x0d2033, shininess: 120, specular: 0x4aa3d8, transparent: true, opacity: 0.86 }));
+  floor.rotation.x = -Math.PI / 2;
+  sc.add(floor);
+  const back = new THREE.Mesh(new THREE.CylinderGeometry(24, 24, 22, 40, 1, true, Math.PI * 0.55, Math.PI * 0.9), new THREE.MeshBasicMaterial({ map: tex.backdrop(), side: THREE.BackSide }));
+  back.position.y = 10;
+  sc.add(back);
+  // faixas de neon
+  const neonM = new THREE.MeshBasicMaterial({ color: 0xdff6ff });
+  const glowM = new THREE.MeshBasicMaterial({ map: tex.glow(), color: 0x5fc8ff, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending });
+  for (const y of [2.1, 6.4]) {
+    const bar = new THREE.Mesh(new THREE.BoxGeometry(60, 0.18, 0.1), neonM);
+    bar.position.set(0, y, -14);
+    sc.add(bar);
+    const gl = new THREE.Mesh(new THREE.PlaneGeometry(64, 3.2), glowM);
+    gl.position.set(0, y, -13.9);
+    sc.add(gl);
+  }
+  const ring = new THREE.Mesh(new THREE.RingGeometry(6.4, 6.6, 64), new THREE.MeshBasicMaterial({ color: 0x3fb5ff, transparent: true, opacity: 0.5 }));
+  ring.rotation.x = -Math.PI / 2;
+  ring.position.y = 0.02;
+  sc.add(ring);
+  sc.add(new THREE.HemisphereLight(0x9fd3ff, 0x0b1626, 1.1));
+  const key = new THREE.DirectionalLight(0xffffff, 2.4);
+  key.position.set(8, 10, 10);
+  sc.add(key);
+  const rim = new THREE.DirectionalLight(0x5fc8ff, 2.2);
+  rim.position.set(-6, 5, -10);
+  sc.add(rim);
+  const fill = new THREE.PointLight(0xff3050, 30, 25);
+  fill.position.set(-7, 2, 4);
+  sc.add(fill);
+  const turn = new THREE.Group();
+  sc.add(turn);
+  show = { scene: sc, cam: cam2, turn, idx: Math.max(0, TRUCKS.findIndex((t) => t.id === S.truck)), yaw: -0.6, drag: null };
+  setShowTruck(show.idx);
+}
+
+function setShowTruck(i) {
+  show.idx = (i + TRUCKS.length) % TRUCKS.length;
+  const def = TRUCKS[show.idx];
+  show.turn.clear();
+  const md = buildTruck(def);
+  md.blob.visible = false;
+  const len = md.zf - md.rearEnd;
+  md.root.position.z = -(md.zf + md.rearEnd) / 2;
+  const holder = new THREE.Group();
+  holder.add(md.root);
+  const mirror = md.root.clone();
+  mirror.scale.y = -1;
+  holder.add(mirror);
+  show.turn.add(holder);
+  show.len = len;
+  renderShowInfo();
+}
+
+function renderShowInfo() {
+  const t = TRUCKS[show.idx];
+  const owned = S.owned.includes(t.id), cur = S.truck === t.id;
+  $('tiname').textContent = t.name;
+  $('tispecs').innerHTML = `<b>${t.hp}</b> cv • <b>${t.cap}</b> t • <b>${t.vmax}</b> km/h • ${t.rigid ? 'Rígido baú' : 'Cavalo ' + t.cfg}`;
+  let b;
+  if (cur) b = '<span class="tibtn"><span>EM USO ✓</span></span>';
+  else if (owned) b = `<button class="tibtn" data-act="use" data-arg="${t.id}"><span>USAR ESTE</span></button>`;
+  else if (t.level > S.level) b = `<span class="tibtn lock"><span>🔒 NÍVEL ${t.level}</span></span>`;
+  else b = `<button class="tibtn buy" data-act="buy" data-arg="${t.id}" ${S.money < t.price ? 'disabled style="opacity:.5"' : ''}><span>COMPRAR ${fmt(t.price)}</span></button>`;
+  $('tiaction').innerHTML = b;
+}
+
+function updateShowroom(dt) {
+  if (!show.drag) show.yaw += dt * 0.25;
+  show.turn.rotation.y = show.yaw;
+  const w = window.innerWidth, h = window.innerHeight;
+  show.cam.aspect = w / h;
+  const d = 11 + show.len * 1.0;
+  // caminhão à direita do centro, deixando espaço para o painel esquerdo
+  show.cam.position.set(-d * 0.2, 3.0, d);
+  show.cam.lookAt(-d * 0.2 - d * 0.1, 1.6, 0);
+  show.cam.updateProjectionMatrix();
 }
 
 function buildSky() {
@@ -160,6 +307,7 @@ function buildSky() {
   sky = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide, fog: false, depthWrite: false }));
   sky.renderOrder = -1;
   scene.add(sky);
+  buildStars();
 }
 
 function placeAtStart() {
@@ -382,18 +530,46 @@ function setupInput() {
   hold($('brake'), 'brake');
   hold($('left'), 'left');
   hold($('right'), 'right');
-  const horn = $('horn');
-  horn.addEventListener('pointerdown', (e) => { e.preventDefault(); audio.init(); audio.horn(true); horn.classList.add('on'); });
-  const hoff = () => { audio.horn(false); horn.classList.remove('on'); };
-  horn.addEventListener('pointerup', hoff);
-  horn.addEventListener('pointercancel', hoff);
-  horn.addEventListener('pointerleave', hoff);
+  // volante: arraste para girar; toque no centro = buzina
+  const wheel = $('wheel');
+  let wd = null;
+  const wAng = (e) => { const r = wheel.getBoundingClientRect(); return Math.atan2(e.clientX - (r.left + r.width / 2), -(e.clientY - (r.top + r.height / 2))); };
+  wheel.addEventListener('pointerdown', (e) => {
+    e.preventDefault(); audio.init();
+    const r = wheel.getBoundingClientRect();
+    const dc = Math.hypot(e.clientX - (r.left + r.width / 2), e.clientY - (r.top + r.height / 2));
+    if (dc < r.width * 0.17) { audio.horn(true); wd = { horn: true, id: e.pointerId }; }
+    else { wd = { id: e.pointerId, a0: wAng(e), w0: ctl.wheel }; ctl.wheelHeld = true; }
+    try { wheel.setPointerCapture(e.pointerId); } catch (x) { /* */ }
+  });
+  wheel.addEventListener('pointermove', (e) => {
+    if (!wd || wd.horn || e.pointerId !== wd.id) return;
+    let d = wAng(e) - wd.a0;
+    d = Math.atan2(Math.sin(d), Math.cos(d));
+    ctl.wheel = clamp(wd.w0 + (d * 180) / Math.PI, -150, 150);
+    wd.a0 = wAng(e); wd.w0 = ctl.wheel;
+  });
+  const wEnd = () => { if (wd && wd.horn) audio.horn(false); wd = null; ctl.wheelHeld = false; };
+  wheel.addEventListener('pointerup', wEnd);
+  wheel.addEventListener('pointercancel', wEnd);
+  wheel.addEventListener('lostpointercapture', wEnd);
+
+  // câmbio
+  document.querySelectorAll('#gearsel button').forEach((b) => b.addEventListener('pointerdown', (e) => { e.preventDefault(); setGear(b.dataset.g); }));
+  $('ic-hand').addEventListener('pointerdown', (e) => { e.preventDefault(); ctl.hand = !ctl.hand; audio.airBrake(); });
+  $('lightsbtn').addEventListener('pointerdown', (e) => { e.preventDefault(); lightsManual = !rig.lightsOn; rig.setLights(lightsManual); audio.beep(1400, 0.04, 'square', 0.08); });
+  $('enginebtn').addEventListener('click', startEngine);
 
   const keys = { ArrowUp: 'gas', KeyW: 'gas', ArrowDown: 'brake', KeyS: 'brake', Space: 'brake', ArrowLeft: 'left', KeyA: 'left', ArrowRight: 'right', KeyD: 'right' };
   window.addEventListener('keydown', (e) => {
     audio.init();
     if (keys[e.code]) { ctl[keys[e.code]] = true; e.preventDefault(); }
     if (e.code === 'KeyH') audio.horn(true);
+    if (e.code === 'KeyR' && !e.repeat) setGear(ctl.gear === 'R' ? 'D' : 'R');
+    if (e.code === 'KeyN' && !e.repeat) setGear('N');
+    if (e.code === 'KeyE' && !e.repeat) startEngine();
+    if (e.code === 'KeyL' && !e.repeat) { lightsManual = !rig.lightsOn; rig.setLights(lightsManual); }
+    if (e.code === 'KeyP' && !e.repeat) ctl.hand = !ctl.hand;
     if (e.code === 'KeyC' && !e.repeat) cycleCamera();
     if (e.code === 'KeyM' && !e.repeat) openMap();
     if (e.code === 'Escape') onBack();
@@ -406,14 +582,15 @@ function setupInput() {
   // arrastar na tela gira a câmera
   const cv = $('gl');
   let drag = null;
-  cv.addEventListener('pointerdown', (e) => { drag = { x: e.clientX, id: e.pointerId }; });
+  cv.addEventListener('pointerdown', (e) => { drag = { x: e.clientX, id: e.pointerId }; if (state === 'title') show.drag = true; });
   window.addEventListener('pointermove', (e) => {
     if (!drag || e.pointerId !== drag.id) return;
+    if (state === 'title') { show.yaw += (e.clientX - drag.x) * 0.01; drag.x = e.clientX; return; }
     cam.orbit += (e.clientX - drag.x) * 0.008;
     drag.x = e.clientX;
     cam.orbitT = 1.8;
   });
-  const end = (e) => { if (drag && e.pointerId === drag.id) drag = null; };
+  const end = (e) => { if (drag && e.pointerId === drag.id) { drag = null; if (show) show.drag = null; } };
   window.addEventListener('pointerup', end);
   window.addEventListener('pointercancel', end);
 
@@ -443,17 +620,43 @@ function onBack() {
   return false;
 }
 
+function setGear(g) {
+  ctl.gear = g;
+  document.querySelectorAll('#gearsel button').forEach((b) => b.classList.toggle('on', b.dataset.g === g));
+  audio.beep(g === 'R' ? 500 : 700, 0.05, 'square', 0.06);
+}
+
+let engineT = 0;
+function startEngine() {
+  if (rig.engineOn || engineT > 0) return;
+  audio.init();
+  engineT = 1.1;
+  $('enginebtn').classList.add('starting');
+  audio.starter();
+}
+
 function readInput(dt) {
   const ramp = (cur, target, up, down) => cur + clamp(target - cur, -down * dt, up * dt);
   const active = state === 'drive';
+  if (engineT > 0) {
+    engineT -= dt;
+    if (engineT <= 0) { rig.engineOn = true; $('enginebtn').classList.add('hidden'); $('enginebtn').classList.remove('starting'); }
+  }
   input.throttle = ramp(input.throttle, active && ctl.gas ? 1 : 0, 2.5, 6);
   input.brake = ramp(input.brake, active && ctl.brake ? 1 : 0, 6, 8);
+  input.gear = S.settings.gearbox === 'auto' ? 'auto' : ctl.gear;
+  input.handbrake = ctl.hand;
+  if (active && ctl.gas && !rig.engineOn && engineT <= 0 && !readInput.warned) { toast('Ligue o motor primeiro'); readInput.warned = true; }
+  // volante volta ao centro ao soltar
+  if (!ctl.wheelHeld) ctl.wheel *= Math.max(0, 1 - dt * 7);
   let st = 0;
-  if (S.settings.steer === 'tilt') st = Math.abs(ctl.tilt) < 0.06 ? 0 : ctl.tilt;
+  if (S.settings.steer === 'tilt') { st = Math.abs(ctl.tilt) < 0.06 ? 0 : ctl.tilt; ctl.wheel = -st * 150; }
+  else if (S.settings.steer === 'wheel') st = -ctl.wheel / 150;
   st += (ctl.left ? 1 : 0) - (ctl.right ? 1 : 0);
   st = active ? clamp(st, -1, 1) : 0;
-  input.steer = ramp(input.steer, st, 2.4, 4);
+  input.steer = S.settings.steer === 'wheel' && ctl.wheelHeld ? st : ramp(input.steer, st, 2.4, 4);
   if (Math.abs(input.steer) < 0.01 && st === 0) input.steer = 0;
+  $('wheel').style.transform = `rotate(${(-input.steer * 150).toFixed(1)}deg)`;
 }
 
 function cycleCamera() {
@@ -500,7 +703,7 @@ function updateCamera(dt, instant = false) {
     cam.pos.z += (tz - cam.pos.z) * kp;
     cam.pos.y += (hgt - cam.pos.y) * kp;
     camera.position.copy(cam.pos);
-    camera.lookAt(px, 2.2 + (cam.mode === 1 ? 0 : 0.4), pz);
+    camera.lookAt(px, cam.mode === 1 ? 1.5 : 1.3, pz);
     camera.fov = 58 + Math.min(8, rig.speedKmh * 0.08);
   }
   camera.updateProjectionMatrix();
@@ -661,8 +864,14 @@ function setupUI() {
     audio.init();
     if (b.dataset.tab) { renderTab(b.dataset.tab); return; }
     const a = b.dataset.act, arg = b.dataset.arg;
-    if (a === 'jobs' || a === 'garage') openModal(a);
-    else if (a === 'menu') openModal('settings');
+    if (a === 'jobs' || a === 'garage' || a === 'settings') openModal(a);
+    else if (a === 'menu' || a === 'pause') openModal('settings');
+    else if (a === 'rename') { const n = prompt('Nome do motorista:', S.name); if (n && n.trim()) { S.name = n.trim().slice(0, 18); save(); showTitle(); } }
+    else if (a === 'prevtruck') setShowTruck(show.idx - 1);
+    else if (a === 'nexttruck') setShowTruck(show.idx + 1);
+    else if (a === 'gearbox') { S.settings.gearbox = arg; $('gearsel').classList.toggle('hidden', arg === 'auto'); save(); renderTab('settings'); }
+    else if (a === 'timemode') { S.settings.time = arg; save(); applyTime(S.clock); renderTab('settings'); }
+    else if (a === 'tomenu') { closeModal(); save(); showTitle(); }
     else if (a === 'camera') cycleCamera();
     else if (a === 'close') closeModal();
     else if (a === 'accept') acceptJob(+arg);
@@ -674,7 +883,7 @@ function setupUI() {
     else if (a === 'popjobs') { closePopup(); openModal('jobs'); }
     else if (a === 'closemap') $('bigmap').classList.add('hidden');
     else if (a === 'quality') { S.settings.quality = arg; save(); renderTab('settings'); toast('Reiniciando para aplicar…'); setTimeout(() => location.reload(), 500); }
-    else if (a === 'steermode') { S.settings.steer = arg; save(); renderTab('settings'); }
+    else if (a === 'steermode') { S.settings.steer = arg; applySteerMode(); save(); renderTab('settings'); }
     else if (a === 'fps') { S.settings.fps = !S.settings.fps; $('fps').classList.toggle('hidden', !S.settings.fps); save(); renderTab('settings'); }
     else if (a === 'reset') { if (confirm('Apagar todo o progresso?')) { localStorage.removeItem(SAVE_KEY); location.reload(); } }
     else if (a === 'rescue') { rescue(); closeModal(); }
@@ -684,25 +893,51 @@ function setupUI() {
   $('tabbody').addEventListener('input', (e) => {
     if (e.target.id === 'vol') { S.settings.volume = +e.target.value; audio.setVolume(S.settings.volume); save(); }
   });
+  applySteerMode();
+  setGear('D');
+  $('gearsel').classList.toggle('hidden', S.settings.gearbox === 'auto');
   $('play').addEventListener('click', () => {
     audio.init();
     $('title').classList.add('hidden');
     $('hud').classList.remove('hidden');
     state = 'drive';
+    if (!rig.engineOn) $('enginebtn').classList.remove('hidden');
+    updateCamera(0, true);
+    onResize();
+    // garante shaders atualizados com o estado de luzes/sombras atual
+    refreshMats = 3;
     try { if (document.documentElement.requestFullscreen && !window.AndroidBridge) document.documentElement.requestFullscreen().catch(() => {}); } catch (e) { /* */ }
     if (!S.job && S.stats.deliveries === 0) setTimeout(() => openModal('jobs'), 400);
   });
 }
 
+function applySteerMode() {
+  const w = $('wheelwrap');
+  w.classList.toggle('buttons', S.settings.steer === 'buttons');
+  w.classList.toggle('tilt', S.settings.steer === 'tilt');
+}
+
 function showTitle() {
   state = 'title';
+  $('hud').classList.add('hidden');
   $('title').classList.remove('hidden');
-  $('titlestats').innerHTML = `<div>⭐ Nível ${S.level}</div><div>💰 ${fmt(S.money)}</div><div>📦 ${S.stats.deliveries} entregas</div><div>🎨 Gráficos: ${qName === 'low' ? 'Leve' : qName === 'medium' ? 'Médio' : 'Ultra'}</div>`;
+  $('pname').textContent = S.name;
+  $('plvl').textContent = `Nv ${S.level} / XP ${S.xp}`;
+  const next = CARGOS.find((c) => c.lvl > S.level);
+  const rows = [
+    ['📦', 'Entregas feitas', S.stats.deliveries],
+    ['🛣️', 'Distância rodada', S.stats.km.toFixed(1) + ' km'],
+    ['⚖️', 'Toneladas levadas', S.stats.tons.toFixed(0) + ' t'],
+    ['💰', 'Total faturado', fmt(S.stats.earned)],
+    ['🔓', next ? `Próxima: ${next.name}` : 'Todas as cargas', next ? `Nv ${next.lvl}` : '✓'],
+  ];
+  $('perf').innerHTML = rows.map((r) => `<div class="prow"><span class="n">${r[0]}</span><span class="l">${r[1]}</span><span class="v">${r[2]}</span></div>`).join('');
+  $('strip').innerHTML = `<div><span>Saldo</span><b>${fmt(S.money)}</b></div><div><span>Nível</span><b>${S.level}</b></div><div><span>Caminhões</span><b>${S.owned.length}</b></div><div><span>Gráficos</span><b>${qName === 'low' ? 'Leve' : qName === 'medium' ? 'Médio' : 'Ultra'}</b></div>`;
+  if (show) setShowTruck(Math.max(0, TRUCKS.findIndex((t) => t.id === S.truck)));
 }
 
 function openModal(tab) {
-  if (state === 'title') return;
-  state = 'menu';
+  state = state === 'title' ? 'title' : 'menu';
   $('modal').classList.remove('hidden');
   ctl.gas = ctl.brake = ctl.left = ctl.right = false;
   document.querySelectorAll('.pad').forEach((p) => p.classList.remove('on'));
@@ -710,6 +945,7 @@ function openModal(tab) {
 }
 function closeModal() {
   $('modal').classList.add('hidden');
+  if (state === 'title') showTitle();
   if (state === 'menu') state = 'drive';
 }
 
@@ -805,6 +1041,7 @@ function useTruck(id) {
   if (S.job && lockReason(S.job, t)) { cancelJob(); }
   save();
   renderTab('garage');
+  if (state === 'title') showTitle();
 }
 
 function profileHTML() {
@@ -827,12 +1064,17 @@ function settingsHTML() {
   const seg = (act, cur, opts) => `<div class="seg">${opts.map(([v, l]) => `<button data-act="${act}" data-arg="${v}" class="${cur === v ? 'on' : ''}">${l}</button>`).join('')}</div>`;
   return `<div class="set"><div><b>Qualidade gráfica</b><br><small style="opacity:.7">Atual: ${qName === 'low' ? 'Leve' : qName === 'medium' ? 'Médio' : 'Ultra'} • resolução dinâmica ativa</small></div>
       ${seg('quality', S.settings.quality, [['auto', 'Auto'], ['low', 'Leve'], ['medium', 'Médio'], ['high', 'Ultra']])}</div>
-    <div class="set"><div><b>Direção</b><br><small style="opacity:.7">Botões na tela ou inclinação do celular</small></div>
-      ${seg('steermode', S.settings.steer, [['buttons', 'Botões'], ['tilt', 'Inclinação']])}</div>
+    <div class="set"><div><b>Direção</b><br><small style="opacity:.7">Volante, setas ou inclinação do celular</small></div>
+      ${seg('steermode', S.settings.steer, [['wheel', 'Volante'], ['buttons', 'Setas'], ['tilt', 'Inclinação']])}</div>
+    <div class="set"><div><b>Câmbio</b><br><small style="opacity:.7">Manual D/N/R ou automático (segurar freio parado = ré)</small></div>
+      ${seg('gearbox', S.settings.gearbox, [['manual', 'D / N / R'], ['auto', 'Automático']])}</div>
+    <div class="set"><div><b>Horário</b><br><small style="opacity:.7">Ciclo de dia e noite com faróis e iluminação urbana</small></div>
+      ${seg('timemode', S.settings.time, [['cycle', 'Ciclo'], ['day', 'Dia'], ['dusk', 'Entardecer'], ['night', 'Noite']])}</div>
     <div class="set"><b>Volume</b><input id="vol" type="range" min="0" max="1" step="0.05" value="${S.settings.volume}"></div>
     <div class="set"><b>Mostrar FPS</b>${seg('fps', S.settings.fps ? 1 : 0, [[1, 'Sim'], [0, 'Não']])}</div>
     <div class="set"><div><b>Desatolar</b><br><small style="opacity:.7">Leva o caminhão de volta para a rua mais próxima</small></div><button class="btn alt" data-act="rescue" style="margin:0">Reposicionar</button></div>
-    <div class="set"><div><b>Controles no teclado</b><br><small style="opacity:.7">WASD/setas • Espaço freio/ré • H buzina • C câmera • M mapa</small></div></div>
+    <div class="set"><div><b>Controles no teclado</b><br><small style="opacity:.7">WASD/setas • Espaço freio • E motor • R ré • N neutro • P freio de mão • L faróis • H buzina • C câmera • M mapa</small></div></div>
+    <div class="set"><b>Menu principal</b><button class="btn alt" data-act="tomenu" style="margin:0">Voltar ao showroom</button></div>
     <div class="set"><b>Apagar progresso</b><button class="btn danger" data-act="reset" style="margin:0">Resetar</button></div>`;
 }
 
@@ -854,22 +1096,61 @@ function toast(html, ms = 2600) {
 }
 
 // ---------------- HUD ----------------
+function drawGauge(id, val, max, majors, label, center, sub, redFrom) {
+  const cv = $(id), ctx = cv.getContext('2d');
+  const W = cv.width, c = W / 2, R = W * 0.46;
+  ctx.clearRect(0, 0, W, W);
+  const a0 = Math.PI * 0.75, a1 = Math.PI * 2.25;
+  const ang = (v) => a0 + (a1 - a0) * clamp(v / max, 0, 1);
+  ctx.beginPath(); ctx.arc(c, c, R, 0, 7);
+  const bg = ctx.createRadialGradient(c, c, R * 0.2, c, c, R);
+  bg.addColorStop(0, 'rgba(30,34,40,0.95)'); bg.addColorStop(1, 'rgba(8,10,14,0.92)');
+  ctx.fillStyle = bg; ctx.fill();
+  ctx.lineWidth = W * 0.035; ctx.strokeStyle = '#c8102e'; ctx.stroke();
+  // arco vermelho de limite
+  if (redFrom) { ctx.beginPath(); ctx.arc(c, c, R * 0.86, ang(redFrom), a1); ctx.lineWidth = W * 0.03; ctx.strokeStyle = 'rgba(227,36,59,.8)'; ctx.stroke(); }
+  ctx.fillStyle = '#fff'; ctx.strokeStyle = '#fff';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.font = `italic 800 ${W * 0.07}px sans-serif`;
+  for (let v = 0; v <= max; v += majors / 2) {
+    const a = ang(v), major = v % majors === 0;
+    ctx.lineWidth = major ? 3 : 1.5;
+    ctx.beginPath();
+    ctx.moveTo(c + Math.cos(a) * R * 0.9, c + Math.sin(a) * R * 0.9);
+    ctx.lineTo(c + Math.cos(a) * R * (major ? 0.76 : 0.82), c + Math.sin(a) * R * (major ? 0.76 : 0.82));
+    ctx.stroke();
+    if (major) ctx.fillText(String(label(v)), c + Math.cos(a) * R * 0.6, c + Math.sin(a) * R * 0.6);
+  }
+  const a = ang(val);
+  ctx.strokeStyle = '#ff2a3d'; ctx.lineWidth = W * 0.025; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(c - Math.cos(a) * R * 0.1, c - Math.sin(a) * R * 0.1); ctx.lineTo(c + Math.cos(a) * R * 0.86, c + Math.sin(a) * R * 0.86); ctx.stroke();
+  ctx.beginPath(); ctx.arc(c, c, R * 0.3, 0, 7); ctx.fillStyle = '#0b0d11'; ctx.fill();
+  ctx.lineWidth = 2; ctx.strokeStyle = 'rgba(255,255,255,.25)'; ctx.stroke();
+  ctx.fillStyle = '#fff';
+  ctx.font = `italic 900 ${W * 0.15}px sans-serif`;
+  ctx.fillText(center, c, c - W * 0.01);
+  ctx.font = `italic 700 ${W * 0.055}px sans-serif`;
+  ctx.fillStyle = '#9aa7b4';
+  ctx.fillText(sub, c, c + W * 0.1);
+}
+
 let hudT = 0;
 function updateHUD(dt) {
   hudT -= dt;
-  const sp = Math.round(rig.speedKmh);
-  $('speed').textContent = sp;
-  $('gear').textContent = rig.gear || 'N';
-  $('rpmarc').style.strokeDashoffset = 252 * (1 - clamp(rig.rpm, 0, 1));
+  const sp = rig.speedKmh;
+  drawGauge('spdg', sp, 120, 20, (v) => v, String(Math.round(sp)), 'km/h', 100);
+  const rpm = rig.rpm * 2500;
+  drawGauge('rpmg', rpm / 100, 25, 5, (v) => v, rig.engineOn ? (rig.gear || 'N') : 'OFF', 'x100 rpm', 21);
   if (hudT > 0) return;
   hudT = 0.2;
-  $('lvl').textContent = S.level;
+  $('lvl').textContent = 'Nv ' + S.level;
   $('money').textContent = fmt(S.money);
   const need = xpForLevel(S.level);
   $('xpbar').style.width = (S.level >= MAX_LEVEL ? 100 : (S.xp / need) * 100) + '%';
-  $('xptext').textContent = S.level >= MAX_LEVEL ? 'Nível máximo' : `${S.xp} / ${need} XP`;
-  const m = (rig.mass / 1000).toFixed(1);
-  $('load').textContent = `${m} t`;
+  $('ic-load').textContent = `${(rig.mass / 1000).toFixed(1)} t`;
+  $('ic-light').classList.toggle('on', rig.lightsOn);
+  $('lightsbtn').classList.toggle('on', rig.lightsOn);
+  $('ic-hand').classList.toggle('on', ctl.hand);
   const j = S.job;
   if (j) {
     const c = CARGO[j.cargo];
@@ -883,18 +1164,19 @@ function updateHUD(dt) {
     }
     $('jobsub').innerHTML = `${j.phase === 'pickup' ? 'Coletar' : 'Entregar'}: <b>${dest}</b> • ${(d / 1000).toFixed(1)} km${tm}`;
     $('dist').textContent = d > 1000 ? (d / 1000).toFixed(1) + ' km' : Math.round(d) + ' m';
-    $('damage').classList.toggle('hidden', j.phase !== 'deliver');
+    $('ic-dmg').classList.toggle('hidden', j.phase !== 'deliver');
     $('dmg').textContent = j.damage.toFixed(0) + '%';
   } else {
     $('jobtitle').textContent = 'Sem frete ativo';
     $('jobsub').innerHTML = 'Toque em 📋 para escolher uma carga';
     $('dist').textContent = '';
-    $('damage').classList.add('hidden');
+    $('ic-dmg').classList.add('hidden');
   }
 }
 
 // ---------------- Loop ----------------
-let last = 0, t = 0, frames = 0, fpsT = 0, saveT = 0;
+let refreshMats = 0;
+let last = 0, t = 0, frames = 0, fpsT = 0, saveT = 0, timeT = 0;
 function loop(now) {
   requestAnimationFrame(loop);
   if (document.hidden) return;
@@ -913,7 +1195,16 @@ function loop(now) {
   }
 
   readInput(dt);
-  const sim = state === 'drive' || state === 'title';
+  if (state === 'title') {
+    updateShowroom(dt);
+    audio.engine(0, 0, false);
+    renderer.render(show.scene, show.cam);
+    return;
+  }
+  if (S.settings.time === 'cycle' && state === 'drive') S.clock = (S.clock + dt / 50) % 24;
+  timeT -= dt;
+  if (timeT <= 0) { timeT = 0.5; applyTime(S.clock); }
+  const sim = state === 'drive';
   if (sim) {
     traffic.obstacles(obstacles);
     const steps = 2;
@@ -924,18 +1215,15 @@ function loop(now) {
     traffic.update(dt, rig, cs);
     if (state === 'drive') updateJob(dt);
   }
-  if (state === 'title') {
-    cam.orbit += dt * 0.12;
-    cam.orbitT = 1;
-  }
   world.update(dt, t);
   updateNav(dt);
   updateCamera(dt);
-  audio.engine(rig.rpm, input.throttle, true);
-  if (state !== 'title') { updateHUD(dt); drawMinimap(); }
+  audio.engine(rig.rpm, input.throttle, rig.engineOn && state === 'drive');
+  updateHUD(dt); drawMinimap();
   saveT += dt;
   if (saveT > 8) { saveT = 0; save(); }
   renderer.render(scene, camera);
+  if (refreshMats > 0 && --refreshMats === 0) scene.traverse((o) => { if (o.material) [].concat(o.material).forEach((m) => { m.needsUpdate = true; }); });
 }
 
 function onImpact(sp) {
@@ -1002,6 +1290,6 @@ window.addEventListener('error', (e) => {
 });
 
 // Expõe ganchos para testes automatizados
-window.__game = { S, get rig() { return rig; }, get state() { return state; }, ctl, acceptJob: (i) => acceptJob(i), get jobs() { return jobs; }, world: () => world, cam };
+window.__game = { get scene() { return scene; }, get sun() { return sun; }, get renderer() { return renderer; }, S, get rig() { return rig; }, get state() { return state; }, ctl, acceptJob: (i) => acceptJob(i), get jobs() { return jobs; }, world: () => world, cam };
 
 boot().catch((e) => { $("loadmsg").textContent = "Erro ao iniciar: " + e.message; console.error(e); });

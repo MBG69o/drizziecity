@@ -7,10 +7,12 @@ Faça entregas pela cidade, suba de nível, compre caminhões mais fortes e libe
 
 | Ação | Celular | Teclado (teste no PC) |
 |---|---|---|
-| Acelerar | botão verde **ACELERAR** | `W` / `↑` |
-| Frear / Ré | botão vermelho **FREIO** (segure parado para dar ré) | `S` / `↓` / `Espaço` |
-| Virar | ◀ ▶ ou inclinação do celular (Ajustes) | `A` `D` / `←` `→` |
-| Buzina / Câmera / Mapa | 📯 / 🎥 / toque no minimapa | `H` / `C` / `M` |
+| Ligar o motor | botão **Ligar Motor** | `E` |
+| Acelerar / Frear | pedais à direita | `W`/`↑` e `S`/`↓`/`Espaço` |
+| Câmbio | seletor **D / N / R** (ou automático em Ajustes) | `R` ré, `N` neutro |
+| Direção | **volante** (arraste), setas ou inclinação do celular | `A` `D` / `←` `→` |
+| Freio de mão / Faróis | **(P)** no painel / botão de farol | `P` / `L` |
+| Buzina / Câmera / Mapa | centro do volante / 🎥 / toque no minimapa | `H` / `C` / `M` |
 
 1. Abra a **Central de Fretes 📋** e aceite uma carga.
 2. Siga a seta verde e a rota laranja do GPS até o local de **coleta** e pare dentro da área amarela.
@@ -30,6 +32,11 @@ Faça entregas pela cidade, suba de nível, compre caminhões mais fortes e libe
 * Bônus por entrega no prazo, multa por atraso, avarias, 30 níveis, estatísticas e salvamento automático.
 
 ## Gráficos e desempenho
+
+* **Ciclo de dia e noite**: entardecer, noite estrelada com luar, janelas dos prédios acesas, postes com
+  iluminação no asfalto, faróis do caminhão e do tráfego (facho de luz real no modo Médio/Ultra).
+* **Showroom** com neon e piso refletivo na tela inicial; caminhões com pintura desgastada/poeira.
+* Interface em estilo simulador: volante, câmbio D/N/R, pedais, velocímetro e conta-giros analógicos.
 
 * Texturas **HD geradas proceduralmente** (asfalto, faixas, fachadas, concreto, grama…) com *mipmaps* e
   filtragem anisotrópica — nítidas de perto e sem serrilhado/pixelização à distância. APK leve (sem imagens).

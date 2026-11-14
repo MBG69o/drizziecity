@@ -131,6 +131,23 @@ export class Audio {
     s.start();
   }
 
+  starter() {
+    if (!this.ctx) return;
+    const ctx = this.ctx, t = ctx.currentTime;
+    const o = ctx.createOscillator(), g = ctx.createGain(), f = ctx.createBiquadFilter();
+    o.type = 'sawtooth';
+    o.frequency.setValueAtTime(14, t);
+    o.frequency.linearRampToValueAtTime(22, t + 0.7);
+    o.frequency.linearRampToValueAtTime(48, t + 1.1);
+    f.frequency.value = 600;
+    g.gain.setValueAtTime(0.0, t);
+    g.gain.linearRampToValueAtTime(0.35, t + 0.1);
+    g.gain.setValueAtTime(0.35, t + 1.0);
+    g.gain.linearRampToValueAtTime(0, t + 1.4);
+    o.connect(f).connect(g).connect(this.master);
+    o.start(t); o.stop(t + 1.5);
+  }
+
   suspend() { if (this.ctx && this.ctx.state === 'running') this.ctx.suspend(); }
   resume() { if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume(); }
 }
