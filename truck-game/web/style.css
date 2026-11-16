@@ -249,3 +249,7 @@ input[type=range] { width: 180px; accent-color: #e3243b; }
 
 #ic-light.hi { color: #6fb6ff; text-shadow: 0 0 8px #6fb6ff; }
 #ic-light { min-width: 30px; }
+
+#hint { left: 50%; top: 76px; transform: translateX(-50%); padding: 6px 14px; border-radius: 14px; background: rgba(10,14,20,.78); font-size: 12px; white-space: nowrap; pointer-events: none; }
+#hint b { color: var(--red); }
+#hint b.ok { color: #3ee07a; }

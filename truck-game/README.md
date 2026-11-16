@@ -91,6 +91,18 @@ Faça entregas pela cidade, suba de nível, compre caminhões mais fortes e libe
   tempestade com raios, clarões e trovões que chegam com atraso pela distância. **Alagamentos** nas baixadas
   perto do rio/litoral e em cruzamentos das cidades: a água sobe com a chuva, freia o caminhão e pode
   **afogar o motor** (caminhões leves a partir de ~55 cm, pesados ~95 cm).
+* **Córregos e vaus**: Ribeirão das Pedras, Rio Pequeno, Córrego Fundo, Ribeirão do Café e Córrego Escuro.
+  Estradas de terra passam **por dentro d'água** (vau, ~45 cm — mais fundo depois de chuva forte, pode afogar o
+  motor) ou por **pontes de madeira** (tábuas, longarinas, guarda-corpo e estacas); no asfalto, pontes baixas de
+  concreto. Placas de aviso antes de cada travessia. Novos locais: Fazenda Três Rios (Estrada do Vau), Laticínio
+  Ponte Velha e Granja Córrego Fundo; novas cargas: leite em tanque, queijos, frango congelado e ração para granja.
+* **Acoplamento de carretas**: nos fretes de carreta, a carreta carregada espera no pátio apoiada nos pés de apoio.
+  Dê ré com o cavalo alinhado até o pino-rei (o painel mostra distância e ângulo), pare e o engate é feito
+  (mangueiras de ar/elétrica). No destino a carreta é desacoplada e fica no pátio do cliente.
+* **Cabine em 1ª pessoa** (câmera 🎥 → Cabine): painel com quadro de instrumentos funcionando (velocímetro,
+  conta-giros, marcha, combustível, relógio e luzes-espia), volante que gira com as mãos do motorista,
+  braços, colunas, portas, para-sol, GPS no painel, capô nos bicudos, retrovisores externos com a imagem real
+  de trás (qualidade média/alta), limpadores e gotas de chuva no para-brisa. Arraste a tela para olhar em volta.
 * Estradas atravessando **mata fechada**, **pontes sobre o rio** com pilares, lavouras, morros com
   aerogeradores e o mar ao sul.
 * GPS calcula a rota por ruas e rodovias entre as cidades.

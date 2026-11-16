@@ -1033,6 +1033,25 @@ export const tex = {
     return finish(c, false);
   }),
 
+  // tábuas de ponte de madeira (atravessadas na pista), gastas e com frestas
+  planks: () => memo('planks', () => {
+    const s = SIZE / 2, [c, ctx] = canvas(s, s);
+    const r = rng(404), n = 16, ph = s / n;
+    ctx.fillStyle = '#1c140c'; ctx.fillRect(0, 0, s, s);
+    for (let i = 0; i < n; i++) {
+      const g = 92 + r() * 40, y = i * ph;
+      ctx.fillStyle = `rgb(${g + 22 | 0},${g - 2 | 0},${g - 30 | 0})`;
+      ctx.fillRect(0, y + 1.5, s, ph - 3);
+      ctx.strokeStyle = 'rgba(40,26,14,0.35)'; ctx.lineWidth = 1;
+      for (let k = 0; k < 5; k++) { ctx.beginPath(); ctx.moveTo(0, y + 3 + r() * (ph - 6)); ctx.bezierCurveTo(s * 0.3, y + r() * ph, s * 0.6, y + r() * ph, s, y + 3 + r() * (ph - 6)); ctx.stroke(); }
+      ctx.fillStyle = '#2a2a2a'; for (const x of [0.06, 0.94]) for (const dy of [0.3, 0.7]) ctx.fillRect(x * s - 1.5, y + ph * dy - 1.5, 3, 3); // pregos
+    }
+    // trilhas de pneu escurecidas
+    for (const x of [0.27, 0.73]) { ctx.fillStyle = 'rgba(30,20,12,0.28)'; ctx.fillRect(s * (x - 0.07), 0, s * 0.14, s); }
+    noise(ctx, s, s, 22, 405);
+    return finish(c);
+  }),
+
   bark: () => memo('bark', () => {
     const s = 256;
     const [c, ctx] = canvas(s, s);

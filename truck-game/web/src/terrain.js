@@ -33,8 +33,9 @@ const RANGES = [[-2400, -3300, 1900], [3350, -1000, 1500], [600, -3500, 1500], [
   [3700, -6900, 1800], [-4300, -7600, 1700], [-200, -8300, 1600], [6200, -4500, 1700], [-7700, -3200, 1300], [8200, 600, 1300]];
 
 export class Terrain {
-  constructor(river) {
+  constructor(river, streams = []) {
     this.river = river;
+    this.streams = streams;
     this.flat = [];
     for (const c of CITIES) this.flat.push({ x0: c.x0, z0: c.z0, x1: cx1(c), z1: cz1(c), r: 380 });
     for (const L of LOCATIONS) if (L.lot) this.flat.push({ x0: L.lot[0], z0: L.lot[1], x1: L.lot[2], z1: L.lot[3], r: 230 });
@@ -50,7 +51,7 @@ export class Terrain {
   }
 
   // relevo "natural" (antes das estradas)
-  raw(x, z) {
+  raw(x, z, noStreams = false) {
     const mm = this.mountainMask(x, z);
     const n = fbm(x / 1100, z / 1100);
     let h = (22 + 120 * mm) * (n - 0.42) + mm * mm * 190 * Math.max(0, ridge(x / 700, z / 700) - 0.42) + 3 * (vnoise(x / 110, z / 110) - 0.5);
@@ -66,6 +67,13 @@ export class Terrain {
     if (dr < RIVER_W / 2 + 200) h = -1.8 + (h + 1.8) * smooth(RIVER_W / 2 - 6, RIVER_W / 2 + 190, dr);
     // litoral
     if (z > SEA_Z - 320) h = h + (-5 - h) * smooth(SEA_Z - 320, SEA_Z + 60, z);
+    // córregos: leito raso com barrancos
+    if (!noStreams) for (const st of this.streams) {
+      const q = st.near(x, z);
+      if (!q || !st.y) continue;
+      const bed = st.y[q.i] - 0.9, k = smooth(st.w / 2 - 2, st.w / 2 + 38, q.d);
+      h = Math.min(h, bed + (h - bed) * k + (1 - k) * 0);
+    }
     return h;
   }
 

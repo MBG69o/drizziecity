@@ -40,6 +40,16 @@ export function zoneOf(c, bx, bz) {
 export const RIVER = [[-3050, -10200], [-2950, -8200], [-2700, -6700], [-2380, -5450], [-2100, -4300], [-1750, -3100], [-1400, -2050], [-1250, -1000], [-1080, 0], [-850, 800], [-350, 1400], [250, 1700], [500, 2100]];
 export const RIVER_W = 54;
 
+// Córregos e ribeirões (rasos): cruzados por vau (a estrada passa dentro d'água),
+// pontes de madeira nas estradas de terra e pontes baixas de concreto no asfalto.
+export const STREAMS = [
+  { id: 'pedras', name: 'Ribeirão das Pedras', w: 16, pts: [[-5800, -2600], [-5450, -2420], [-5050, -2330], [-4700, -2305], [-4350, -2380], [-3950, -2560], [-3550, -2800]] },
+  { id: 'pequeno', name: 'Rio Pequeno', w: 18, pts: [[-200, -5150], [250, -5180], [700, -5200], [1150, -5150], [1550, -5020], [1900, -4950]] },
+  { id: 'fundo', name: 'Córrego Fundo', w: 13, pts: [[4800, 900], [5250, 760], [5650, 700], [6100, 800], [6600, 1000]] },
+  { id: 'cafe', name: 'Ribeirão do Café', w: 14, pts: [[-2650, -1350], [-2420, -1020], [-2250, -850], [-2080, -640], [-1850, -470], [-1500, -330], [-1230, -260]] },
+  { id: 'escuro', name: 'Córrego Escuro', w: 12, pts: [[-900, -1900], [-560, -1860], [-225, -1850], [100, -1800], [420, -1700]] },
+];
+
 // Pisos: aderência (mu), resistência ao rolamento (crr), trepidação e nome
 export const SURFACES = {
   asphalt: { name: 'Asfalto', mu: 0.85, crr: 0.008, shake: 0 },
@@ -48,6 +58,7 @@ export const SURFACES = {
   dirt: { name: 'Terra', mu: 0.5, crr: 0.03, shake: 0.02 },
   mud: { name: 'Lama', mu: 0.3, crr: 0.075, shake: 0.012 },
   concrete: { name: 'Concreto', mu: 0.8, crr: 0.009, shake: 0 },
+  wood: { name: 'Ponte de madeira', mu: 0.6, crr: 0.012, shake: 0.03 },
 };
 
 // Rodovias e estradas: pontos de controle (spline). from/to = cidade e saída, ['hw', id] = entroncamento
@@ -61,9 +72,9 @@ export const HIGHWAYS = [
     pts: [[2610, 1440], [2760, 1440], [2950, 1380], [3150, 1150], [3300, 800], [3350, 400], [3250, 0], [3150, -400], [3250, -800], [3200, -1200], [3050, -1550], [2980, -1750], [2980, -1870]], hills: 16 },
   { id: 'RS-030', from: ['drizzie', 4, 0], to: null,
     pts: [[0, -570], [0, -800], [-120, -1080], [-420, -1380], [-800, -1640], [-1150, -1880], [-1450, -2000], [-1720, -2150], [-1960, -2420], [-2100, -2650], [-2100, -2900], [-2100, -3100]], hills: 10 },
-  { id: 'Estrada do Café', surface: 'dirt', half: 5.5, from: ['hw', 'BR-101'], to: null,
+  { id: 'Estrada do Café', cross: 'wood', surface: 'dirt', half: 5.5, from: ['hw', 'BR-101'], to: null,
     pts: [[-1760, -1180], [-1880, -1080], [-2020, -980], [-2250, -850], [-2450, -640], [-2600, -470], [-2600, -400]] },
-  { id: 'Trilha do Rio Escuro', surface: 'mud', half: 5, from: ['hw', 'RS-030'], to: null,
+  { id: 'Trilha do Rio Escuro', cross: 'ford', surface: 'mud', half: 5, from: ['hw', 'RS-030'], to: null,
     pts: [[-420, -1380], [-380, -1500], [-300, -1700], [-150, -2000], [-50, -2300], [100, -2500], [100, -2570]] },
   { id: 'Estrada da Olaria', surface: 'gravel', half: 6, from: ['hw', 'SP-280'], to: null,
     pts: [[1350, 80], [1380, -40], [1450, -200], [1550, -500], [1650, -760], [1650, -820]] },
@@ -86,6 +97,13 @@ export const HIGHWAYS = [
     pts: [[-6120, -630], [-6120, -300], [-5900, 200], [-5500, 550], [-5100, 800], [-4920, 890]] },
   { id: 'Rodovia do Sol', from: ['drizzie', 2, 8], to: ['lagoa', 4, 1],
     pts: [[-280, 570], [-300, 850], [-700, 1100], [-1300, 1150], [-2000, 1100], [-2800, 1050], [-3600, 1080], [-4200, 1040], [-4630, 1040]] },
+  // estradas do interior com vau e pontes de madeira
+  { id: 'Estrada do Vau', cross: 'ford', surface: 'dirt', half: 5.5, from: ['hw', 'BR-277'], to: null,
+    pts: [[-4700, -1400], [-4720, -1700], [-4750, -2000], [-4710, -2305], [-4680, -2600], [-4700, -2900], [-4700, -3100], [-4700, -3150]] },
+  { id: 'Estrada da Ponte Velha', cross: 'wood', surface: 'gravel', half: 6, from: ['hw', 'SC-401'], to: null,
+    pts: [[600, -5800], [640, -5600], [690, -5400], [700, -5200], [720, -4950], [760, -4700], [760, -4600]] },
+  { id: 'Estrada do Córrego', cross: 'ford', surface: 'dirt', half: 5.5, from: ['hw', 'BR-364'], to: null,
+    pts: [[5400, 100], [5480, 350], [5600, 560], [5650, 700], [5720, 900], [5850, 1080], [5850, 1150]] },
   // saídas para outros estados (terminam no posto fiscal da divisa)
   { id: 'BR-116', from: ['luzia', 3, 0], to: null,
     pts: [[-6180, -6010], [-6180, -6300], [-6000, -7000], [-5700, -7800], [-5600, -8600], [-5600, -9300], [-5600, -9395]] },
@@ -142,6 +160,9 @@ export const LOCATIONS = [
   { id: 'porto_lagoa', like: 'porto', name: 'Porto de Lagoa Dourada', city: 'lagoa', bx: 1, bz: 2, side: 'n', kind: 'port', color: 0x1f8fb0 },
   { id: 'mercado_lagoa', like: 'mercado', name: 'Mercado do Peixe', city: 'lagoa', bx: 0, bz: 0, side: 'e', kind: 'market', color: 0x2e9e52 },
   { id: 'mangue', name: 'Aquicultura do Mangue', hw: 'Estrada do Mangue', lot: [-3160, 40, -3040, 160], side: 's', kind: 'farm', color: 0x2a7f6f },
+  { id: 'tres_rios', like: 'fazenda', name: 'Fazenda Três Rios', hw: 'Estrada do Vau', lot: [-4760, -3270, -4640, -3150], side: 's', kind: 'farm', color: 0x8b5a2b },
+  { id: 'laticinio', name: 'Laticínio Ponte Velha', hw: 'Estrada da Ponte Velha', lot: [700, -4590, 820, -4470], side: 'n', kind: 'factory', color: 0x4a90c0 },
+  { id: 'granja', name: 'Granja Córrego Fundo', hw: 'Estrada do Córrego', lot: [5790, 1160, 5910, 1280], side: 'n', kind: 'farm', color: 0xc0752a },
   { id: 'divisa_n', like: 'porto', name: 'Posto Fiscal — Divisa Norte', hw: 'BR-116', lot: [-5660, -9515, -5540, -9395], side: 's', kind: 'warehouse', color: 0x445566 },
   { id: 'divisa_l', like: 'porto', name: 'Posto Fiscal — Divisa Leste', hw: 'BR-364 Leste', lot: [9495, -1560, 9615, -1440], side: 'w', kind: 'warehouse', color: 0x445566 },
 ];
@@ -197,6 +218,10 @@ export const CARGOS = [
   { id: 'acucar', name: 'Açúcar a Granel', icon: '🍬', t: 30, lvl: 8, trailer: 'bulk', rate: 1.05, from: ['usina'], to: ['porto', 'cd'] },
   { id: 'gado', name: 'Ração para Gado', icon: '🐄', t: 20, lvl: 4, trailer: 'bulk', rate: 1.0, from: ['silo'], to: ['frigorifico', 'fazenda'] },
   { id: 'pescado', name: 'Pescado Congelado', icon: '🐟', t: 8, lvl: 2, trailer: 'box', rate: 1.3, fragile: true, from: ['mangue', 'porto_lagoa'], to: ['mercado', 'cd'] },
+  { id: 'leite', name: 'Leite (tanque)', icon: '🥛', t: 24, lvl: 6, trailer: 'tank', rate: 1.25, hazard: false, from: ['laticinio'], to: ['mercado', 'cd'] },
+  { id: 'queijos', name: 'Queijos e Laticínios', icon: '🧀', t: 6, lvl: 2, trailer: 'box', rate: 1.3, fragile: true, from: ['laticinio'], to: ['mercado', 'cd', 'porto'] },
+  { id: 'frango', name: 'Frango Congelado', icon: '🍗', t: 16, lvl: 4, trailer: 'box', rate: 1.3, from: ['granja'], to: ['mercado', 'cd', 'porto'] },
+  { id: 'racao_granja', name: 'Ração para Granja', icon: '🌽', t: 22, lvl: 5, trailer: 'bulk', rate: 1.05, from: ['silo'], to: ['granja', 'laticinio'] },
   { id: 'cana_bitrem', name: 'Açúcar — Bitrem', icon: '🚛', t: 47, lvl: 14, trailer: 'bitrem', sub: 'bulk', rate: 1.15, from: ['usina'], to: ['porto'] },
 ];
 // locais novos que funcionam como os antigos entram automaticamente nas cargas

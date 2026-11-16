@@ -9,6 +9,7 @@ import { Sky } from 'three/examples/jsm/objects/Sky.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { Traffic, trafficQuality } from './traffic.js';
 import { Weather } from './weather.js';
+import { Cockpit } from './cockpit.js';
 import { findRoute, buildGraph } from './route.js';
 import { Audio } from './audio.js';
 
@@ -93,7 +94,7 @@ let zoneTimer = 0;
 const obstacles = [];
 const ctl = { gas: false, brake: false, left: false, right: false, tilt: 0, wheel: 0, wheelHeld: false, gear: 'D', hand: false, blink: 0, blinkArm: false };
 const input = { throttle: 0, brake: 0, steer: 0, gear: 'D', handbrake: false };
-let lightsManual = null, weather = null;
+let lightsManual = null, weather = null, cockpit = null;
 const cam = { yaw: 0, orbit: 0, orbitT: 0, mode: S.settings.camera || 0, pos: new THREE.Vector3(), look: new THREE.Vector3() };
 let pr = Q.pr;
 
@@ -171,6 +172,8 @@ async function boot() {
   }
   placeAtStart();
   restoreTruckState();
+  cockpit = new Cockpit(renderer, scene, qName, $('minimap'));
+  cockpit.build(rig);
   rig.onPuncture = () => {
     audio.crash(18); audio.airBrake();
     if (navigator.vibrate) try { navigator.vibrate([60, 40, 60]); } catch (e) { /* */ }
@@ -207,6 +210,7 @@ async function boot() {
   await step(85, 'Desenhando o mapa…');
   buildMapCanvas();
   if (S.job && S.job.phase === 'deliver') rig.attach(CARGO[S.job.cargo]);
+  else if (S.job) parkAtDepot(S.job);
   jobs = genJobs();
   setupInput();
   setupUI();
@@ -517,7 +521,8 @@ function acceptJob(i) {
   jobs.splice(i, 1);
   audio.beep(660, 0.1); audio.beep(990, 0.12);
   closeModal();
-  toast(`Frete aceito! Vá até <b>${LOC[j.from].name}</b>`);
+  parkAtDepot(S.job);
+  toast(`Frete aceito! Vá até <b>${LOC[j.from].name}</b>${rig.parked ? ' e engate a carreta' : ''}`);
   routeT = 0;
   save();
 }
@@ -527,11 +532,59 @@ function cancelJob() {
   const fee = S.job.phase === 'deliver' ? Math.round(S.job.pay * 0.25) : 0;
   S.money = Math.max(0, S.money - fee);
   rig.detach();
+  rig.unpark();
   S.job = null;
   marker.visible = false;
   navArrow.visible = false;
   toast(fee ? `Frete cancelado. Multa de ${fmt(fee)}` : 'Frete cancelado');
   save();
+}
+
+// carreta carregada estacionada no pátio de coleta, de frente para a entrada
+const FACE = { n: [0, -1], s: [0, 1], w: [-1, 0], e: [1, 0] };
+function parkAtDepot(job) {
+  rig.unpark();
+  const c = CARGO[job.cargo];
+  if (!rig.usesTrailer(c)) return;
+  const d = world.depots[job.from], f = FACE[d.side] || [0, -1];
+  rig.park(c, d.zone.x - f[0] * 2, d.zone.z - f[1] * 2, Math.atan2(f[0], f[1]));
+}
+// carretas deixadas nos clientes (somem quando o caminhão se afasta)
+const dropped = [];
+let coupleT = 0;
+function updateCoupling(dt) {
+  const p = rig.parked, hint = $('hint');
+  if (!p || !S.job || S.job.phase !== 'pickup') { hint.classList.add('hidden'); coupleT = 0; return false; }
+  const hz = rig.hitchFor(p);
+  const hx = rig.x + Math.sin(rig.h) * hz, hzz = rig.z + Math.cos(rig.h) * hz;
+  const dist = Math.hypot(hx - p.x, hzz - p.z);
+  let ang = Math.abs(Math.atan2(Math.sin(rig.h - p.h), Math.cos(rig.h - p.h)));
+  if (dist > 45) { hint.classList.add('hidden'); coupleT = 0; return true; }
+  hint.classList.remove('hidden');
+  const degs = Math.round((ang * 180) / Math.PI);
+  const ok = dist < 1.1 && ang < 0.2;
+  if (ok && rig.speedKmh < 1.2) {
+    coupleT += dt;
+    hint.innerHTML = `🔗 Engatando… conectando mangueiras de ar e elétrica`;
+    if (coupleT > 1.6) {
+      coupleT = 0;
+      hint.classList.add('hidden');
+      rig.attach(p.cargo, p);
+      S.job.phase = 'deliver';
+      S.job.tLeft = S.job.time;
+      audio.crash(14); audio.airBrake();
+      if (navigator.vibrate) try { navigator.vibrate(80); } catch (e) { /* */ }
+      toast(`🔗 Carreta acoplada: <b>${p.cargo.name}</b> (${p.cargo.t} t)`);
+      toast(`Entregue em <b>${LOC[S.job.to].name}</b>`);
+      routeT = 0;
+      save();
+    }
+  } else {
+    coupleT = 0;
+    const side = Math.cos(rig.h - p.h) < 0 ? ' — vire o caminhão de frente para a saída' : '';
+    hint.innerHTML = ok ? '🔗 Pare para acoplar' : `🔗 Dê ré até o pino-rei: <b>${dist.toFixed(1)} m</b> • alinhamento <b class="${degs < 12 ? 'ok' : ''}">${degs}°</b>${side}`;
+  }
+  return true;
 }
 
 function currentTarget() {
@@ -549,6 +602,7 @@ function updateJob(dt) {
   const job = S.job;
   if (!job) { $('progress').classList.add('hidden'); return; }
   if (job.phase === 'deliver') job.tLeft -= dt;
+  if (job.phase === 'pickup' && rig.parked) { updateCoupling(dt); $('progress').classList.add('hidden'); return; }
   const d = currentTarget();
   const inside = inZone(d);
   const stopped = rig.speedKmh < 1.5;
@@ -556,7 +610,7 @@ function updateJob(dt) {
     zoneTimer += dt;
     const need = 2.2;
     $('progress').classList.remove('hidden');
-    $('progtext').textContent = job.phase === 'pickup' ? 'Carregando…' : 'Descarregando…';
+    $('progtext').textContent = job.phase === 'pickup' ? 'Carregando…' : rig.trailer ? 'Desacoplando…' : 'Descarregando…';
     $('progarc').style.strokeDashoffset = 264 * (1 - Math.min(1, zoneTimer / need));
     if (zoneTimer >= need) {
       zoneTimer = 0;
@@ -593,7 +647,7 @@ function completeJob() {
   S.stats.deliveries++;
   S.stats.earned += total;
   S.stats.tons += c.t;
-  rig.detach();
+  if (rig.trailer) { const p = rig.dropTrailer(); if (p) dropped.push(p); toast('🔗 Carreta desacoplada no pátio do cliente', 2200); } else rig.detach();
   S.job = null;
   marker.visible = false;
   navArrow.visible = false;
@@ -816,13 +870,14 @@ function readInput(dt) {
 function cycleCamera() {
   cam.mode = (cam.mode + 1) % 3;
   S.settings.camera = cam.mode;
-  toast(['Câmera: Perseguição', 'Câmera: Aérea', 'Câmera: Cabine'][cam.mode], 1200);
+  toast(['Câmera: Perseguição', 'Câmera: Aérea', 'Câmera: Cabine (1ª pessoa)'][cam.mode], 1200);
 }
 
 // ---------------- Câmera ----------------
 const _p = { x: 0, z: 0 }, _o = { x: 0, z: 0 };
 function updateCamera(dt, instant = false) {
   if (Math.hypot(cam.pos.x - rig.x, cam.pos.z - rig.z) > 150) instant = true;
+  if (instant) cullT = 0;
   const md = rig.model;
   if (cam.orbitT > 0) cam.orbitT -= dt;
   else cam.orbit *= Math.max(0, 1 - dt * 2.5);
@@ -833,13 +888,13 @@ function updateCamera(dt, instant = false) {
   dy = Math.atan2(Math.sin(dy), Math.cos(dy));
   cam.yaw += dy * k;
   const fx = Math.sin(rig.h), fz = Math.cos(rig.h);
-  if (cam.mode === 2) {
-    const ex = rig.x + fx * (md.zf - 0.7) - Math.cos(rig.h) * 0.45, ez = rig.z + fz * (md.zf - 0.7) + Math.sin(rig.h) * 0.45;
-    camera.position.set(ex, rig.y + (rig.def.id === 'urbano' ? 2.3 : 2.75), ez);
-    const lx = Math.sin(cam.yaw), lz = Math.cos(cam.yaw);
-    camera.lookAt(ex + lx * 20, rig.y + 2.0 + Math.sin(rig.pitch) * 20, ez + lz * 20);
-    camera.fov = 70;
+  if (cam.mode === 2 && cockpit) {
+    // 1ª pessoa: dentro da cabine, com painel, volante e mãos
+    if (!cockpit.active) cockpit.setActive(true);
+    const hh = Math.floor(S.clock), mm = Math.floor((S.clock - hh) * 60);
+    cockpit.update(dt, rig, input, ctl, { night, rain: weather ? weather.rain : 0, clock: `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}` }, camera, cam);
   } else {
+    if (cockpit && cockpit.active) { cockpit.setActive(false); camera.near = 0.5; }
     const len = rig.trainLength;
     const tl = md.zf - md.rearEnd; // comprimento do caminhão
     let dist = (cam.mode === 0 ? 3.5 + tl : 12 + tl * 1.2) + len * (cam.mode === 0 ? 0.75 : 1.1);
@@ -1284,6 +1339,7 @@ function useTruck(id) {
   const f = S.fuelBy[id];
   rig.fuel = f === undefined ? t.tank : Math.min(f, t.tank);
   rig.lpm = FUEL_SCALE / (t.kml * 1000);
+  if (S.job && S.job.phase === 'pickup') parkAtDepot(S.job);
   if (S.job && lockReason(S.job, t)) { cancelJob(); }
   save();
   renderTab('garage');
@@ -1513,7 +1569,7 @@ function updateHUD(dt) {
 }
 
 // ---------------- Loop ----------------
-let refreshMats = 0;
+let refreshMats = 0, cullT = 0;
 let last = 0, t = 0, frames = 0, fpsT = 0, saveT = 0, timeT = 0;
 function loop(now) {
   requestAnimationFrame(loop);
@@ -1540,8 +1596,9 @@ function loop(now) {
     traffic.update(dt, rig, rig._cs || []);
     world.update(dt, t);
     weather.update(dt, camera, world);
+    if (cockpit && cockpit.active) { cockpit.setActive(false); camera.near = 0.5; }
     titleCamera(dt);
-    if ((frames & 15) === 0) world.cullAt(camera.position.x, camera.position.z, Q.far);
+    cullT -= dt; if (cullT <= 0) { cullT = 0.4; world.cullAt(camera.position.x, camera.position.z, Q.far); }
     audio.engine(0, 0, false);
     renderer.render(scene, camera);
     return;
@@ -1552,6 +1609,11 @@ function loop(now) {
   const sim = state === 'drive';
   if (sim) {
     traffic.obstacles(obstacles);
+    if (rig.parked) rig.parkedCircles(rig.parked, obstacles);
+    for (let k = dropped.length - 1; k >= 0; k--) {
+      const p = dropped[k];
+      if (Math.hypot(p.x - rig.x, p.z - rig.z) > 450 || dropped.length > 3) { rig.unpark(p); dropped.splice(k, 1); } else rig.parkedCircles(p, obstacles);
+    }
     const steps = 2;
     for (let i = 0; i < steps; i++) rig.update(dt / steps, input, world, obstacles);
     if (rig.lastImpact > 0) onImpact(rig.lastImpact);
@@ -1562,7 +1624,7 @@ function loop(now) {
   }
   world.update(dt, t);
   weather.update(dt, camera, world);
-  if ((frames & 15) === 0) world.cullAt(camera.position.x, camera.position.z, Q.far);
+  cullT -= dt; if (cullT <= 0) { cullT = 0.4; world.cullAt(camera.position.x, camera.position.z, Q.far); }
   if (sim) checkRedLight();
   updateNav(dt);
   updateCamera(dt);
@@ -1618,6 +1680,12 @@ function updateNav(dt) {
   marker.visible = Math.hypot(d.zone.x - rig.x, d.zone.z - rig.z) < 600;
   marker.position.set(d.zone.x, 0, d.zone.z);
   marker.zone.scale.set(d.zone.w, d.zone.d, 1);
+  if (S.job.phase === 'pickup' && rig.parked) {
+    // alvo = pino-rei da carreta
+    const p = rig.parked;
+    marker.position.set(p.x, world.heightAt(p.x, p.z), p.z);
+    marker.zone.scale.set(2.6, 2.6, 1);
+  }
   const inside = inZone(d);
   marker.zone.material.color.setHex(inside ? 0x3ee07a : 0xffc400);
   marker.cone.position.y = 7 + Math.sin(t * 3) * 0.8;

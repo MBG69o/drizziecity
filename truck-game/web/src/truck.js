@@ -866,37 +866,130 @@ export class Rig {
     this.sync();
   }
 
-  attach(cargo) {
+  // a carga vai numa carreta? (cavalo sempre; rígido só com carga de carreta, puxada por cambão)
+  usesTrailer(cargo, def = this.def) { return !!cargo && (!def.rigid || cargo.trailer !== 'box'); }
+
+  makeTrailers(cargo) {
+    let t1, t2 = null;
+    if (cargo.trailer === 'bitrem') {
+      const sub = { ...cargo, trailer: cargo.sub };
+      t1 = buildTrailer(sub, { len: 9.2, lead: true });
+      t2 = buildTrailer(sub, { len: 10.2, front: 0.5 });
+    } else t1 = buildTrailer(cargo);
+    for (const tr of [t1, t2]) {
+      if (!tr) continue;
+      tr.blob.visible = !this.shadows;
+      tr.night.visible = false;
+      this.scene.add(tr.root);
+    }
+    return { t1, t2 };
+  }
+
+  // pés de apoio (carreta estacionada)
+  addLegs(tr) {
+    const g = new THREE.Group(), m = new THREE.MeshStandardMaterial({ color: 0x2c2f33, metalness: 0.5, roughness: 0.6 });
+    for (const sd of [-1, 1]) {
+      const leg = new THREE.Mesh(new THREE.BoxGeometry(0.16, 1.15, 0.16), m);
+      leg.position.set(sd * 0.95, 0.6, -1.9);
+      const foot = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.06, 0.4), m);
+      foot.position.set(sd * 0.95, 0.04, -1.9);
+      g.add(leg, foot);
+    }
+    const brace = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.08, 0.08), m);
+    brace.position.set(0, 0.55, -1.9);
+    g.add(brace);
+    tr.root.add(g);
+    return g;
+  }
+
+  // carreta carregada esperando no pátio (o jogador engata de ré)
+  park(cargo, x, z, h) {
+    this.unpark();
+    const { t1, t2 } = this.makeTrailers(cargo);
+    this.parked = { cargo, t1, t2, x, z, h, legs: this.addLegs(t1) };
+    this.placeParked(this.parked);
+    return this.parked;
+  }
+
+  placeParked(p) {
+    const W = this.world;
+    const fx = Math.sin(p.h), fz = Math.cos(p.h);
+    const hy = (x, z) => (W ? W.heightAt(x, z) : 0);
+    const put = (tr, x, z) => {
+      const y = hy(x, z), ax = x - fx * tr.Lk, az = z - fz * tr.Lk, ya = hy(ax, az);
+      tr.root.position.set(x, y, z);
+      tr.root.rotation.set(-Math.atan2(y - ya, tr.Lk), p.h, 0);
+    };
+    put(p.t1, p.x, p.z);
+    if (p.t2) put(p.t2, p.x + fx * p.t1.coupleZ, p.z + fz * p.t1.coupleZ);
+  }
+
+  unpark(p = this.parked) {
+    if (!p) return;
+    for (const tr of [p.t1, p.t2]) if (tr) this.scene.remove(tr.root);
+    if (p === this.parked) this.parked = null;
+  }
+
+  // engate da quinta-roda (ou do cambão) que ficará sobre o pino-rei desta carreta
+  hitchFor(p) {
+    return this.def.rigid ? this.model.rearEnd - 1.5 - p.t1.front : this.model.hitchZ;
+  }
+
+  attach(cargo, parked = null) {
     this.cargo = cargo;
     // caminhão rígido com carga de carreta: puxa um reboque pelo engate traseiro (cambão)
     const tow = this.def.rigid && cargo.trailer !== 'box';
     if (this.model.bedCargo) this.model.bedCargo.visible = !tow;
     this._hitch = null;
-    if (!this.def.rigid || tow) {
-      if (cargo.trailer === 'bitrem') {
-        const sub = { ...cargo, trailer: cargo.sub };
-        this.trailer = buildTrailer(sub, { len: 9.2, lead: true });
-        this.trailer2 = buildTrailer(sub, { len: 10.2, front: 0.5 });
-        this.th2 = this.h;
-      } else this.trailer = buildTrailer(cargo);
+    if (this.usesTrailer(cargo)) {
+      let t1, t2;
+      if (parked) {
+        ({ t1, t2 } = parked);
+        if (parked.legs) t1.root.remove(parked.legs);
+        if (parked === this.parked) this.parked = null;
+      } else ({ t1, t2 } = this.makeTrailers(cargo));
+      this.trailer = t1; this.trailer2 = t2;
+      for (const tr of [t1, t2]) if (tr) tr.night.visible = this.lightsOn;
       if (tow) {
         const tr = this.trailer, gap = 1.5;
         this._hitch = this.model.rearEnd - gap - tr.front;
-        // cambão: barra do engate do caminhão até a frente do reboque
-        const bar = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.14, gap + 0.3), new THREE.MeshStandardMaterial({ color: 0x2b2b2b, metalness: 0.6, roughness: 0.5 }));
-        bar.position.set(0, 0.85, tr.front + gap / 2);
-        tr.root.add(bar);
+        if (!tr.bar) {
+          // cambão: barra do engate do caminhão até a frente do reboque
+          const bar = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.14, gap + 0.3), new THREE.MeshStandardMaterial({ color: 0x2b2b2b, metalness: 0.6, roughness: 0.5 }));
+          bar.position.set(0, 0.85, tr.front + gap / 2);
+          tr.root.add(bar);
+          tr.bar = bar;
+        }
       }
-      for (const tr of [this.trailer, this.trailer2]) {
-        if (!tr) continue;
-        tr.blob.visible = !this.shadows;
-        tr.night.visible = this.lightsOn;
-        this.scene.add(tr.root);
-      }
-      this.th = this.h;
+      this.th = parked ? parked.h : this.h;
+      this.th2 = parked ? parked.h : this.h;
     }
     this.computePhys();
     this.sync();
+  }
+
+  // solta a carreta onde está (fica estacionada no pátio do cliente)
+  dropTrailer() {
+    if (!this.trailer) { this.detach(); return null; }
+    const hz = this.hitch;
+    const p = { cargo: this.cargo, t1: this.trailer, t2: this.trailer2, h: this.th, x: this.x + Math.sin(this.h) * hz, z: this.z + Math.cos(this.h) * hz };
+    p.legs = this.addLegs(p.t1);
+    for (const tr of [p.t1, p.t2]) if (tr) tr.night.visible = false;
+    this.trailer = null; this.trailer2 = null; this._hitch = null;
+    if (this.model.bedCargo) this.model.bedCargo.visible = false;
+    this.cargo = null;
+    this.computePhys();
+    this.placeParked(p);
+    return p;
+  }
+
+  // círculos de colisão de uma carreta estacionada (atrás dos pés de apoio, para dar para engatar)
+  parkedCircles(p, out) {
+    const fx = Math.sin(p.h), fz = Math.cos(p.h);
+    const add = (tr, x, z, from) => { for (let s = from; s > tr.back + 0.4; s -= 2.2) out.push({ x: x + fx * s, z: z + fz * s, r: 1.3, set hit(v) {} }); };
+    add(p.t1, p.x, p.z, -3.4);
+    if (p.t2) add(p.t2, p.x + fx * p.t1.coupleZ, p.z + fz * p.t1.coupleZ, p.t2.front - 1);
+    return out;
   }
 
   detach() {

@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { Builder, mat, G } from './geo.js';
 import { tex } from './textures.js';
 import { BLOCK, ROAD_W, HW_HALF, CITIES, CITY, cx1, cz1, zoneOf, LOCATIONS, RIVER_W, SEA_Z, WORLD, SURFACES } from './data.js';
-import { buildHighways, River } from './highway.js';
+import { buildHighways, buildStreams, River } from './highway.js';
 import { Terrain } from './terrain.js';
 
 const RH = ROAD_W / 2;
@@ -42,8 +42,10 @@ export class World {
     this.hills = [];
     this.fields = [];
     const river = new River();
-    this.terrain = new Terrain(river);
-    const H = buildHighways(this.terrain, river);
+    this.streams = buildStreams();
+    this.terrain = new Terrain(river, this.streams);
+    for (const st of this.streams) st.computeLevel(this.terrain);
+    const H = buildHighways(this.terrain, river, this.streams);
     this.terrain.setRoads(H.hws);
     this.river = H.river;
     this.hws = H.hws;
@@ -157,7 +159,7 @@ export class World {
       if (x >= a.x0 && x <= a.x1 && z >= a.z0 && z <= a.z1) return a.city ? (a.city.surface || 'asphalt') : a.lot ? 'concrete' : 'asphalt';
     }
     const q = this.hw(x, z);
-    if (q && q.d < q.o.half + 2) return q.o.surface;
+    if (q && q.d < q.o.half + 2) return q.o.bridge[q.i] === 2 ? 'wood' : q.o.surface;
     if (this.stationAt(x, z)) return 'concrete';
     return 'dirt';
   }
@@ -224,12 +226,15 @@ export class World {
     return this.terrain.meshHeight(x, z);
   }
 
+  isFreeLoose(x, z) { const q = this.hw(x, z); return !(q && q.d < q.o.half + 6) && !this.inArea(x, z, 0); }
+
   // local livre de rodovias, rio, cidades, pátios, campos e mar?
   isFree(x, z, m) {
     if (z > SEA_Z - 40) return false;
     const q = this.hw(x, z);
     if (q && q.d < q.o.half + 8 + m) return false;
     if (this.river.dist(x, z) < RIVER_W / 2 + 12 + m) return false;
+    for (const st of this.streams) if (st.dist(x, z) < st.w / 2 + 8 + m) return false;
     for (const a of this.areas) {
       if (a.circle) { if (Math.hypot(x - a.x, z - a.z) < a.r + 10 + m) return false; continue; }
       if (x > a.x0 - 25 - m && x < a.x1 + 25 + m && z > a.z0 - 25 - m && z < a.z1 + 25 + m) return false;
@@ -251,6 +256,8 @@ export class World {
       inter: lam(tex.intersection()),
       concrete: lam(tex.concrete()),
       bridge: lam(tex.concrete(), { side: THREE.DoubleSide }),
+      wood: lam(tex.planks(), { side: THREE.DoubleSide }),
+      timber: lam(tex.bark(), { vertexColors: true }),
       lot: lam(tex.lot()),
       side0: lam(tex.sidewalk(0)), side1: lam(tex.sidewalk(1)), side2: lam(tex.sidewalk(2)),
       curb: lam(tex.curb()),
@@ -278,7 +285,7 @@ export class World {
     }
     this.M = M;
     const makeB = () => ({
-      grass: new Builder(true), road: new Builder(), hwy: new Builder(), dirt: new Builder(), mud: new Builder(), gravel: new Builder(), cobble: new Builder(), cobbleI: new Builder(), inter: new Builder(), concrete: new Builder(), bridge: new Builder(),
+      grass: new Builder(true), road: new Builder(), hwy: new Builder(), dirt: new Builder(), mud: new Builder(), gravel: new Builder(), cobble: new Builder(), cobbleI: new Builder(), inter: new Builder(), concrete: new Builder(), bridge: new Builder(), wood: new Builder(), timber: new Builder(true),
       lot: new Builder(), puddle: new Builder(), side0: new Builder(), side1: new Builder(), side2: new Builder(), curb: new Builder(), marks: new Builder(), stop: new Builder(), field: new Builder(true), sand: new Builder(), roof: new Builder(), tiles: new Builder(),
       wh: new Builder(true), f: [new Builder(), new Builder(), new Builder(), new Builder()],
       flat: new Builder(true), metal: new Builder(true), cont: new Builder(true),
@@ -340,7 +347,7 @@ export class World {
       return mesh;
     };
     add(B.grass, M.grass); add(B.road, M.road); add(B.hwy, M.hwy); add(B.dirt, M.dirt); add(B.mud, M.mud); add(B.gravel, M.gravel); add(B.cobble, M.cobble); add(B.cobbleI, M.cobbleI); add(B.inter, M.inter); add(B.concrete, M.concrete, true);
-    add(B.bridge, M.bridge, true); add(B.lot, M.lot); add(B.puddle, M.puddle); for (const k of ['side0', 'side1', 'side2', 'curb', 'marks', 'stop']) add(B[k], M[k]); add(B.field, M.field); add(B.sand, M.sand); add(B.roof, M.roof);
+    add(B.bridge, M.bridge, true); add(B.wood, M.wood, true); add(B.timber, M.timber, true); add(B.lot, M.lot); add(B.puddle, M.puddle); for (const k of ['side0', 'side1', 'side2', 'curb', 'marks', 'stop']) add(B[k], M[k]); add(B.field, M.field); add(B.sand, M.sand); add(B.roof, M.roof);
     add(B.tiles, M.tiles, true); add(B.wh, M.wh, true); add(B.flat, M.flat, true);
     add(B.metal, M.metal, true); add(B.cont, M.cont, true);
     B.f.forEach((b, i) => add(b, M.f[i], true));
@@ -921,7 +928,26 @@ export class World {
       const ya = h.y[a] + 0.04, yb = h.y[b] + 0.04;
       const va = h.s[a] / tile, vb = h.s[b] / tile;
       const P = (k, rr, o, y) => [h.x[k] + rr[0] * o, y, h.z[k] + rr[1] * o];
-      RB.quad(P(a, ra, -E, ya), P(a, ra, E, ya), P(b, rb, E, yb), P(b, rb, -E, yb), [0, 1, 0], [0, va, 1, va, 1, vb, 0, vb]);
+      const wood = h.bridge[a] === 2 || h.bridge[b] === 2;
+      if (!wood) RB.quad(P(a, ra, -E, ya), P(a, ra, E, ya), P(b, rb, E, yb), P(b, rb, -E, yb), [0, 1, 0], [0, va, 1, va, 1, vb, 0, vb]);
+      else {
+        // ponte de madeira: tabuleiro de tábuas, longarinas, guarda-corpo e estacas no leito
+        const W2 = E - 0.6, ua = h.s[a] / 4, ub = h.s[b] / 4;
+        B.wood.quad(P(a, ra, -W2, ya + 0.05), P(a, ra, W2, ya + 0.05), P(b, rb, W2, yb + 0.05), P(b, rb, -W2, yb + 0.05), [0, 1, 0], [0, ua, 1, ua, 1, ub, 0, ub]);
+        B.wood.quad(P(a, ra, W2, ya - 0.35), P(a, ra, -W2, ya - 0.35), P(b, rb, -W2, yb - 0.35), P(b, rb, W2, yb - 0.35), [0, -1, 0], [0, ua, 1, ua, 1, ub, 0, ub]);
+        const hd = Math.atan2(h.dx[a], h.dz[a]), seg = h.s[b] - h.s[a];
+        const mx = (h.x[a] + h.x[b]) / 2, mz = (h.z[a] + h.z[b]) / 2, my = (ya + yb) / 2;
+        for (const sd of [-1, 1]) {
+          const ox = ra[0] * sd, oz = ra[1] * sd;
+          B.timber.add(G.box(), mat(mx + ox * (W2 - 0.1), my - 0.2, mz + oz * (W2 - 0.1), 0, hd, 0, 0.35, 0.45, seg + 0.05), 0x6a4a2c); // longarina
+          B.timber.add(G.box(), mat(mx + ox * (W2 + 0.05), my + 1.0, mz + oz * (W2 + 0.05), 0, hd, 0, 0.16, 0.14, seg + 0.05), 0x7a5634); // corrimão
+          B.timber.add(G.box(), mat(mx + ox * (W2 + 0.05), my + 0.5, mz + oz * (W2 + 0.05), 0, hd, 0, 0.12, 0.1, seg + 0.05), 0x6e4c2e);
+          const px = h.x[a] + ox * (W2 + 0.05), pz = h.z[a] + oz * (W2 + 0.05);
+          B.timber.add(G.box(), mat(px, ya + 0.55, pz, 0, hd, 0, 0.22, 1.15, 0.22), 0x5e4128); // mourão
+          if (i % 2 === 0) B.timber.add(G.cyl(8), mat(h.x[a] + ox * (W2 - 0.3), ya - 2.6, h.z[a] + oz * (W2 - 0.3), 0, 0, 0, 0.42, 4.6, 0.42), 0x4f3720); // estaca
+        }
+        if (i % 2 === 0) B.timber.add(G.box(), mat(h.x[a], ya - 0.55, h.z[a], 0, hd, 0, W2 * 2 + 0.6, 0.3, 0.35), 0x5a3e24); // travessa
+      }
       // lamaçal: poças fundas e brilhantes
       if (h.surface === 'mud') {
         const da = this.mudDepth(h.x[a], h.z[a]), db = this.mudDepth(h.x[b], h.z[b]);
@@ -930,7 +956,7 @@ export class World {
           B.puddle.quad(P(a, ra, -wa * Math.sign(da), ya + 0.03), P(a, ra, wa * Math.sign(da), ya + 0.03), P(b, rb, wb * Math.sign(db), yb + 0.03), P(b, rb, -wb * Math.sign(db), yb + 0.03), [0, 1, 0], [0, 0, 1, 0, 1, 1, 0, 1]);
         }
       }
-      const bridge = h.bridge[a] || h.bridge[b];
+      const bridge = h.bridge[a] === 1 || h.bridge[b] === 1;
       for (const side of [-1, 1]) {
         const ea = P(a, ra, side * E, ya - 0.04), eb = P(b, rb, side * E, yb - 0.04);
         if (bridge) {
@@ -957,6 +983,17 @@ export class World {
       }
       if (i % 12 === 0 && h.surface === 'asphalt') for (const side of [-1, 1]) this.posts.push({ x: h.x[a] + ra[0] * side * (E + 0.7), y: h.y[a], z: h.z[a] + ra[1] * side * (E + 0.7), rot: Math.atan2(h.dx[a], h.dz[a]) });
     }
+    // placas: vau e ponte de madeira
+    const warn = (i, title, sub) => {
+      for (const dir of [-1, 1]) {
+        const k = Math.max(0, Math.min(n - 1, i + dir * 18));
+        const hd = Math.atan2(h.dx[k], h.dz[k]) + (dir < 0 ? 0 : Math.PI);
+        const sx = h.x[k] + -h.dz[k] * (E + 2.5) * -dir, sz = h.z[k] + h.dx[k] * (E + 2.5) * -dir;
+        this.roadSign(sx, sz, hd, title, sub, '#7a4a1d', h.y[k]);
+      }
+    };
+    for (const f of h.fords) { let bi = 0, bd = Infinity; for (let k = 0; k < n; k++) { const d = (h.x[k] - f.x) ** 2 + (h.z[k] - f.z) ** 2; if (d < bd) { bd = d; bi = k; } } warn(bi, 'VAU', 'Água sobre a pista'); }
+    for (const c of h.crossings || []) if (c.type === 'wood') warn((c.i + c.j) >> 1, 'PONTE DE MADEIRA', 'Reduza a velocidade');
     // placas de destino
     const lotsHere = LOCATIONS.filter((L) => L.hw === h.id).map((L) => L.name);
     const name = (end) => (end && end[0] !== 'hw' ? CITY[end[0]].name : lotsHere.slice(-2).join(' • ') || h.id);
@@ -1019,6 +1056,25 @@ export class World {
       // vegetação ciliar
       if (i % 3 === 0) for (const s of [-1, 1]) { const p = P(i, ra, s * (W + 22 + this.r() * 14), 0); this.tree(p[0], p[2], 1.2, 0, this.terrain.meshHeight(p[0], p[2]) - 0.3); }
     }
+    // córregos (o nível sobe um pouco com as enchentes)
+    const sw = new Builder();
+    for (const st of this.streams) {
+      const W = st.w / 2 + 2;
+      for (let i = 0; i < st.n - 1; i++) {
+        const d = (k) => { const a = Math.max(0, k - 1), b = Math.min(st.n - 1, k + 1), vx = st.x[b] - st.x[a], vz = st.z[b] - st.z[a], l = Math.hypot(vx, vz) || 1; return [-vz / l, vx / l]; };
+        const ra = d(i), rb = d(i + 1);
+        const Pp = (k, rr, o) => [st.x[k] + rr[0] * o, st.y[k], st.z[k] + rr[1] * o];
+        const a1 = Pp(i, ra, -W), a2 = Pp(i, ra, W), b2 = Pp(i + 1, rb, W), b1 = Pp(i + 1, rb, -W);
+        sw.quad(a1, a2, b2, b1, [0, 1, 0], [a1[0] / 20, a1[2] / 20, a2[0] / 20, a2[2] / 20, b2[0] / 20, b2[2] / 20, b1[0] / 20, b1[2] / 20]);
+        if (i % 3 === 0) for (const s2 of [-1, 1]) { const p = Pp(i, ra, s2 * (W + 10 + this.r() * 12)); if (this.isFreeLoose(p[0], p[2])) this.tree(p[0], p[2], 1.1, this.r() < 0.4 ? 2 : 0, this.terrain.meshHeight(p[0], p[2]) - 0.3); }
+      }
+    }
+    const swm = new THREE.MeshPhongMaterial({ map: tex.water().clone(), color: 0x8fa69a, shininess: 110, specular: 0x99aabb, transparent: true, opacity: 0.88, side: THREE.DoubleSide, depthWrite: false });
+    swm.map.needsUpdate = true;
+    this.streamMesh = sw.mesh(swm);
+    if (this.streamMesh) { this.streamMesh.renderOrder = 1; this.scene.add(this.streamMesh); }
+    this.fordList = [];
+    for (const h of this.hws) for (const f of h.fords) this.fordList.push(f);
     this.M.sand.side = THREE.DoubleSide;
     const wm = new THREE.MeshPhongMaterial({ map: tex.water().clone(), color: 0x9cc6d6, shininess: 110, specular: 0x99bbdd, transparent: true, opacity: 0.94, side: THREE.DoubleSide });
     wm.map.needsUpdate = true;
@@ -1228,6 +1284,10 @@ export class World {
   // profundidade da água num ponto (m)
   floodDepth(x, z) {
     const L = this.floodLevel || 0;
+    if (this.fordList) for (const f of this.fordList) {
+      const d = Math.hypot(x - f.x, z - f.z);
+      if (d < f.r + 4) return Math.max(0, f.water + L * 0.5 - this.heightAt(x, z));
+    }
     if (L < 0.02 || !this.floods) return 0;
     for (const f of this.floods) {
       const rr = f.r * (0.45 + 0.55 * Math.sqrt(L)), d = Math.hypot(x - f.x, z - f.z);
@@ -1248,6 +1308,7 @@ export class World {
     for (const a of this.animated) a.obj.rotation.z += a.speed * dt;
     if (this.water) this.water.material.map.offset.set(t * 0.004, t * 0.006);
     if (this.riverMesh) this.riverMesh.material.map.offset.set(t * 0.02, t * 0.01);
+    if (this.streamMesh) { this.streamMesh.material.map.offset.set(t * 0.035, t * 0.02); this.streamMesh.position.y = (this.floodLevel || 0) * 0.5; }
     if (this.floodTex && this.floodLevel > 0.02) this.floodTex.offset.set(Math.sin(t * 0.7) * 0.02, t * 0.015);
   }
 }
