@@ -34,9 +34,19 @@ function loadSave() {
   return JSON.parse(JSON.stringify(DEFAULTS));
 }
 const S = loadSave();
+// VERSÃO DE TESTES: tudo liberado (nível máximo, todos os caminhões, dinheiro de sobra)
+const TEST_MODE = true;
+function unlockAll() {
+  if (!TEST_MODE) return;
+  S.level = MAX_LEVEL; S.xp = 0;
+  S.owned = TRUCKS.map((t) => t.id);
+  if (S.money < 5000000) S.money = 10000000;
+}
+unlockAll();
 function save() {
   try {
     S.pos = rig ? { x: rig.x, z: rig.z, h: rig.h } : S.pos;
+    unlockAll();
     if (rig) { S.fuelBy[S.truck] = +rig.fuel.toFixed(2); S.tire = { flat: rig.flat, spare: rig.spare }; }
     localStorage.setItem(SAVE_KEY, JSON.stringify(S));
   } catch (e) { /* armazenamento indisponível */ }
@@ -451,7 +461,7 @@ function genJobs() {
 function lockReason(j, def = rig.def) {
   const c = CARGO[j.cargo];
   if (c.lvl > S.level) return `Requer nível ${c.lvl}`;
-  if (c.t > def.cap) return `Caminhão fraco (máx. ${def.cap} t)`;
+  if (c.t > def.cap && !TEST_MODE) return `Caminhão fraco (máx. ${def.cap} t)`;
   if (def.rigid && c.trailer !== 'box') return 'Requer cavalo mecânico';
   if (c.trailer === 'bitrem' && (def.axles < 3 || def.drive < 0.45)) return 'Bitrem exige cavalo com tração 6x4 ou 8x4';
   return null;
