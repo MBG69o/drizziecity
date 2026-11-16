@@ -147,6 +147,42 @@ export class Audio {
     this.scr.gain.setTargetAtTime(level * 0.22, this.ctx.currentTime, 0.08);
   }
 
+  // chuva: ruído filtrado contínuo
+  rain(level) {
+    if (!this.ctx) return;
+    if (!this.rainG) {
+      const ctx = this.ctx, len = ctx.sampleRate * 2;
+      const buf = ctx.createBuffer(1, len, ctx.sampleRate), d = buf.getChannelData(0);
+      let b = 0;
+      for (let i = 0; i < len; i++) { const w = Math.random() * 2 - 1; b = 0.97 * b + 0.03 * w; d[i] = w * 0.6 + b * 2.2 + (Math.random() < 0.0009 ? (Math.random() - 0.5) * 3 : 0); }
+      const src = ctx.createBufferSource(); src.buffer = buf; src.loop = true;
+      const hp = ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 500;
+      const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 7000;
+      const g = ctx.createGain(); g.gain.value = 0;
+      src.connect(hp).connect(lp).connect(g).connect(this.master); src.start();
+      this.rainG = g;
+    }
+    this.rainG.gain.setTargetAtTime(level * 0.32, this.ctx.currentTime, 0.5);
+  }
+
+  // trovão: estrondo grave com estalo inicial (raios próximos)
+  thunder(power = 1) {
+    if (!this.ctx) return;
+    const ctx = this.ctx, len = 5.5, t = ctx.currentTime;
+    const buf = ctx.createBuffer(1, ctx.sampleRate * len, ctx.sampleRate), d = buf.getChannelData(0);
+    let b = 0;
+    for (let i = 0; i < d.length; i++) {
+      const x = i / d.length;
+      b = 0.985 * b + 0.015 * (Math.random() * 2 - 1);
+      const env = Math.min(1, x * 30) * Math.pow(1 - x, 1.6) * (0.65 + 0.35 * Math.sin(x * 40 + Math.sin(x * 9) * 3));
+      d[i] = b * 9 * env + (x < 0.04 ? (Math.random() * 2 - 1) * power * (1 - x / 0.04) : 0);
+    }
+    const s = ctx.createBufferSource(); s.buffer = buf;
+    const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 180 + power * 500;
+    const g = ctx.createGain(); g.gain.value = 0.25 + power * 0.6;
+    s.connect(f).connect(g).connect(this.master); s.start(t);
+  }
+
   starter() {
     if (!this.ctx) return;
     const ctx = this.ctx, t = ctx.currentTime;

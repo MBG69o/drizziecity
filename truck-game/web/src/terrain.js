@@ -29,7 +29,8 @@ const ridge = (x, z) => {
 };
 
 // regiões montanhosas (centro, raio)
-const RANGES = [[-2400, -3300, 1900], [3350, -1000, 1500], [600, -3500, 1500], [-3600, 300, 1300], [3600, 1600, 900]];
+const RANGES = [[-2400, -3300, 1900], [3350, -1000, 1500], [600, -3500, 1500], [-3900, -3200, 1000], [3600, 1600, 900],
+  [3700, -6900, 1800], [-4300, -7600, 1700], [-200, -8300, 1600], [6200, -4500, 1700], [-7700, -3200, 1300], [8200, 600, 1300]];
 
 export class Terrain {
   constructor(river) {
@@ -108,7 +109,8 @@ export class Terrain {
     for (let j = 0; j <= nz; j++)
       for (let i = 0; i <= nx; i++) H[j * (nx + 1) + i] = this.height(X0 + i * spacing, Z0 + j * spacing);
     this.grid = { X0, Z0, nx, nz, s: spacing, H };
-    const CH = 40;
+    this.chunks = [];
+    const CH = 18; // pedaços menores = culling mais eficiente no mapa grande
     const col = new THREE.Color(), grass = new THREE.Color(0x7d9a52), dry = new THREE.Color(0xa59a62), forest = new THREE.Color(0x5d7a40),
       rock = new THREE.Color(0x8a8378), snow = new THREE.Color(0xeef1f4), sand = new THREE.Color(0xd8c89a), dirt = new THREE.Color(0x9a7b55);
     for (let cj = 0; cj < nz; cj += CH)
@@ -157,6 +159,8 @@ export class Terrain {
         m.receiveShadow = true;
         m.matrixAutoUpdate = false;
         scene.add(m);
+        const bs = g.boundingSphere;
+        this.chunks.push({ obj: m, x: bs.center.x, z: bs.center.z, r: bs.radius });
       }
   }
 

@@ -71,13 +71,29 @@ Faça entregas pela cidade, suba de nível, compre caminhões mais fortes e libe
   (Estrada da Olaria), **terra** (Estrada do Café) e **lama** (Trilha do Rio Escuro) — cada piso com aderência,
   resistência ao rolamento e trepidação próprias.
 
-* **4 cidades** — Drizzie City (metrópole), Vila Serrana (interior), Porto Azul (litoral com porto) e Monte Alto
-  (serra, com mineradora e vinícola, pela BR-040).
-* **Rodovias entre cidades** (BR-101, SP-280 e RS-030) com curvas, aclives/declives, aterros com taludes,
-  defensas metálicas, balizadores, placas de destino e de velocidade.
+* **Mapa de ~17 x 12 km com 10 cidades** — Drizzie City e Santa Luzia (metrópoles), Rio Claro, Nova Esperança,
+  Campo Verde e Vila Serrana (interior), Porto Azul e Lagoa Dourada (litoral com porto), Monte Alto e Pedra Branca
+  (serra, calçamento). Saídas para outros estados pela BR-116 (Divisa Norte) e BR-364 (Divisa Leste), terminando
+  no posto fiscal. Fretes de até ~22 km (40–45 min ao volante), com prazo proporcional.
+* **20 estradas**: BR-101, SP-280, BR-040, RS-030, BR-153, BR-277, BR-376, BR-470, SC-401, BR-282, BR-364,
+  SP-055, Rodovia do Sol, BR-116 e estradas de terra, cascalho e lama até fazendas, usina e aquicultura.
+* **Ruas realistas**: asfalto com remendos, trincas, manchas de óleo, trilhas de pneu e pintura gasta; sarjeta,
+  meio-fio, calçada de pedra portuguesa (centro) ou bloquete (bairros), árvores na calçada, faixas de pedestre,
+  faixa de retenção, setas, "PARE" pintado + placa, bocas de lobo e tampas de bueiro.
+* **Semáforos funcionando** nas metrópoles, portos, Rio Claro e Campo Verde (verde/amarelo/vermelho por eixo);
+  os carros param no vermelho e respeitam o PARE. Avançar o vermelho gera multa de R$ 293,47.
+* **Tráfego com modelos detalhados**: sedã, hatch, SUV, picape cabine dupla, van, ônibus urbano e caminhão leve —
+  carroceria com caixas de roda, estufa de vidro, colunas, para-choques, grade, retrovisores, placa Mercosul,
+  faróis, lanternas e rodas de liga leve; cores de frota real.
+* **Faróis**: desligado / baixo / alto (botão ◐ sob o velocímetro ou `L`). O alto ilumina bem mais longe.
+* **Clima**: sol, nublado, chuva e tempestade (automático ou fixo em Ajustes). Chuva com gotas, céu escuro e
+  menos visibilidade; pista molhada brilha e perde aderência (terra vira barro, a lama fica mais funda);
+  tempestade com raios, clarões e trovões que chegam com atraso pela distância. **Alagamentos** nas baixadas
+  perto do rio/litoral e em cruzamentos das cidades: a água sobe com a chuva, freia o caminhão e pode
+  **afogar o motor** (caminhões leves a partir de ~55 cm, pesados ~95 cm).
 * Estradas atravessando **mata fechada**, **pontes sobre o rio** com pilares, lavouras, morros com
-  aerogeradores e o mar ao sul. Locais de carga à beira da estrada (fazenda, serraria, pedreira, parque eólico).
-* GPS calcula a rota por ruas e rodovias entre as cidades; tráfego de carros, ônibus e caminhões.
+  aerogeradores e o mar ao sul.
+* GPS calcula a rota por ruas e rodovias entre as cidades.
 
 ## Gráficos e desempenho
 

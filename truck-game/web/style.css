@@ -246,3 +246,6 @@ input[type=range] { width: 180px; accent-color: #e3243b; }
 #fuel.low i { animation: pulseW .5s infinite alternate; }
 #mstat { margin-left: auto; margin-right: 10px; align-self: center; font-size: 13px; opacity: .9; white-space: nowrap; }
 #mstat b { color: var(--red); }
+
+#ic-light.hi { color: #6fb6ff; text-shadow: 0 0 8px #6fb6ff; }
+#ic-light { min-width: 30px; }

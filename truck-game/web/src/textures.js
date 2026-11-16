@@ -86,37 +86,157 @@ export const tex = {
   }),
 
   // Rua: 20 m de largura x 20 m de comprimento por repetição
+  // Rua urbana: 20 m de largura x 40 m de comprimento por repetição (sarjeta, remendos,
+  // trincas, manchas de óleo, trilhas de pneu e pintura gasta)
   road: () => memo('road', () => {
-    const s = SIZE;
-    const [c, ctx] = canvas(s, s);
+    const s = SIZE, h = SIZE * 2;
+    const [c, ctx] = canvas(s, h);
     asphaltBase(ctx, s, 21);
+    ctx.drawImage(c, 0, 0, s, s, 0, s, s, s);
+    noise(ctx, s, h, 10, 23);
     const m = s / 20; // pixels por metro
-    // marcas de pneu (faixas mais escuras)
-    ctx.fillStyle = 'rgba(20,20,20,0.18)';
-    for (const x of [1.6, 3.4, 6.6, 8.4]) {
-      ctx.fillRect((10 + x) * m - m * 0.6, 0, m * 1.2, s);
-      ctx.fillRect((10 - x) * m - m * 0.6, 0, m * 1.2, s);
-    }
-    const paint = (color, x, w, dash) => {
-      ctx.fillStyle = color;
-      if (!dash) ctx.fillRect(x * m - (w * m) / 2, 0, w * m, s);
-      else ctx.fillRect(x * m - (w * m) / 2, s * 0.1, w * m, s * dash);
-    };
-    paint('#e8b923', 9.8, 0.15);   // faixa dupla amarela
-    paint('#e8b923', 10.2, 0.15);
-    paint('#f2f2f2', 5, 0.15, 0.45);  // tracejadas brancas
-    paint('#f2f2f2', 15, 0.15, 0.45);
-    paint('#f2f2f2', 0.5, 0.18);  // bordas
-    paint('#f2f2f2', 19.5, 0.18);
-    // desgaste na pintura
     const r = rng(5);
+    // remendos de asfalto (mais escuros/novos ou mais claros/velhos)
+    for (let i = 0; i < 7; i++) {
+      const w = (1.5 + r() * 4) * m, hh = (1.5 + r() * 6) * m, x = (1 + r() * 17) * m - w / 2, y = r() * (h - hh);
+      ctx.fillStyle = r() > 0.4 ? 'rgba(25,26,28,0.45)' : 'rgba(120,120,118,0.22)';
+      ctx.fillRect(x, y, w, hh);
+      ctx.strokeStyle = 'rgba(15,15,15,0.5)'; ctx.lineWidth = 1.5; ctx.strokeRect(x, y, w, hh);
+    }
+    // trincas
+    ctx.strokeStyle = 'rgba(12,12,12,0.55)';
+    for (let i = 0; i < 14; i++) {
+      let x = (1 + r() * 18) * m, y = r() * h;
+      ctx.lineWidth = 1 + r() * 1.5;
+      ctx.beginPath(); ctx.moveTo(x, y);
+      for (let k = 0; k < 8; k++) { x += (r() - 0.5) * m * 0.9; y += (r() - 0.3) * m * 0.8; ctx.lineTo(x, y); }
+      ctx.stroke();
+    }
+    // manchas de óleo no centro das faixas
+    for (let i = 0; i < 10; i++) {
+      const x = [2.5, 7.5, 12.5, 17.5][(r() * 4) | 0] * m + (r() - 0.5) * m, y = r() * h, rad = m * (0.3 + r() * 0.7);
+      const g = ctx.createRadialGradient(x, y, 0, x, y, rad);
+      g.addColorStop(0, 'rgba(10,10,12,0.45)'); g.addColorStop(1, 'rgba(10,10,12,0)');
+      ctx.fillStyle = g; ctx.beginPath(); ctx.ellipse(x, y, rad, rad * 1.8, 0, 0, 7); ctx.fill();
+    }
+    // trilhas de pneu polidas
+    for (const x of [1.6, 3.4, 6.6, 8.4]) for (const sd of [-1, 1]) {
+      const cx = (10 + sd * x) * m;
+      const g = ctx.createLinearGradient(cx - m * 0.7, 0, cx + m * 0.7, 0);
+      g.addColorStop(0, 'rgba(18,18,20,0)'); g.addColorStop(0.5, 'rgba(18,18,20,0.22)'); g.addColorStop(1, 'rgba(18,18,20,0)');
+      ctx.fillStyle = g; ctx.fillRect(cx - m * 0.7, 0, m * 1.4, h);
+    }
+    // sarjeta de concreto junto ao meio-fio
+    for (const x of [0, 19.35]) {
+      ctx.fillStyle = '#8d8a83'; ctx.fillRect(x * m, 0, 0.65 * m, h);
+      ctx.fillStyle = 'rgba(40,38,34,0.35)';
+      for (let y = 0; y < h; y += m * 2) ctx.fillRect(x * m, y, 0.65 * m, 2);
+    }
+    const g2 = ctx.createLinearGradient(0, 0, m * 1.2, 0); g2.addColorStop(0, 'rgba(30,26,20,0.35)'); g2.addColorStop(1, 'rgba(30,26,20,0)');
+    ctx.fillStyle = g2; ctx.fillRect(0.65 * m, 0, m * 1.2, h);
+    const g3 = ctx.createLinearGradient(s, 0, s - m * 1.2, 0); g3.addColorStop(0, 'rgba(30,26,20,0.35)'); g3.addColorStop(1, 'rgba(30,26,20,0)');
+    ctx.fillStyle = g3; ctx.fillRect(s - 1.85 * m, 0, m * 1.2, h);
+    const paint = (color, x, w, dash, gap) => {
+      ctx.fillStyle = color;
+      if (!dash) ctx.fillRect(x * m - (w * m) / 2, 0, w * m, h);
+      else for (let y = m * 1; y < h; y += (dash + gap) * m) ctx.fillRect(x * m - (w * m) / 2, y, w * m, dash * m);
+    };
+    paint('#e3b21f', 9.85, 0.12);   // faixa dupla amarela
+    paint('#e3b21f', 10.15, 0.12);
+    paint('#ececec', 5, 0.13, 4, 6);  // tracejadas brancas (4 m pintado / 6 m vazio)
+    paint('#ececec', 15, 0.13, 4, 6);
+    paint('#ececec', 1.0, 0.15);  // bordas
+    paint('#ececec', 19.0, 0.15);
+    // desgaste da pintura
     ctx.globalCompositeOperation = 'source-atop';
-    for (let i = 0; i < s * 3; i++) {
-      ctx.fillStyle = 'rgba(60,60,62,0.35)';
-      ctx.fillRect(r() * s, r() * s, 1 + r() * 3, 1 + r() * 3);
+    for (let i = 0; i < s * 6; i++) {
+      ctx.fillStyle = 'rgba(58,58,60,0.4)';
+      ctx.fillRect(r() * s, r() * h, 1 + r() * 3, 1 + r() * 3);
     }
     ctx.globalCompositeOperation = 'source-over';
     return finish(c);
+  }),
+
+  // calçada: pedra portuguesa em ondas (centro) ou bloquete intertravado (bairros)
+  sidewalk: (kind) => memo('sidewalk' + kind, () => {
+    const s = SIZE / 2;
+    const [c, ctx] = canvas(s, s);
+    const r = rng(77 + kind);
+    if (kind === 0) {
+      ctx.fillStyle = '#e9e5dc'; ctx.fillRect(0, 0, s, s);
+      ctx.fillStyle = '#26262a';
+      // ondas (padrão "Copacabana") — período casa com a repetição
+      const A = s * 0.07, P = s;
+      for (let band = 0; band < 4; band++) {
+        ctx.beginPath();
+        const y0 = band * s / 4;
+        for (let x = 0; x <= s; x += 2) ctx.lineTo(x, y0 + Math.sin((x / P) * Math.PI * 4) * A);
+        for (let x = s; x >= 0; x -= 2) ctx.lineTo(x, y0 + s / 8 + Math.sin((x / P) * Math.PI * 4) * A);
+        ctx.closePath(); ctx.fill();
+      }
+      // pedrinhas
+      ctx.strokeStyle = 'rgba(120,115,105,0.55)'; ctx.lineWidth = 1;
+      const st = s / 64;
+      for (let y = 0; y < s; y += st) for (let x = (y / st) % 2 ? st / 2 : 0; x < s; x += st) { ctx.strokeRect(x + r(), y + r(), st, st); }
+    } else {
+      ctx.fillStyle = '#7d7a75'; ctx.fillRect(0, 0, s, s);
+      const bw = s / 8, bh = s / 16;
+      for (let y = 0; y < 16; y++) for (let x = -1; x < 9; x++) {
+        const g = 120 + r() * 40, red = kind === 2 ? 40 : 0;
+        ctx.fillStyle = `rgb(${g + red | 0},${g - red * 0.3 | 0},${g - red * 0.5 | 0})`;
+        ctx.fillRect(x * bw + (y % 2) * bw / 2 + 1.5, y * bh + 1.5, bw - 3, bh - 3);
+      }
+    }
+    noise(ctx, s, s, 18, 79 + kind);
+    // sujeira
+    for (let i = 0; i < 25; i++) { const x = r() * s, y = r() * s, rad = s * (0.02 + r() * 0.08); const g = ctx.createRadialGradient(x, y, 0, x, y, rad); g.addColorStop(0, 'rgba(60,55,45,0.18)'); g.addColorStop(1, 'rgba(60,55,45,0)'); ctx.fillStyle = g; ctx.fillRect(0, 0, s, s); }
+    return finish(c);
+  }),
+
+  // meio-fio de concreto pintado de branco (desgastado)
+  curb: () => memo('curb', () => {
+    const s = 256;
+    const [c, ctx] = canvas(s, s);
+    ctx.fillStyle = '#d9d6cf'; ctx.fillRect(0, 0, s, s);
+    noise(ctx, s, s, 30, 91);
+    const g = ctx.createLinearGradient(0, s, 0, s * 0.4); g.addColorStop(0, 'rgba(60,50,40,0.6)'); g.addColorStop(1, 'rgba(60,50,40,0)');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, s, s);
+    ctx.fillStyle = 'rgba(40,40,40,0.5)'; for (let x = 0; x < s; x += s / 2) ctx.fillRect(x, 0, 2, s);
+    return finish(c);
+  }),
+
+  // marcas viárias (atlas 4x2): faixa de retenção, PARE, setas, tampa de bueiro, grelha, ÔNIBUS, bicicleta
+  roadMarks: () => memo('roadMarks', () => {
+    const C = 256, [c, ctx] = canvas(C * 4, C * 2);
+    ctx.clearRect(0, 0, C * 4, C * 2);
+    const paint = 'rgba(240,240,236,0.92)';
+    // 0: faixa de retenção (barra larga)
+    ctx.fillStyle = paint; ctx.fillRect(4, C * 0.3, C - 8, C * 0.4);
+    // 1: PARE
+    ctx.save(); ctx.translate(C * 1.5, C * 0.5); ctx.scale(1, 1.9); ctx.fillStyle = paint; ctx.font = `900 ${C * 0.32}px sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('PARE', 0, 0); ctx.restore();
+    // 2: seta em frente
+    const arrow = (ox, left) => {
+      ctx.fillStyle = paint; ctx.beginPath();
+      ctx.moveTo(ox + C * 0.5, 8); ctx.lineTo(ox + C * 0.72, C * 0.32); ctx.lineTo(ox + C * 0.58, C * 0.32); ctx.lineTo(ox + C * 0.58, C - 8); ctx.lineTo(ox + C * 0.42, C - 8); ctx.lineTo(ox + C * 0.42, C * 0.32); ctx.lineTo(ox + C * 0.28, C * 0.32); ctx.closePath(); ctx.fill();
+      if (left) { ctx.beginPath(); ctx.moveTo(ox + C * 0.44, C * 0.6); ctx.lineTo(ox + C * 0.2, C * 0.6); ctx.lineTo(ox + C * 0.2, C * 0.5); ctx.lineTo(ox + 6, C * 0.66); ctx.lineTo(ox + C * 0.2, C * 0.82); ctx.lineTo(ox + C * 0.2, C * 0.72); ctx.lineTo(ox + C * 0.44, C * 0.72); ctx.closePath(); ctx.fill(); }
+    };
+    arrow(C * 2, false); arrow(C * 3, true);
+    // 4: tampa de bueiro (ferro fundido)
+    const cx = C * 0.5, cy = C * 1.5;
+    let g = ctx.createRadialGradient(cx, cy, C * 0.1, cx, cy, C * 0.46); g.addColorStop(0, '#3e3a36'); g.addColorStop(1, '#25221f');
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(cx, cy, C * 0.46, 0, 7); ctx.fill();
+    ctx.strokeStyle = '#5a554e'; ctx.lineWidth = 6; ctx.beginPath(); ctx.arc(cx, cy, C * 0.44, 0, 7); ctx.stroke();
+    ctx.lineWidth = 3; for (let k = -3; k <= 3; k++) { ctx.beginPath(); ctx.moveTo(cx + k * C * 0.1, cy - C * 0.38); ctx.lineTo(cx + k * C * 0.1, cy + C * 0.38); ctx.stroke(); }
+    ctx.fillStyle = '#6a645c'; ctx.font = `800 ${C * 0.09}px sans-serif`; ctx.textAlign = 'center'; ctx.fillText('ESGOTO', cx, cy + 6);
+    // 5: grelha de boca de lobo
+    ctx.fillStyle = '#2a2724'; ctx.fillRect(C + 20, C + C * 0.3, C - 40, C * 0.4);
+    ctx.fillStyle = '#5a554e'; for (let x = C + 26; x < 2 * C - 26; x += 14) ctx.fillRect(x, C + C * 0.32, 5, C * 0.36);
+    // 6: ÔNIBUS
+    ctx.save(); ctx.translate(C * 2.5, C * 1.5); ctx.scale(1, 1.9); ctx.fillStyle = 'rgba(245,200,40,0.92)'; ctx.font = `900 ${C * 0.22}px sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('ÔNIBUS', 0, 0); ctx.restore();
+    // 7: losango (aviso de faixa de pedestre)
+    ctx.strokeStyle = paint; ctx.lineWidth = 14; ctx.beginPath(); ctx.moveTo(C * 3.5, C + 12); ctx.lineTo(C * 3.85, C * 1.5); ctx.lineTo(C * 3.5, 2 * C - 12); ctx.lineTo(C * 3.15, C * 1.5); ctx.closePath(); ctx.stroke();
+    const t = finish(c, false);
+    return t;
   }),
 
   intersection: () => memo('intersection', () => {
@@ -124,6 +244,9 @@ export const tex = {
     const [c, ctx] = canvas(s, s);
     asphaltBase(ctx, s, 31);
     const m = s / 20;
+    // marcas de frenagem e óleo no centro do cruzamento
+    const rr = rng(33);
+    for (let i = 0; i < 8; i++) { const x = (4 + rr() * 12) * m, y = (4 + rr() * 12) * m, rad = m * (0.6 + rr()); const g = ctx.createRadialGradient(x, y, 0, x, y, rad); g.addColorStop(0, 'rgba(12,12,14,0.35)'); g.addColorStop(1, 'rgba(12,12,14,0)'); ctx.fillStyle = g; ctx.fillRect(0, 0, s, s); }
     ctx.fillStyle = 'rgba(240,240,240,0.92)';
     // faixas de pedestre nas 4 bordas
     for (let i = 0; i < 8; i++) {
@@ -133,6 +256,9 @@ export const tex = {
       ctx.fillRect(0.3 * m, p, 2.6 * m, 1.1 * m);
       ctx.fillRect(s - 2.9 * m, p, 2.6 * m, 1.1 * m);
     }
+    ctx.globalCompositeOperation = 'source-atop';
+    for (let i = 0; i < s * 5; i++) { ctx.fillStyle = 'rgba(58,58,60,0.45)'; ctx.fillRect(rr() * s, rr() * s, 1 + rr() * 4, 1 + rr() * 4); }
+    ctx.globalCompositeOperation = 'source-over';
     noise(ctx, s, s, 10, 32);
     return finish(c, false);
   }),
@@ -742,6 +868,20 @@ export const tex = {
     for (let i = 1; i < 12; i++) {
       ctx.beginPath(); ctx.moveTo((i * w) / 12, 0); ctx.lineTo((i * w) / 12, h); ctx.stroke();
     }
+    return finish(c, false);
+  }),
+
+  // placa PARE (octógono vermelho) e verso cinza
+  stopSign: () => memo('stopSign', () => {
+    const S = 256, [c, ctx] = canvas(S * 2, S);
+    const oct = (ox, fill, stroke) => {
+      ctx.beginPath();
+      for (let k = 0; k < 8; k++) { const a = (k / 8) * Math.PI * 2 + Math.PI / 8; ctx.lineTo(ox + S / 2 + Math.cos(a) * S * 0.47, S / 2 + Math.sin(a) * S * 0.47); }
+      ctx.closePath(); ctx.fillStyle = fill; ctx.fill(); if (stroke) { ctx.lineWidth = S * 0.04; ctx.strokeStyle = stroke; ctx.stroke(); }
+    };
+    oct(0, '#c8102e', '#ffffff');
+    ctx.fillStyle = '#fff'; ctx.font = `900 ${S * 0.27}px sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('PARE', S / 2, S / 2 + 4);
+    oct(S, '#8d9196', null);
     return finish(c, false);
   }),
 

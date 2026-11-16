@@ -7,20 +7,22 @@ import { Rig, setTruckQuality, MODELS } from './truck.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { Sky } from 'three/examples/jsm/objects/Sky.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
-import { Traffic } from './traffic.js';
+import { Traffic, trafficQuality } from './traffic.js';
+import { Weather } from './weather.js';
 import { findRoute, buildGraph } from './route.js';
 import { Audio } from './audio.js';
 
 const $ = (id) => document.getElementById(id);
 const SAVE_KEY = 'drizzieTruck.v1';
 const fmt = (n) => 'R$ ' + Math.round(n).toLocaleString('pt-BR');
+const RH = ROAD_W / 2;
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
 // ---------------- Save ----------------
 const DEFAULTS = {
   money: 3000, xp: 0, level: 1, owned: ['mini'], truck: 'mini', job: null, pos: null, name: 'Motorista', clock: 15.5, fuelBy: {}, tire: { flat: 0, spare: true },
   stats: { deliveries: 0, km: 0, earned: 0, tons: 0, crashes: 0 },
-  settings: { quality: 'auto', volume: 0.7, fps: false, steer: 'wheel', camera: 0, time: 'cycle', gearbox: 'manual', gauge: 'analog', accent: 'amber', hud: 'normal' },
+  settings: { weather: 'auto', quality: 'auto', volume: 0.7, fps: false, steer: 'wheel', camera: 0, time: 'cycle', gearbox: 'manual', gauge: 'analog', accent: 'amber', hud: 'normal' },
 };
 function loadSave() {
   try {
@@ -54,9 +56,9 @@ function save() {
 
 // ---------------- Qualidade gráfica ----------------
 const QUALITY = {
-  low: { pr: 1.0, minPr: 0.75, shadows: false, shadowSize: 0, tex: 512, aniso: 2, traffic: 10, fogNear: 150, fogFar: 650, far: 900, trees: 5000, terrainStep: 34 },
-  medium: { pr: 1.5, minPr: 0.85, shadows: true, shadowSize: 1024, tex: 1024, aniso: 4, traffic: 16, fogNear: 260, fogFar: 1050, far: 1500, trees: 9000, terrainStep: 26 },
-  high: { pr: 2.0, minPr: 1.0, shadows: true, shadowSize: 2048, tex: 1024, aniso: 8, traffic: 22, fogNear: 380, fogFar: 1600, far: 2600, trees: 14000, terrainStep: 20 },
+  low: { pr: 1.0, minPr: 0.75, shadows: false, shadowSize: 0, tex: 512, aniso: 2, traffic: 10, fogNear: 150, fogFar: 650, far: 900, trees: 9000, terrainStep: 42 },
+  medium: { pr: 1.5, minPr: 0.85, shadows: true, shadowSize: 1024, tex: 1024, aniso: 4, traffic: 16, fogNear: 260, fogFar: 1050, far: 1500, trees: 16000, terrainStep: 32 },
+  high: { pr: 2.0, minPr: 1.0, shadows: true, shadowSize: 2048, tex: 1024, aniso: 8, traffic: 22, fogNear: 380, fogFar: 1600, far: 2600, trees: 26000, terrainStep: 25 },
 };
 function detectQuality() {
   let r = '';
@@ -91,7 +93,7 @@ let zoneTimer = 0;
 const obstacles = [];
 const ctl = { gas: false, brake: false, left: false, right: false, tilt: 0, wheel: 0, wheelHeld: false, gear: 'D', hand: false, blink: 0, blinkArm: false };
 const input = { throttle: 0, brake: 0, steer: 0, gear: 'D', handbrake: false };
-let lightsManual = null;
+let lightsManual = null, weather = null;
 const cam = { yaw: 0, orbit: 0, orbitT: 0, mode: S.settings.camera || 0, pos: new THREE.Vector3(), look: new THREE.Vector3() };
 let pr = Q.pr;
 
@@ -175,6 +177,7 @@ async function boot() {
     toast(`💥 <b>Pneu furado!</b> ${rig.spare ? 'Pare e troque pelo estepe' : 'Sem estepe — vá até um posto (borracharia)'}`, 3800);
   };
   rig.onFuelOut = () => { audio.beep(300, 0.4, 'sawtooth', 0.15); toast('⛽ <b>Acabou o diesel!</b> O motor apagou.', 4000); $('enginebtn').classList.remove('hidden'); };
+  rig.onDrown = () => { audio.beep(220, 0.5, 'sawtooth', 0.12); toast('🌊 <b>Motor afogou</b> na enchente! Saia da água e ligue de novo', 4000); $('enginebtn').classList.remove('hidden'); };
   rig.onRollover = () => {
     audio.crash(60);
     S.stats.crashes++;
@@ -187,6 +190,18 @@ async function boot() {
   };
   // rodas voltando ao chão depois de levantar numa curva
   rig.onWheelsDown = (w) => { audio.crash(Math.min(40, w * 25)); if (navigator.vibrate) try { navigator.vibrate(Math.min(150, w * 80)); } catch (e) { /* */ } };
+  weather = new Weather(scene, qName, audio);
+  weather.setMode(S.settings.weather || 'auto');
+  let lastSky = weather.state;
+  weather.onCheck = () => {
+    if (weather.state === lastSky) return;
+    const was = lastSky; lastSky = weather.state;
+    if (state !== 'drive') return;
+    if (weather.state === 'chuva') toast('🌧️ Começou a chover — pista escorregadia', 3000);
+    else if (weather.state === 'tempestade') toast('⛈️ Tempestade! Cuidado com alagamentos', 3200);
+    else if (was === 'chuva' || was === 'tempestade') toast('🌤️ A chuva está passando', 2200);
+  };
+  trafficQuality(qName === 'low');
   traffic = new Traffic(scene, Q.traffic, world);
   buildMarkers();
   await step(85, 'Desenhando o mapa…');
@@ -239,12 +254,39 @@ function applyTime(h) {
   // névoa atmosférica sobre a cordilheira (perspectiva aérea)
   mountains.material.color.setRGB(1, 1, 1).lerp(scene.fog.color, 0.55);
   mountains.material.color.multiplyScalar(1 - night * 0.75);
+  if (weather) {
+    weather.applyLighting({ sun, hemi, scene, night, fogNear: Q.fogNear, fogFar: Q.fogFar, clouds, sky, physSky });
+    mountains.material.color.lerp(scene.fog.color, weather.cloud * 0.5);
+    if (weather.onCheck) weather.onCheck();
+  }
   updateEnv();
   world.setNight(night);
   traffic.setNight(night);
-  const want = lightsManual !== null ? lightsManual : night > 0.35;
-  if (rig.lightsOn !== want) rig.setLights(want);
-  if (headSpot) headSpot.intensity = rig.lightsOn ? 60 * (0.35 + night) : 0;
+  applyBeam();
+}
+
+// faróis: manual (0 desligado, 1 baixo, 2 alto) ou automático (baixo à noite e na chuva)
+function applyBeam() {
+  const auto = night > 0.35 || (weather && weather.rain > 0.35) ? 1 : 0;
+  const mode = lightsManual !== null ? lightsManual : auto;
+  if (rig.beamMode !== mode) rig.setBeam(mode);
+  if (headSpot) {
+    const hi = mode === 2, md = rig.model;
+    headSpot.intensity = mode ? 60 * (0.35 + night) * (hi ? 2.4 : 1) : 0;
+    headSpot.distance = hi ? 190 : 75;
+    headSpot.angle = hi ? 0.42 : 0.55;
+    headSpot.target.position.set(0, hi ? 1.2 : 0, md.zf + (hi ? 75 : 22));
+  }
+  const ic = $('ic-light');
+  ic.classList.toggle('on', mode === 1); ic.classList.toggle('hi', mode === 2);
+  ic.textContent = mode === 2 ? '≣D' : mode === 1 ? '◐' : '○';
+}
+function cycleBeam() {
+  const cur = lightsManual !== null ? lightsManual : rig.beamMode || 0;
+  lightsManual = (cur + 1) % 3;
+  applyBeam();
+  audio.beep(1400, 0.04, 'square', 0.08);
+  toast(['💡 Faróis desligados', '💡 Farol baixo', '💡 Farol alto'][lightsManual], 1100);
 }
 
 function buildStars() {
@@ -642,7 +684,7 @@ function setupInput() {
   $('ic-haz').addEventListener('pointerdown', (e) => { e.preventDefault(); setBlink(2); });
   window.__setBlink = setBlink;
   $('ic-hand').addEventListener('pointerdown', (e) => { e.preventDefault(); ctl.hand = !ctl.hand; audio.airBrake(); });
-  $('ic-light').addEventListener('pointerdown', (e) => { e.preventDefault(); lightsManual = !rig.lightsOn; rig.setLights(lightsManual); audio.beep(1400, 0.04, 'square', 0.08); });
+  $('ic-light').addEventListener('pointerdown', (e) => { e.preventDefault(); cycleBeam(); });
   $('ic-ret').addEventListener('pointerdown', (e) => { e.preventDefault(); rig.retarder = !rig.retarder; audio.beep(rig.retarder ? 1100 : 600, 0.04, 'square', 0.08); toast(`Freio-motor ${rig.retarder ? 'LIGADO' : 'desligado'}`, 1000); });
   $('actionbtn').addEventListener('click', doAction);
   $('enginebtn').addEventListener('click', startEngine);
@@ -655,7 +697,7 @@ function setupInput() {
     if (e.code === 'KeyR' && !e.repeat) setGear(ctl.gear === 'R' ? 'D' : 'R');
     if (e.code === 'KeyN' && !e.repeat) setGear('N');
     if (e.code === 'KeyE' && !e.repeat) startEngine();
-    if (e.code === 'KeyL' && !e.repeat) { lightsManual = !rig.lightsOn; rig.setLights(lightsManual); }
+    if (e.code === 'KeyL' && !e.repeat) cycleBeam();
     if (e.code === 'KeyP' && !e.repeat) ctl.hand = !ctl.hand;
     if (e.code === 'KeyB' && !e.repeat) rig.retarder = !rig.retarder;
     if (e.code === 'KeyF' && !e.repeat) doAction();
@@ -858,10 +900,10 @@ function buildMapCanvas() {
 
 function drawWorldMap(ctx, k) {
   ctx.fillStyle = '#3d5a34';
-  ctx.fillRect(WORLD.x0 - 3000, WORLD.z0 - 3000, 12000, 12000);
+  ctx.fillRect(WORLD.x0 - 3000, WORLD.z0 - 3000, WORLD.x1 - WORLD.x0 + 6000, WORLD.z1 - WORLD.z0 + 6000);
   ctx.fillStyle = '#34502d'; ctx.fill(MP.hills);
   ctx.fillStyle = '#9a9356'; ctx.fill(MP.fields);
-  ctx.fillStyle = '#2d6f93'; ctx.fillRect(WORLD.x0 - 3000, SEA_Z, 12000, 4000);
+  ctx.fillStyle = '#2d6f93'; ctx.fillRect(WORLD.x0 - 3000, SEA_Z, WORLD.x1 - WORLD.x0 + 6000, 4000);
   ctx.lineCap = 'round'; ctx.lineJoin = 'round';
   ctx.strokeStyle = '#2d6f93'; ctx.lineWidth = Math.max(RIVER_W, 3 / k); ctx.stroke(MP.river);
   for (const c in MP.blocks) { ctx.fillStyle = c; ctx.fill(MP.blocks[c]); }
@@ -909,6 +951,7 @@ function drawMinimap() {
     mapIcon(ctx, d.zone.x, d.zone.z, tgt === d ? accentHex() : L.id === 'garagem' ? '#2f6fde' : 'rgba(30,30,30,0.85)', (tgt === d ? 9 : 6) / k);
   }
   for (const st of world.stations) fuelIcon(ctx, st.x, st.z, 7 / k);
+  if (world.floodLevel > 0.05) { ctx.fillStyle = 'rgba(70,140,220,0.75)'; for (const f of world.floods) { ctx.beginPath(); ctx.arc(f.x, f.z, Math.max(f.r, 6 / k), 0, 7); ctx.fill(); } }
   ctx.fillStyle = 'rgba(255,255,255,0.7)';
   for (const c of traffic.cars) if (c.mode) ctx.fillRect(c.x - 2 / k, c.z - 2 / k, 4 / k, 4 / k);
   ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -981,6 +1024,7 @@ function setupUI() {
     else if (a === 'accent') { S.settings.accent = arg; applyTheme(); save(); renderTab('settings'); }
     else if (a === 'hudsize') { S.settings.hud = arg; applyTheme(); save(); renderTab('settings'); }
     else if (a === 'gearbox') { S.settings.gearbox = arg; $('gearsel').classList.toggle('hidden', arg === 'auto'); save(); renderTab('settings'); }
+    else if (a === 'wmode') { S.settings.weather = arg; weather.setMode(arg); save(); renderTab('settings'); }
     else if (a === 'timemode') { S.settings.time = arg; save(); applyTime(S.clock); renderTab('settings'); }
     else if (a === 'tomenu') { closeModal(); save(); showTitle(); }
     else if (a === 'camera') cycleCamera();
@@ -1272,6 +1316,8 @@ function settingsHTML() {
       ${seg('gearbox', S.settings.gearbox, [['manual', 'D / N / R'], ['auto', 'Automático']])}</div>
     <div class="set"><div><b>Horário</b><br><small style="opacity:.7">Ciclo de dia e noite com faróis e iluminação urbana</small></div>
       ${seg('timemode', S.settings.time, [['cycle', 'Ciclo'], ['day', 'Dia'], ['dusk', 'Entardecer'], ['night', 'Noite']])}</div>
+    <div class="set"><div><b>Clima</b><br><small style="opacity:.7">Automático muda sozinho: sol, nuvens, chuva e tempestades com alagamentos</small></div>
+      ${seg('wmode', S.settings.weather || 'auto', [['auto', 'Automático'], ['sol', 'Sol'], ['nublado', 'Nublado'], ['chuva', 'Chuva'], ['tempestade', 'Tempestade']])}</div>
     <div class="set"><div><b>Velocímetro</b><br><small style="opacity:.7">Estilo dos mostradores do painel</small></div>
       ${seg('gauge', S.settings.gauge, [['analog', 'Analógico'], ['digital', 'Digital'], ['sport', 'Esportivo'], ['classic', 'Clássico']])}</div>
     <div class="set"><div><b>Cor do painel</b><br><small style="opacity:.7">Cor de destaque da interface</small></div>
@@ -1441,7 +1487,6 @@ function updateHUD(dt) {
   pw.innerHTML = w;
   pw.classList.toggle('hidden', !w);
   audio.screech(rig.slip > 0.08 ? Math.min(1, rig.slip * 2) : 0);
-  $('ic-light').classList.toggle('on', rig.lightsOn);
   $('ic-hand').classList.toggle('on', ctl.hand);
   $('ic-ret').classList.toggle('on', rig.retarder);
   const j = S.job;
@@ -1494,7 +1539,9 @@ function loop(now) {
     traffic.obstacles(obstacles);
     traffic.update(dt, rig, rig._cs || []);
     world.update(dt, t);
+    weather.update(dt, camera, world);
     titleCamera(dt);
+    if ((frames & 15) === 0) world.cullAt(camera.position.x, camera.position.z, Q.far);
     audio.engine(0, 0, false);
     renderer.render(scene, camera);
     return;
@@ -1514,6 +1561,9 @@ function loop(now) {
     if (state === 'drive') updateJob(dt);
   }
   world.update(dt, t);
+  weather.update(dt, camera, world);
+  if ((frames & 15) === 0) world.cullAt(camera.position.x, camera.position.z, Q.far);
+  if (sim) checkRedLight();
   updateNav(dt);
   updateCamera(dt);
   audio.engine(rig.rpm, input.throttle, rig.engineOn && state === 'drive');
@@ -1523,6 +1573,29 @@ function loop(now) {
   if (saveT > 8) { saveT = 0; save(); }
   renderer.render(scene, camera);
   if (refreshMats > 0 && --refreshMats === 0) scene.traverse((o) => { if (o.material) [].concat(o.material).forEach((m) => { m.needsUpdate = true; }); });
+}
+
+// avanço de sinal vermelho: multa de trânsito (gravíssima)
+let lastCross = null;
+function checkRedLight() {
+  let key = null, sig = null;
+  for (const c of CITIES) {
+    if (rig.x < c.x0 - RH || rig.x > cx1(c) + RH || rig.z < c.z0 - RH || rig.z > cz1(c) + RH) continue;
+    const i = Math.round((rig.x - c.x0) / BLOCK), j = Math.round((rig.z - c.z0) / BLOCK);
+    const nx = c.x0 + i * BLOCK, nz = c.z0 + j * BLOCK;
+    if (Math.abs(rig.x - nx) < RH - 1 && Math.abs(rig.z - nz) < RH - 1) { key = c.id + ':' + i + ':' + j; sig = world.signalAt(c.id, i, j); }
+    break;
+  }
+  if (key && key !== lastCross && sig && !sig.stop && rig.v > 2.5) {
+    const axis = Math.abs(Math.sin(rig.h)) > Math.abs(Math.cos(rig.h)) ? 'x' : 'z';
+    if (world.signalState(sig, axis) === 'r') {
+      const fine = 293.47;
+      S.money -= fine;
+      audio.beep(600, 0.15, 'square', 0.1); setTimeout(() => audio.beep(600, 0.15, 'square', 0.1), 220);
+      toast(`🚦 Avançou o sinal vermelho! Multa <b>R$ 293,47</b>`, 3000);
+    }
+  }
+  lastCross = key;
 }
 
 function onImpact(sp) {
@@ -1589,6 +1662,6 @@ window.addEventListener('error', (e) => {
 });
 
 // Expõe ganchos para testes automatizados
-window.__game = { makeCam: (x, y, z, tx, ty, tz) => { const c = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 1, Q.far); c.position.set(x, y, z); c.lookAt(tx, ty, tz); sky.position.copy(c.position); mountains.position.y = -y - 4; return c; }, TRUCK, CARGO, get scene() { return scene; }, get sun() { return sun; }, get renderer() { return renderer; }, S, get rig() { return rig; }, get state() { return state; }, ctl, acceptJob: (i) => acceptJob(i), get jobs() { return jobs; }, world: () => world, cam };
+window.__game = { get traffic() { return traffic; }, get weather() { return weather; }, makeCam: (x, y, z, tx, ty, tz) => { const c = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 1, Q.far); c.position.set(x, y, z); c.lookAt(tx, ty, tz); sky.position.copy(c.position); mountains.position.y = -y - 4; return c; }, TRUCK, CARGO, get scene() { return scene; }, get sun() { return sun; }, get renderer() { return renderer; }, S, get rig() { return rig; }, get state() { return state; }, ctl, acceptJob: (i) => acceptJob(i), get jobs() { return jobs; }, world: () => world, cam };
 
 boot().catch((e) => { $("loadmsg").textContent = "Erro ao iniciar: " + e.message; console.error(e); });

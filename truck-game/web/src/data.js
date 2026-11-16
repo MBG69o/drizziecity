@@ -12,6 +12,12 @@ export const CITIES = [
   { id: 'serrana', name: 'Vila Serrana', nx: 4, nz: 4, x0: -3000, z0: -2300, kind: 'town', surface: 'cobble' },
   { id: 'azul', name: 'Porto Azul', nx: 5, nz: 3, x0: 1900, z0: 1300, kind: 'port' },
   { id: 'monte', name: 'Monte Alto', nx: 4, nz: 3, x0: 2700, z0: -2300, kind: 'mountain', surface: 'cobble' },
+  { id: 'rioclaro', name: 'Rio Claro', nx: 5, nz: 4, x0: -1700, z0: -5600, kind: 'town', lights: true },
+  { id: 'luzia', name: 'Santa Luzia', nx: 6, nz: 5, x0: -6600, z0: -6000, kind: 'metro' },
+  { id: 'novaesp', name: 'Nova Esperança', nx: 4, nz: 4, x0: -6400, z0: -1200, kind: 'town' },
+  { id: 'lagoa', name: 'Lagoa Dourada', nx: 4, nz: 3, x0: -5200, z0: 900, kind: 'port' },
+  { id: 'pedra', name: 'Pedra Branca', nx: 4, nz: 4, x0: 1800, z0: -6400, kind: 'mountain', surface: 'cobble' },
+  { id: 'campo', name: 'Campo Verde', nx: 4, nz: 4, x0: 6200, z0: -1600, kind: 'town', lights: true },
 ];
 export const CITY = Object.fromEntries(CITIES.map((c) => [c.id, c]));
 export const cx1 = (c) => c.x0 + c.nx * BLOCK;
@@ -31,7 +37,7 @@ export function zoneOf(c, bx, bz) {
 }
 
 // Rio (linha central) — atravessado por pontes nas rodovias
-export const RIVER = [[-2100, -4300], [-1750, -3100], [-1400, -2050], [-1250, -1000], [-1080, 0], [-850, 800], [-350, 1400], [250, 1700], [500, 2100]];
+export const RIVER = [[-3050, -10200], [-2950, -8200], [-2700, -6700], [-2380, -5450], [-2100, -4300], [-1750, -3100], [-1400, -2050], [-1250, -1000], [-1080, 0], [-850, 800], [-350, 1400], [250, 1700], [500, 2100]];
 export const RIVER_W = 54;
 
 // Pisos: aderência (mu), resistência ao rolamento (crr), trepidação e nome
@@ -61,6 +67,34 @@ export const HIGHWAYS = [
     pts: [[-420, -1380], [-380, -1500], [-300, -1700], [-150, -2000], [-50, -2300], [100, -2500], [100, -2570]] },
   { id: 'Estrada da Olaria', surface: 'gravel', half: 6, from: ['hw', 'SP-280'], to: null,
     pts: [[1350, 80], [1380, -40], [1450, -200], [1550, -500], [1650, -760], [1650, -820]] },
+  // ---- novas rodovias (mapa expandido) ----
+  { id: 'BR-153', from: ['hw', 'RS-030'], to: ['rioclaro', 2, 4],
+    pts: [[-1720, -2150], [-1600, -2400], [-1450, -2900], [-1350, -3500], [-1300, -4100], [-1350, -4600], [-1420, -4900], [-1420, -5040]] },
+  { id: 'BR-277', from: ['serrana', 0, 2], to: ['novaesp', 4, 2],
+    pts: [[-3010, -2020], [-3300, -2020], [-3700, -1900], [-4200, -1650], [-4700, -1400], [-5200, -1150], [-5600, -950], [-5830, -920]] },
+  { id: 'BR-376', from: ['novaesp', 2, 0], to: ['luzia', 3, 5],
+    pts: [[-6120, -1210], [-6120, -1500], [-6250, -2200], [-6300, -3000], [-6200, -3800], [-6150, -4500], [-6180, -5000], [-6180, -5290]] },
+  { id: 'BR-470', from: ['luzia', 6, 2], to: ['rioclaro', 0, 2],
+    pts: [[-5750, -5720], [-5400, -5720], [-4800, -5850], [-4200, -5900], [-3600, -5750], [-3000, -5550], [-2400, -5420], [-2000, -5340], [-1710, -5320]] },
+  { id: 'SC-401', from: ['rioclaro', 5, 2], to: ['pedra', 0, 2],
+    pts: [[-990, -5320], [-600, -5320], [0, -5500], [600, -5800], [1200, -6050], [1600, -6120], [1790, -6120]] },
+  { id: 'BR-282', from: ['monte', 2, 0], to: ['pedra', 2, 4],
+    pts: [[2980, -2310], [2980, -2600], [2900, -3100], [2700, -3700], [2500, -4300], [2300, -4900], [2120, -5400], [2080, -5830]] },
+  { id: 'BR-364', from: ['hw', 'BR-040'], to: ['campo', 2, 4],
+    pts: [[3300, 800], [3600, 820], [4200, 700], [4800, 450], [5400, 100], [5900, -350], [6300, -700], [6480, -900], [6480, -1030]] },
+  { id: 'SP-055', from: ['novaesp', 2, 4], to: ['lagoa', 2, 0],
+    pts: [[-6120, -630], [-6120, -300], [-5900, 200], [-5500, 550], [-5100, 800], [-4920, 890]] },
+  { id: 'Rodovia do Sol', from: ['drizzie', 2, 8], to: ['lagoa', 4, 1],
+    pts: [[-280, 570], [-300, 850], [-700, 1100], [-1300, 1150], [-2000, 1100], [-2800, 1050], [-3600, 1080], [-4200, 1040], [-4630, 1040]] },
+  // saídas para outros estados (terminam no posto fiscal da divisa)
+  { id: 'BR-116', from: ['luzia', 3, 0], to: null,
+    pts: [[-6180, -6010], [-6180, -6300], [-6000, -7000], [-5700, -7800], [-5600, -8600], [-5600, -9300], [-5600, -9395]] },
+  { id: 'BR-364 Leste', from: ['campo', 4, 2], to: null,
+    pts: [[6770, -1320], [7100, -1320], [7700, -1450], [8300, -1500], [8900, -1500], [9400, -1500], [9495, -1500]] },
+  { id: 'Estrada da Usina', surface: 'gravel', half: 6, from: ['hw', 'BR-364'], to: null,
+    pts: [[4800, 450], [4850, 300], [4900, 50], [4980, -250], [5000, -480], [5000, -540]] },
+  { id: 'Estrada do Mangue', surface: 'mud', half: 5, from: ['hw', 'Rodovia do Sol'], to: null,
+    pts: [[-2800, 1050], [-2850, 900], [-2950, 650], [-3050, 400], [-3100, 230], [-3100, 160]] },
 ];
 for (const h of HIGHWAYS) { h.surface = h.surface || 'asphalt'; h.half = h.half || HW_HALF; }
 
@@ -87,6 +121,29 @@ export const LOCATIONS = [
   { id: 'madeireira', name: 'Madeireira Rio Escuro', hw: 'Trilha do Rio Escuro', lot: [40, -2690, 160, -2570], side: 's', kind: 'sawmill', color: 0x4f3a24 },
   { id: 'olaria', name: 'Olaria Barro Vermelho', hw: 'Estrada da Olaria', lot: [1590, -940, 1710, -820], side: 's', kind: 'quarry', color: 0xa04a2a },
   { id: 'pedreira', name: 'Pedreira Rocha Viva', hw: 'RS-030', lot: [-2160, -3220, -2040, -3100], side: 's', kind: 'quarry', color: 0x9c9284 },
+  // ---- mapa expandido (like = funciona como o local indicado nas cargas) ----
+  { id: 'cd_luzia', like: 'cd', name: 'CD Santa Luzia', city: 'luzia', bx: 5, bz: 1, side: 'w', kind: 'warehouse', color: 0xe0a020 },
+  { id: 'mercado_luzia', like: 'mercado', name: 'Atacadão Luzia', city: 'luzia', bx: 3, bz: 3, side: 'w', kind: 'market', color: 0x2e9e52 },
+  { id: 'hospital_luzia', like: 'hospital', name: 'Hospital Santa Luzia', city: 'luzia', bx: 1, bz: 3, side: 'e', kind: 'hospital', color: 0xf0f0f0 },
+  { id: 'obra_luzia', like: 'obra', name: 'Obra do Metrô', city: 'luzia', bx: 4, bz: 4, side: 'n', kind: 'construction', color: 0xf0b400 },
+  { id: 'fabrica_luzia', like: 'fabrica', name: 'Indústria Luzimóveis', city: 'luzia', bx: 0, bz: 0, side: 'e', kind: 'factory', color: 0x9a6b3f },
+  { id: 'porto_seco', like: 'porto', name: 'Porto Seco Santa Luzia', city: 'luzia', bx: 5, bz: 4, side: 'w', kind: 'port', color: 0x1f8fb0 },
+  { id: 'silo_rio', like: 'silo', name: 'Armazém Rio Claro', city: 'rioclaro', bx: 0, bz: 3, side: 'e', kind: 'silo', color: 0xc8b26a },
+  { id: 'serraria_rio', like: 'serraria', name: 'Serraria Rio Claro', city: 'rioclaro', bx: 4, bz: 0, side: 'w', kind: 'sawmill', color: 0x7a5230 },
+  { id: 'mercado_rio', like: 'mercado', name: 'Supermercado Ribeirinho', city: 'rioclaro', bx: 2, bz: 2, side: 'w', kind: 'market', color: 0x2e9e52 },
+  { id: 'coop', like: 'silo', name: 'Cooperativa Agrícola', city: 'novaesp', bx: 3, bz: 0, side: 'w', kind: 'silo', color: 0xc8b26a },
+  { id: 'fazenda_ne', like: 'fazenda', name: 'Fazenda Esperança', city: 'novaesp', bx: 0, bz: 3, side: 'e', kind: 'farm', color: 0xb03a2e },
+  { id: 'posto_ne', like: 'posto', name: 'Posto Esperança', city: 'novaesp', bx: 2, bz: 3, side: 'n', kind: 'fuel', color: 0xd02020 },
+  { id: 'mina_pb', like: 'mineradora', name: 'Mineração Pedra Branca', city: 'pedra', bx: 3, bz: 3, side: 'w', kind: 'quarry', color: 0x6e5a4a },
+  { id: 'pedreira_pb', like: 'pedreira', name: 'Britadeira Serra Branca', city: 'pedra', bx: 0, bz: 0, side: 'e', kind: 'quarry', color: 0x9c9284 },
+  { id: 'frigorifico', name: 'Frigorífico Campo Verde', city: 'campo', bx: 3, bz: 1, side: 'w', kind: 'factory', color: 0xa83232 },
+  { id: 'usina', name: 'Usina de Açúcar Verde-Mar', hw: 'Estrada da Usina', lot: [4940, -660, 5060, -540], side: 's', kind: 'factory', color: 0x6b8e23 },
+  { id: 'fazenda_cv', like: 'fazenda', name: 'Fazenda Campo Verde', city: 'campo', bx: 0, bz: 3, side: 'e', kind: 'farm', color: 0xb03a2e },
+  { id: 'porto_lagoa', like: 'porto', name: 'Porto de Lagoa Dourada', city: 'lagoa', bx: 1, bz: 2, side: 'n', kind: 'port', color: 0x1f8fb0 },
+  { id: 'mercado_lagoa', like: 'mercado', name: 'Mercado do Peixe', city: 'lagoa', bx: 0, bz: 0, side: 'e', kind: 'market', color: 0x2e9e52 },
+  { id: 'mangue', name: 'Aquicultura do Mangue', hw: 'Estrada do Mangue', lot: [-3160, 40, -3040, 160], side: 's', kind: 'farm', color: 0x2a7f6f },
+  { id: 'divisa_n', like: 'porto', name: 'Posto Fiscal — Divisa Norte', hw: 'BR-116', lot: [-5660, -9515, -5540, -9395], side: 's', kind: 'warehouse', color: 0x445566 },
+  { id: 'divisa_l', like: 'porto', name: 'Posto Fiscal — Divisa Leste', hw: 'BR-364 Leste', lot: [9495, -1560, 9615, -1440], side: 'w', kind: 'warehouse', color: 0x445566 },
 ];
 export const LOC = Object.fromEntries(LOCATIONS.map((l) => [l.id, l]));
 
@@ -136,7 +193,19 @@ export const CARGOS = [
   { id: 'transformador', name: 'Transformador', icon: '⚡', t: 56, lvl: 18, trailer: 'lowboy', model: 'transformer', rate: 1.7, fragile: true, from: ['siderurgica', 'porto'], to: ['refinaria', 'eolica'] },
   { id: 'pa_eolica', name: 'Pá Eólica', icon: '🌀', t: 62, lvl: 20, trailer: 'lowboy', model: 'blade', rate: 1.9, fragile: true, from: ['porto'], to: ['eolica'] },
   { id: 'prensa', name: 'Prensa Industrial', icon: '🏭', t: 85, lvl: 24, trailer: 'lowboy', model: 'press', rate: 2.1, from: ['porto'], to: ['siderurgica', 'fabrica'] },
+  { id: 'carne', name: 'Carne Refrigerada', icon: '🥩', t: 18, lvl: 5, trailer: 'box', rate: 1.35, fragile: true, from: ['frigorifico'], to: ['mercado', 'cd', 'porto'] },
+  { id: 'acucar', name: 'Açúcar a Granel', icon: '🍬', t: 30, lvl: 8, trailer: 'bulk', rate: 1.05, from: ['usina'], to: ['porto', 'cd'] },
+  { id: 'gado', name: 'Ração para Gado', icon: '🐄', t: 20, lvl: 4, trailer: 'bulk', rate: 1.0, from: ['silo'], to: ['frigorifico', 'fazenda'] },
+  { id: 'pescado', name: 'Pescado Congelado', icon: '🐟', t: 8, lvl: 2, trailer: 'box', rate: 1.3, fragile: true, from: ['mangue', 'porto_lagoa'], to: ['mercado', 'cd'] },
+  { id: 'cana_bitrem', name: 'Açúcar — Bitrem', icon: '🚛', t: 47, lvl: 14, trailer: 'bitrem', sub: 'bulk', rate: 1.15, from: ['usina'], to: ['porto'] },
 ];
+// locais novos que funcionam como os antigos entram automaticamente nas cargas
+for (const c of CARGOS)
+  for (const k of ['from', 'to']) {
+    const add = [];
+    for (const L of LOCATIONS) if (L.like && c[k].includes(L.like) && !c[k].includes(L.id)) add.push(L.id);
+    c[k] = c[k].concat(add);
+  }
 export const CARGO = Object.fromEntries(CARGOS.map((c) => [c.id, c]));
 
 export const xpForLevel = (L) => 200 + 180 * (L - 1);
@@ -159,4 +228,4 @@ export function cargoCG(cargo, rigid) {
 }
 
 // Limites do mundo (para o mapa)
-export const WORLD = { x0: -3400, z0: -3500, x1: 3700, z1: 2300 };
+export const WORLD = { x0: -7400, z0: -9900, x1: 9900, z1: 2300 };

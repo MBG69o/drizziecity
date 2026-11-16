@@ -259,7 +259,7 @@ function buildFromModel(def, src) {
   const ly = cfg.lampY || 0.8;
   for (const sd of [-1, 1]) {
     const g = new THREE.Sprite(M.glow);
-    g.scale.set(1.4, 1.4, 1);
+    g.scale.set(1.4, 1.4, 1); g.userData.front = 1.4;
     g.position.set(sd * (W2 - 0.3), ly, zf + 0.1);
     night.add(g);
     const rg = new THREE.Sprite(M.glowRed);
@@ -269,7 +269,7 @@ function buildFromModel(def, src) {
   }
   const beam = new THREE.Mesh(new THREE.PlaneGeometry(8, 24), M.beam);
   beam.rotation.set(-Math.PI / 2, 0, Math.PI);
-  beam.position.set(0, 0.07, zf + 12.5);
+  beam.position.set(0, 0.07, zf + 12.5); beam.userData.beam = zf;
   night.add(beam);
   night.visible = false;
   root.add(night);
@@ -533,7 +533,7 @@ export function buildTruck(def) {
   const frontLampX = conv ? W2 - 0.31 : W2 - 0.43;
   for (const sd of [-1, 1]) {
     const g = new THREE.Sprite(M.glow);
-    g.scale.set(1.7, 1.7, 1);
+    g.scale.set(1.7, 1.7, 1); g.userData.front = 1.7;
     g.position.set(sd * frontLampX, frontLampY, frontLampZ);
     night.add(g);
     const rg = new THREE.Sprite(M.glowRed);
@@ -543,7 +543,7 @@ export function buildTruck(def) {
   }
   const beam = new THREE.Mesh(new THREE.PlaneGeometry(9, 26), M.beam);
   beam.rotation.set(-Math.PI / 2, 0, Math.PI); // parte larga do facho à frente
-  beam.position.set(0, 0.07, zf + 13.5);
+  beam.position.set(0, 0.07, zf + 13.5); beam.userData.beam = zf;
   night.add(beam);
   night.visible = false;
   root.add(night);
@@ -858,6 +858,7 @@ export class Rig {
     this.model.blob.visible = !this.shadows;
     this.scene.add(this.model.root);
     this.model.night.visible = this.lightsOn;
+    this.beamMode = -1; // reaplica o modo do farol no novo modelo
     if (this.onModel) this.onModel(this.model);
     if (this.trailer && def.rigid) this.detach();
     if (this.model.bedCargo) this.model.bedCargo.visible = !!this.cargo;
@@ -950,6 +951,19 @@ export class Rig {
     if (last) { show(last.blinkL, L); show(last.blinkR, R); }
   }
 
+  // faróis: 0 desligado, 1 baixo, 2 alto
+  setBeam(mode) {
+    this.beamMode = mode;
+    this.setLights(mode > 0);
+    for (const o of this.model.night.children) {
+      if (o.userData.beam !== undefined) {
+        o.scale.set(mode === 2 ? 1.25 : 1, mode === 2 ? 2.3 : 1, 1);
+        o.position.z = o.userData.beam + (mode === 2 ? 30 : 13);
+        o.material.opacity = mode === 2 ? 0.75 : 1;
+      } else if (o.userData.front) { const k = o.userData.front * (mode === 2 ? 1.7 : 1); o.scale.set(k, k, 1); }
+    }
+  }
+
   setLights(on) {
     if (MATS && MATS.lamp.emissiveIntensity !== undefined) MATS.lamp.emissiveIntensity = on ? 1.6 : 0.15;
     if (MATS && MATS.lampFlat.emissiveIntensity !== undefined) MATS.lampFlat.emissiveIntensity = on ? 2.2 : 0.15;
@@ -1029,7 +1043,11 @@ export class Rig {
     this.surface = S.key;
     // estradas de lama: firme entre as poças, mole e escorregadia dentro delas
     const deep = S.key === 'mud' && world.mudDepth ? world.mudDepth(this.x, this.z) : 0;
-    const mu = (S.key === 'mud' ? 0.5 - 0.2 * deep : S.mu) * Pp.tireMu;
+    // chuva: pista molhada perde aderência (terra vira barro); água de alagamento freia e pode afogar o motor
+    const wet = world.wet || 0, paved = S.key === 'asphalt' || S.key === 'concrete' || S.key === 'cobble';
+    const water = world.floodDepth ? world.floodDepth(this.x, this.z) : 0;
+    this.water = water;
+    const mu = (S.key === 'mud' ? 0.5 - 0.2 * deep : S.mu) * Pp.tireMu * (1 - wet * (paved ? 0.2 : 0.32)) * (water > 0.08 && Math.abs(this.v) > 12 ? 0.55 : 1);
     const Pw = def.hp * 735.5 * 1.45;
     const vmax = (this.flat ? Math.min(def.vmax, 60) : def.vmax) / 3.6;
     let v = this.v;
@@ -1091,7 +1109,11 @@ export class Rig {
     const grade = Math.sin(this.pitch) * 0.55 + Math.sin(this.trailer ? this.tpitch : this.pitch) * 0.45;
     const Fg = -m * G0 * grade;
     F += Fg;
-    R += crr * m * G0 + 0.5 * 1.2 * Pp.cda * v * v;
+    R += crr * m * G0 * (paved ? 1 : 1 + wet * 0.8) + 0.5 * 1.2 * Pp.cda * v * v;
+    if (water > 0.05) {
+      R += 0.5 * 1000 * 0.45 * (this.model.cabW || 2.4) * Math.min(water, 1.2) * v * v + m * 0.6 * water;
+      if (this.engineOn && water > (def.rigid && def.mass < 6 ? 0.55 : 0.95) && Math.abs(v) > 0.5) { this.engineOn = false; if (this.onDrown) this.onDrown(); }
+    }
     // temperatura dos freios
     const pBrake = Fb * av / m;                    // W/kg dissipados
     this.brakeT += dt * (pBrake / 220 - (0.01 + av * 0.0007) * this.brakeT);
