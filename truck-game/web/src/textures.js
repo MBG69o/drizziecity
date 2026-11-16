@@ -622,6 +622,63 @@ export const tex = {
     return t;
   }),
 
+
+  // Pisos de estrada (repetem a cada "largura" de estrada no comprimento)
+  surface: (kind) => memo('surf' + kind, () => {
+    const S = SIZE / 2;
+    const [c, ctx] = canvas(S, S);
+    const r = rng(700 + kind.length * 13);
+    if (kind === 'cobble') {
+      ctx.fillStyle = '#4a4744'; ctx.fillRect(0, 0, S, S);
+      const n = 14, cw = S / n, chh = S / (n * 1.3);
+      for (let y = 0; y < S / chh + 1; y++)
+        for (let x = -1; x < n + 1; x++) {
+          const ox = x * cw + (y % 2) * cw * 0.5, oy = y * chh;
+          const g = 95 + r() * 55, tint = r() * 18;
+          ctx.fillStyle = `rgb(${g + tint | 0},${g + tint * 0.6 | 0},${g - tint * 0.4 | 0})`;
+          const pad = 1.6;
+          ctx.beginPath();
+          if (ctx.roundRect) ctx.roundRect(ox + pad, oy + pad, cw - pad * 2, chh - pad * 2, 3); else ctx.rect(ox + pad, oy + pad, cw - pad * 2, chh - pad * 2);
+          ctx.fill();
+          ctx.fillStyle = 'rgba(255,255,255,0.08)'; ctx.fillRect(ox + pad, oy + pad, cw - pad * 2, 2);
+        }
+      noise(ctx, S, S, 16, 701);
+    } else if (kind === 'gravel') {
+      ctx.fillStyle = '#8a8070'; ctx.fillRect(0, 0, S, S);
+      speckle(ctx, S, S, S * 18, ['#6b6357', '#a49a88', '#5a5249', '#b8ae9c', '#7a6f60'], S / 220, 702);
+      // trilhas dos pneus mais compactadas
+      for (const x of [0.25, 0.75]) { const g = ctx.createLinearGradient(S * (x - 0.12), 0, S * (x + 0.12), 0); g.addColorStop(0, 'rgba(70,64,56,0)'); g.addColorStop(0.5, 'rgba(70,64,56,0.35)'); g.addColorStop(1, 'rgba(70,64,56,0)'); ctx.fillStyle = g; ctx.fillRect(S * (x - 0.12), 0, S * 0.24, S); }
+      noise(ctx, S, S, 22, 703);
+    } else if (kind === 'dirt') {
+      ctx.fillStyle = '#93693f'; ctx.fillRect(0, 0, S, S);
+      for (let i = 0; i < 60; i++) { const x = r() * S, y = r() * S, rad = S * (0.05 + r() * 0.15); const g = ctx.createRadialGradient(x, y, 0, x, y, rad); const k = r() > 0.5 ? '120,84,48' : '150,112,70'; g.addColorStop(0, `rgba(${k},0.45)`); g.addColorStop(1, `rgba(${k},0)`); ctx.fillStyle = g; ctx.fillRect(0, 0, S, S); }
+      for (const x of [0.27, 0.73]) {
+        ctx.fillStyle = 'rgba(95,64,36,0.45)'; ctx.fillRect(S * (x - 0.07), 0, S * 0.14, S);
+        ctx.strokeStyle = 'rgba(70,46,26,0.5)'; ctx.lineWidth = 2;
+        for (let k = -2; k <= 2; k++) { ctx.beginPath(); ctx.moveTo(S * x + k * 4, 0); ctx.lineTo(S * x + k * 4 + (r() - 0.5) * 6, S); ctx.stroke(); }
+      }
+      speckle(ctx, S, S, S * 6, ['#7a5634', '#b08356', '#6b4a2c', '#a87d50'], S / 300, 704);
+      // capim nas bordas
+      ctx.fillStyle = 'rgba(96,118,58,0.55)'; ctx.fillRect(0, 0, S * 0.06, S); ctx.fillRect(S * 0.94, 0, S * 0.06, S);
+      noise(ctx, S, S, 20, 705);
+    } else { // mud
+      ctx.fillStyle = '#5a4128'; ctx.fillRect(0, 0, S, S);
+      for (let i = 0; i < 40; i++) { const x = r() * S, y = r() * S, rad = S * (0.04 + r() * 0.12); const g = ctx.createRadialGradient(x, y, 0, x, y, rad); g.addColorStop(0, 'rgba(40,28,16,0.6)'); g.addColorStop(1, 'rgba(40,28,16,0)'); ctx.fillStyle = g; ctx.fillRect(0, 0, S, S); }
+      // poças d'água refletindo o céu
+      for (let i = 0; i < 9; i++) {
+        const x = S * (0.15 + r() * 0.7), y = r() * S, rw = S * (0.05 + r() * 0.1), rh = S * (0.03 + r() * 0.07);
+        const g = ctx.createRadialGradient(x, y, 0, x, y, rw);
+        g.addColorStop(0, 'rgba(150,160,165,0.75)'); g.addColorStop(0.7, 'rgba(95,95,85,0.6)'); g.addColorStop(1, 'rgba(60,44,28,0)');
+        ctx.fillStyle = g; ctx.beginPath(); ctx.ellipse(x, y, rw, rh, r() * 3, 0, 7); ctx.fill();
+      }
+      for (const x of [0.27, 0.73]) { ctx.fillStyle = 'rgba(30,20,12,0.55)'; ctx.fillRect(S * (x - 0.08), 0, S * 0.16, S); }
+      speckle(ctx, S, S, S * 5, ['#3e2c1a', '#6e5236', '#2c1f12'], S / 260, 706);
+      ctx.fillStyle = 'rgba(80,100,50,0.5)'; ctx.fillRect(0, 0, S * 0.05, S); ctx.fillRect(S * 0.95, 0, S * 0.05, S);
+      noise(ctx, S, S, 18, 707);
+    }
+    return finish(c);
+  }),
+
   warehouse: () => memo('warehouse', () => {
     const s = SIZE / 2;
     const [c, ctx] = canvas(s, s);

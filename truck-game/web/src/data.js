@@ -9,9 +9,9 @@ export const SEA_Z = 1790;         // litoral (mar ao sul)
 // Cidades em grade. x0/z0 = coordenada da primeira rua.
 export const CITIES = [
   { id: 'drizzie', name: 'Drizzie City', nx: 8, nz: 8, x0: -560, z0: -560, kind: 'metro' },
-  { id: 'serrana', name: 'Vila Serrana', nx: 4, nz: 4, x0: -3000, z0: -2300, kind: 'town' },
+  { id: 'serrana', name: 'Vila Serrana', nx: 4, nz: 4, x0: -3000, z0: -2300, kind: 'town', surface: 'cobble' },
   { id: 'azul', name: 'Porto Azul', nx: 5, nz: 3, x0: 1900, z0: 1300, kind: 'port' },
-  { id: 'monte', name: 'Monte Alto', nx: 4, nz: 3, x0: 2700, z0: -2300, kind: 'mountain' },
+  { id: 'monte', name: 'Monte Alto', nx: 4, nz: 3, x0: 2700, z0: -2300, kind: 'mountain', surface: 'cobble' },
 ];
 export const CITY = Object.fromEntries(CITIES.map((c) => [c.id, c]));
 export const cx1 = (c) => c.x0 + c.nx * BLOCK;
@@ -34,7 +34,18 @@ export function zoneOf(c, bx, bz) {
 export const RIVER = [[-2100, -4300], [-1750, -3100], [-1400, -2050], [-1250, -1000], [-1080, 0], [-850, 800], [-350, 1400], [250, 1700], [500, 2100]];
 export const RIVER_W = 54;
 
-// Rodovias: pontos de controle (spline). from/to = cidade e saída (ou fim em local).
+// Pisos: aderência (mu), resistência ao rolamento (crr), trepidação e nome
+export const SURFACES = {
+  asphalt: { name: 'Asfalto', mu: 0.85, crr: 0.008, shake: 0 },
+  cobble: { name: 'Calçamento', mu: 0.7, crr: 0.014, shake: 0.035 },
+  gravel: { name: 'Cascalho', mu: 0.58, crr: 0.022, shake: 0.025 },
+  dirt: { name: 'Terra', mu: 0.5, crr: 0.03, shake: 0.02 },
+  mud: { name: 'Lama', mu: 0.3, crr: 0.075, shake: 0.012 },
+  concrete: { name: 'Concreto', mu: 0.8, crr: 0.009, shake: 0 },
+};
+
+// Rodovias e estradas: pontos de controle (spline). from/to = cidade e saída, ['hw', id] = entroncamento
+// (o primeiro ponto fica sobre a via principal) ou null (termina num pátio).
 export const HIGHWAYS = [
   { id: 'BR-101', from: ['drizzie', 0, 4], to: ['serrana', 4, 2],
     pts: [[-570, 0], [-720, 0], [-900, 0], [-1100, -160], [-1350, -480], [-1560, -820], [-1760, -1180], [-1980, -1520], [-2200, -1840], [-2330, -2020], [-2430, -2020]], hills: 7 },
@@ -44,7 +55,14 @@ export const HIGHWAYS = [
     pts: [[2610, 1440], [2760, 1440], [2950, 1380], [3150, 1150], [3300, 800], [3350, 400], [3250, 0], [3150, -400], [3250, -800], [3200, -1200], [3050, -1550], [2980, -1750], [2980, -1870]], hills: 16 },
   { id: 'RS-030', from: ['drizzie', 4, 0], to: null,
     pts: [[0, -570], [0, -800], [-120, -1080], [-420, -1380], [-800, -1640], [-1150, -1880], [-1450, -2000], [-1720, -2150], [-1960, -2420], [-2100, -2650], [-2100, -2900], [-2100, -3100]], hills: 10 },
+  { id: 'Estrada do Café', surface: 'dirt', half: 5.5, from: ['hw', 'BR-101'], to: null,
+    pts: [[-1760, -1180], [-1880, -1080], [-2020, -980], [-2250, -850], [-2450, -640], [-2600, -470], [-2600, -400]] },
+  { id: 'Trilha do Rio Escuro', surface: 'mud', half: 5, from: ['hw', 'RS-030'], to: null,
+    pts: [[-420, -1380], [-380, -1500], [-300, -1700], [-150, -2000], [-50, -2300], [100, -2500], [100, -2570]] },
+  { id: 'Estrada da Olaria', surface: 'gravel', half: 6, from: ['hw', 'SP-280'], to: null,
+    pts: [[1350, 80], [1380, -40], [1450, -200], [1550, -500], [1650, -760], [1650, -820]] },
 ];
+for (const h of HIGHWAYS) { h.surface = h.surface || 'asphalt'; h.half = h.half || HW_HALF; }
 
 // Locais de coleta/entrega. city: na grade (bx,bz); lot: pátio à beira da rodovia [x0,z0,x1,z1].
 // side = lado do pátio voltado para a via.
@@ -65,19 +83,22 @@ export const LOCATIONS = [
   { id: 'fazenda', name: 'Fazenda Boa Vista', hw: 'BR-101', lot: [-862, 11, -742, 131], side: 'n', kind: 'farm', color: 0xb03a2e },
   { id: 'eolica', name: 'Parque Eólico', hw: 'SP-280', lot: [900, -131, 1020, -11], side: 's', kind: 'wind', color: 0xeeeeee },
   { id: 'serraria', name: 'Serraria Pinheiro', hw: 'RS-030', lot: [-2089, -3020, -1969, -2900], side: 'w', kind: 'sawmill', color: 0x7a5230 },
+  { id: 'cafezal', name: 'Fazenda Café do Vale', hw: 'Estrada do Café', lot: [-2660, -400, -2540, -280], side: 'n', kind: 'farm', color: 0x5b3a1e },
+  { id: 'madeireira', name: 'Madeireira Rio Escuro', hw: 'Trilha do Rio Escuro', lot: [40, -2690, 160, -2570], side: 's', kind: 'sawmill', color: 0x4f3a24 },
+  { id: 'olaria', name: 'Olaria Barro Vermelho', hw: 'Estrada da Olaria', lot: [1590, -940, 1710, -820], side: 's', kind: 'quarry', color: 0xa04a2a },
   { id: 'pedreira', name: 'Pedreira Rocha Viva', hw: 'RS-030', lot: [-2160, -3220, -2040, -3100], side: 's', kind: 'quarry', color: 0x9c9284 },
 ];
 export const LOC = Object.fromEntries(LOCATIONS.map((l) => [l.id, l]));
 
 // Caminhões. cab: 'cabover' (cara-chata) ou 'conventional' (bicudo).
 export const TRUCKS = [
-  { id: 'mini', name: 'Mini Carga 1.0', hp: 95, cap: 1.5, mass: 1.0, level: 1, price: 0, rigid: true, axles: 2, model: 'labo', color: 0x3d7fd1, vmax: 95, desc: 'Picape de carga compacta para entregas leves.' },
-  { id: 'urbano', name: 'Leve Baú 4.5', hp: 160, cap: 5, mass: 4.5, level: 2, price: 8000, rigid: true, axles: 2, model: 'canter', color: 0xf2f2f2, vmax: 100, desc: 'Caminhão leve com baú, ágil na cidade.' },
-  { id: 'toco', name: 'Toco 11-240', hp: 240, cap: 12, mass: 7.5, level: 3, price: 15000, rigid: true, axles: 2, cab: 'cabover', roof: 'mid', color: 0x2f6fde, vmax: 100, desc: 'Caminhão médio de carroceria baú.' },
-  { id: 'cavalo', cfg: '6x2', name: 'Cavalo 360', hp: 360, cap: 30, mass: 8.5, level: 6, price: 60000, rigid: false, axles: 3, model: 'volvo', cab: 'cabover', roof: 'high', color: 0xb5121b, vmax: 110, desc: 'Cavalo mecânico cara-chata para carretas.' },
-  { id: 'rodo', cfg: '6x4', name: 'Rodomax 480', hp: 480, cap: 45, mass: 9, level: 10, price: 140000, rigid: false, axles: 3, model: 'volvo', cab: 'cabover', roof: 'high', color: 0x1d3f6e, vmax: 110, desc: 'Cavalo 6x2 de teto alto para longas viagens.' },
-  { id: 'titan', cfg: '6x4', name: 'Titan 620 Bicudo', hp: 620, cap: 65, mass: 10.5, level: 15, price: 280000, rigid: false, axles: 3, cab: 'conventional', roof: 'high', color: 0x222831, vmax: 105, desc: 'Bicudo 6x4 de capô longo e muita tração.' },
-  { id: 'colosso', cfg: '8x4', name: 'Colosso 750 8x4', hp: 750, cap: 90, mass: 12.5, level: 20, price: 500000, rigid: false, axles: 4, cab: 'conventional', roof: 'high', color: 0xf0a000, vmax: 95, desc: 'Gigante para cargas especiais e indivisíveis.' },
+  { id: 'mini', track: 1.25, cgH: 0.8, drive: 0.45, tireMu: 0.95, steerLock: 0.66, name: 'Mini Carga 1.0', hp: 95, cap: 1.5, mass: 1.0, level: 1, price: 0, rigid: true, axles: 2, model: 'labo', color: 0x3d7fd1, vmax: 95, desc: 'Picape de carga compacta para entregas leves.' },
+  { id: 'urbano', track: 1.6, cgH: 1.0, drive: 0.5, tireMu: 0.95, steerLock: 0.62, name: 'Leve Baú 4.5', hp: 160, cap: 5, mass: 4.5, level: 2, price: 8000, rigid: true, axles: 2, model: 'canter', color: 0xf2f2f2, vmax: 100, desc: 'Caminhão leve com baú, ágil na cidade.' },
+  { id: 'toco', track: 1.85, cgH: 1.2, drive: 0.5, tireMu: 0.92, steerLock: 0.6, name: 'Toco 11-240', hp: 240, cap: 12, mass: 7.5, level: 3, price: 15000, rigid: true, axles: 2, cab: 'cabover', roof: 'mid', color: 0x2f6fde, vmax: 100, desc: 'Caminhão médio de carroceria baú.' },
+  { id: 'cavalo', track: 2.0, cgH: 1.05, drive: 0.33, tireMu: 0.9, steerLock: 0.58, cfg: '6x2', name: 'Cavalo 360', hp: 360, cap: 30, mass: 8.5, level: 6, price: 60000, rigid: false, axles: 3, model: 'volvo', cab: 'cabover', roof: 'high', color: 0xb5121b, vmax: 110, desc: 'Cavalo mecânico cara-chata para carretas.' },
+  { id: 'rodo', track: 2.0, cgH: 1.05, drive: 0.5, tireMu: 0.92, steerLock: 0.56, cfg: '6x4', name: 'Rodomax 480', hp: 480, cap: 45, mass: 9, level: 10, price: 140000, rigid: false, axles: 3, model: 'volvo', cab: 'cabover', roof: 'high', color: 0x1d3f6e, vmax: 110, desc: 'Cavalo 6x2 de teto alto para longas viagens.' },
+  { id: 'titan', track: 2.0, cgH: 1.1, drive: 0.52, tireMu: 0.93, steerLock: 0.54, cfg: '6x4', name: 'Titan 620 Bicudo', hp: 620, cap: 65, mass: 10.5, level: 15, price: 280000, rigid: false, axles: 3, cab: 'conventional', roof: 'high', color: 0x222831, vmax: 105, desc: 'Bicudo 6x4 de capô longo e muita tração.' },
+  { id: 'colosso', track: 2.05, cgH: 1.15, drive: 0.55, tireMu: 0.95, steerLock: 0.5, cfg: '8x4', name: 'Colosso 750 8x4', hp: 750, cap: 90, mass: 12.5, level: 20, price: 500000, rigid: false, axles: 4, cab: 'conventional', roof: 'high', color: 0xf0a000, vmax: 95, desc: 'Gigante para cargas especiais e indivisíveis.' },
 ];
 export const TRUCK = Object.fromEntries(TRUCKS.map((t) => [t.id, t]));
 
@@ -91,7 +112,7 @@ export const CARGOS = [
   { id: 'bebidas', name: 'Bebidas', icon: '🥤', t: 9, lvl: 3, trailer: 'box', rate: 1.05, from: ['cd'], to: ['mercado', 'posto'] },
   { id: 'racao', name: 'Ração Animal', icon: '🌾', t: 12, lvl: 4, trailer: 'box', rate: 1.0, from: ['silo'], to: ['fazenda'] },
   { id: 'trator', name: 'Trator Agrícola', icon: '🚜', t: 14, lvl: 6, trailer: 'lowboy', model: 'tractor', rate: 1.5, from: ['porto'], to: ['fazenda', 'silo'] },
-  { id: 'madeira', name: 'Toras de Madeira', icon: '🪵', t: 18, lvl: 6, trailer: 'flatbed', model: 'logs', rate: 1.05, from: ['serraria'], to: ['fabrica', 'obra', 'porto'] },
+  { id: 'madeira', name: 'Toras de Madeira', icon: '🪵', t: 18, lvl: 6, trailer: 'flatbed', model: 'logs', rate: 1.05, from: ['serraria', 'madeireira'], to: ['fabrica', 'obra', 'porto'] },
   { id: 'conteiner', name: 'Contêiner 40 pés', icon: '🚢', t: 26, lvl: 7, trailer: 'flatbed', model: 'container', rate: 1.15, from: ['porto'], to: ['cd', 'siderurgica', 'fabrica'] },
   { id: 'graos', name: 'Soja a Granel', icon: '🫘', t: 28, lvl: 8, trailer: 'bulk', rate: 1.0, from: ['fazenda', 'silo'], to: ['porto'] },
   { id: 'combustivel', name: 'Combustível', icon: '⛽', t: 30, lvl: 9, trailer: 'tank', rate: 1.45, hazard: true, from: ['refinaria'], to: ['posto', 'fazenda', 'pedreira'] },
@@ -99,6 +120,11 @@ export const CARGOS = [
   { id: 'vinho', name: 'Vinho em Caixas', icon: '🍷', t: 7, lvl: 3, trailer: 'box', rate: 1.3, fragile: true, from: ['vinicola'], to: ['mercado', 'cd', 'porto'] },
   { id: 'minerio', name: 'Minério de Ferro', icon: '⛏️', t: 34, lvl: 11, trailer: 'bulk', rate: 1.1, from: ['mineradora'], to: ['siderurgica', 'porto'] },
   { id: 'granito', name: 'Blocos de Granito', icon: '🪨', t: 40, lvl: 12, trailer: 'flatbed', model: 'stone', rate: 1.2, from: ['mineradora'], to: ['obra', 'porto'] },
+  { id: 'cafe', name: 'Sacas de Café', icon: '☕', t: 10, lvl: 2, trailer: 'box', rate: 1.25, from: ['cafezal'], to: ['porto', 'cd', 'mercado'] },
+  { id: 'tijolos', name: 'Tijolos (paletes)', icon: '🧱', t: 16, lvl: 5, trailer: 'flatbed', model: 'bricks', rate: 1.1, from: ['olaria'], to: ['obra', 'cd', 'fabrica'] },
+  { id: 'graos_bitrem', name: 'Soja — Bitrem', icon: '🚛', t: 48, lvl: 14, trailer: 'bitrem', sub: 'bulk', rate: 1.15, from: ['fazenda', 'silo', 'cafezal'], to: ['porto'] },
+  { id: 'madeira_bitrem', name: 'Toras — Bitrem', icon: '🌲', t: 50, lvl: 15, trailer: 'bitrem', sub: 'flatbed', model: 'logs', rate: 1.2, from: ['serraria', 'madeireira'], to: ['fabrica', 'porto'] },
+  { id: 'comb_bitrem', name: 'Combustível — Bitrem', icon: '⛽', t: 45, lvl: 16, trailer: 'bitrem', sub: 'tank', hazard: true, rate: 1.55, from: ['refinaria'], to: ['posto', 'fazenda', 'mineradora'] },
   { id: 'bobinas', name: 'Bobinas de Aço', icon: '🧲', t: 36, lvl: 11, trailer: 'flatbed', model: 'coils', rate: 1.2, from: ['siderurgica'], to: ['porto', 'fabrica'] },
   { id: 'vigas', name: 'Vigas de Aço', icon: '🏢', t: 42, lvl: 13, trailer: 'flatbed', model: 'beams', rate: 1.25, from: ['siderurgica'], to: ['obra'] },
   { id: 'escavadeira', name: 'Escavadeira', icon: '🚧', t: 48, lvl: 15, trailer: 'lowboy', model: 'excavator', rate: 1.55, from: ['porto'], to: ['pedreira', 'obra'] },
@@ -112,7 +138,19 @@ export const xpForLevel = (L) => 200 + 180 * (L - 1);
 
 export function trailerMass(cargo) {
   if (!cargo) return 0;
+  if (cargo.trailer === 'bitrem') return 13;
   return cargo.trailer === 'lowboy' ? 9 : cargo.trailer === 'tank' ? 7 : 6.5;
+}
+
+// altura do centro de gravidade da carga (m) — define o risco de tombamento
+export function cargoCG(cargo, rigid) {
+  const t = cargo.trailer === 'bitrem' ? cargo.sub : cargo.trailer;
+  if (rigid) return 1.6;
+  if (t === 'box') return 2.4;
+  if (t === 'tank') return 2.3;
+  if (t === 'bulk') return 2.1;
+  if (t === 'flatbed') return { logs: 2.2, container: 2.6, coils: 1.85, beams: 1.9, stone: 2.1, bricks: 2.0 }[cargo.model] || 2.0;
+  return { tractor: 2.3, excavator: 2.3, transformer: 2.5, blade: 2.6, press: 2.7 }[cargo.model] || 2.2;
 }
 
 // Limites do mundo (para o mapa)

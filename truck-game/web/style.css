@@ -231,3 +231,9 @@ input[type=range] { width: 180px; accent-color: #e3243b; }
 #icons .bl.on { color: #3ee07a; text-shadow: 0 0 10px #3ee07a; }
 #ic-haz { color: rgba(255,80,80,.45); font-size: 15px; padding: 0; }
 #ic-haz.on { color: #ff5050; }
+
+#physwarn { left: 50%; top: 92px; transform: translateX(-50%); pointer-events: none; font-weight: 900; font-size: 14px; text-align: center; }
+#physwarn b { display: inline-block; padding: 7px 18px; border-radius: 18px; background: rgba(10,12,16,.85); animation: pulseW .5s infinite alternate; }
+#physwarn .r { color: #ff4d4d; border: 2px solid #ff4d4d; }
+#physwarn .o { color: #ffb02e; border: 2px solid #ffb02e; }
+@keyframes pulseW { to { transform: scale(1.06); } }

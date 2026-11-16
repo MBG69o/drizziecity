@@ -34,9 +34,16 @@ export function buildGraph(world) {
   for (const h of world.hws) {
     const cuts = [];
     for (const d of Object.values(world.depots)) if (d.entry.hw === h.id) cuts.push({ s: d.entry.s, depot: d.id });
+    // entroncamentos de estradas que saem desta
+    for (const c of world.hws) if (c.def.from && c.def.from[0] === 'hw' && c.def.from[1] === h.id) {
+      let bi = 0, bd = Infinity;
+      for (let i = 0; i < h.n; i++) { const d = (h.x[i] - c.x[0]) ** 2 + (h.z[i] - c.z[0]) ** 2; if (d < bd) { bd = d; bi = i; } }
+      cuts.push({ s: h.s[bi] + 0.001, junction: c.id });
+    }
     cuts.sort((a, b) => a.s - b.s);
-    const startNode = h.def.from ? G.cityNode[h.def.from[0] + ':' + h.def.from[1] + ':' + h.def.from[2]] : addNode(h.x[0], h.z[0]);
-    const endNode = h.def.to ? G.cityNode[h.def.to[0] + ':' + h.def.to[1] + ':' + h.def.to[2]] : addNode(h.x[h.n - 1], h.z[h.n - 1]);
+    G.junction = G.junction || {};
+    const startNode = !h.def.from ? addNode(h.x[0], h.z[0]) : h.def.from[0] === 'hw' ? G.junction[h.id] : G.cityNode[h.def.from[0] + ':' + h.def.from[1] + ':' + h.def.from[2]];
+    const endNode = h.def.to && h.def.to[0] !== 'hw' ? G.cityNode[h.def.to[0] + ':' + h.def.to[1] + ':' + h.def.to[2]] : addNode(h.x[h.n - 1], h.z[h.n - 1]);
     let prevNode = startNode, prevI = 0;
     const pts = (i0, i1) => {
       const out = [];
@@ -48,7 +55,8 @@ export function buildGraph(world) {
       while (i < h.n - 1 && h.s[i + 1] < c.s) i++;
       const node = addNode(h.x[i], h.z[i]);
       G.depotNode = G.depotNode || {};
-      G.depotNode[c.depot] = node;
+      if (c.depot) G.depotNode[c.depot] = node;
+      if (c.junction) G.junction[c.junction] = node;
       addEdge(prevNode, node, [G.nodes[prevNode], ...pts(prevI, i)]);
       prevNode = node; prevI = i;
     }

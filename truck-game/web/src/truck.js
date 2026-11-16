@@ -4,7 +4,8 @@ import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { Builder, mat, G } from './geo.js';
 import { tex } from './textures.js';
-import { trailerMass } from './data.js';
+import { trailerMass, cargoCG, SURFACES } from './data.js';
+const SURF = Object.fromEntries(Object.entries(SURFACES).map(([k, v]) => [k, { ...v, key: k }]));
 
 let QUAL = 'medium';
 export const MODELS = {}; // modelos 3D importados (GLB)
@@ -577,7 +578,7 @@ export function buildTruck(def) {
 }
 
 // ---------- carreta ----------
-export function buildTrailer(cargo) {
+export function buildTrailer(cargo, opts = {}) {
   const M = mats();
   const root = new THREE.Group();
   root.rotation.order = 'YXZ';
@@ -585,13 +586,14 @@ export function buildTrailer(cargo) {
   const box = (b, w, h, d, x, y, z, color, rx = 0, ry = 0, rz = 0) => b.add(G.box(), mat(x, y, z, rx, ry, rz, w, h, d), color);
   const cyl = (b, rad, len, x, y, z, rx, ry, rz, color, seg = 18) => b.add(G.cyl(seg), mat(x, y, z, rx, ry, rz, rad * 2, len, rad * 2), color);
   const type = cargo.trailer, model = cargo.model;
-  const useModel = type === 'flatbed' && MODELS.flatbed;
+  const useModel = type === 'flatbed' && MODELS.flatbed && !opts.len;
   const tm = useModel ? modelMeta(MODELS.flatbed) : null;
-  const Lt = useModel ? tm.front - tm.back : model === 'blade' ? 20 : type === 'tank' ? 12.5 : type === 'bulk' ? 12 : type === 'lowboy' ? 14.5 : 13.6;
-  const front = useModel ? tm.front : 1.0, back = useModel ? tm.back : -(Lt - front);
-  const nAx = type === 'lowboy' ? (cargo.t > 60 ? 5 : 4) : 3;
+  const Lt = opts.len || (useModel ? tm.front - tm.back : model === 'blade' ? 20 : type === 'tank' ? 12.5 : type === 'bulk' ? 12 : type === 'lowboy' ? 14.5 : 13.6);
+  const front = useModel ? tm.front : (opts.front ?? 1.0), back = useModel ? tm.back : -(Lt - front);
+  const ax0 = opts.lead ? back + 0.9 : back + 1.6;
+  const nAx = opts.len ? (opts.lead ? 3 : 3) : type === 'lowboy' ? (cargo.t > 60 ? 5 : 4) : 3;
   const axleSpacing = 1.35;
-  const axC = useModel ? tm.axles.reduce((a, b) => a + b, 0) / tm.axles.length : back + 1.6 + ((nAx - 1) * axleSpacing) / 2;
+  const axC = useModel ? tm.axles.reduce((a, b) => a + b, 0) / tm.axles.length : ax0 + ((nAx - 1) * axleSpacing) / 2;
   const deck = useModel ? tm.deckY - 0.11 : 1.35;
   const extra = [];
   const modelAxles = [];
@@ -695,6 +697,14 @@ export function buildTrailer(cargo) {
         box(D, 1.6, 0.25, 1.4, 0, top + 0.12, front - 2 - i * 3.0);
         box(P, 0.05, 1.8, 1.7, 0, top + 0.9, front - 2 - i * 3.0, 0xf1c40f);
       }
+    } else if (model === 'bricks') {
+      for (let z = front - 1.4; z > back + 1; z -= 1.3)
+        for (const x of [-0.62, 0.62]) {
+          box(D, 1.15, 0.12, 1.15, x, top + 0.06, z);
+          box(P, 1.1, 0.95, 1.1, x, top + 0.6, z, 0xa8472c);
+          box(P, 1.12, 0.03, 1.12, x, top + 0.36, z, 0x8f3a22);
+        }
+      straps(top + 1.12);
     } else if (model === 'stone') {
       for (let i = 0; i < 3; i++) box(P, 2.2, 1.35 + (i % 2) * 0.25, 2.6, 0, top + 0.7 + (i % 2) * 0.12, front - 2.6 - i * 3.8, [0x8d8a86, 0xa29e98, 0x7c7975][i], 0, (i - 1) * 0.04, 0);
       straps(top + 1.6);
@@ -760,7 +770,7 @@ export function buildTrailer(cargo) {
   for (const e of extra) if (e) { e.castShadow = true; root.add(e); }
   const axles = [...modelAxles];
   if (!useModel) for (let i = 0; i < nAx; i++) {
-    const a = axleMesh(back + 1.6 + i * axleSpacing, 1.75, 0.5, 0.28, true);
+    const a = axleMesh(ax0 + i * axleSpacing, 1.75, 0.5, 0.28, true);
     axles.push(a);
     root.add(a);
   }
@@ -787,19 +797,31 @@ export function buildTrailer(cargo) {
   blob.position.set(0, 0.05, (front + back) / 2);
   root.add(blob);
   root.traverse((o) => { if (o.isMesh && o !== blob) o.castShadow = true; });
-  return { root, axles, Lk: -axC, Lt, front, back, blob, night, blinkL, blinkR };
+  // bitrem: quinta roda traseira na carreta dianteira (sobre o conjunto de eixos)
+  let coupleZ = null;
+  if (opts.lead) {
+    coupleZ = back + 0.45;
+    const fw = new THREE.Mesh(G.box(), M.steel);
+    fw.scale.set(1.3, 0.14, 1.3);
+    fw.position.set(0, deck + 0.05, coupleZ);
+    root.add(fw);
+  }
+  return { root, axles, Lk: -axC, Lt, front, back, blob, night, blinkL, blinkR, coupleZ };
 }
 
 // ---------- física ----------
 const tmp = { x: 0, z: 0 };
+const G0 = 9.81;
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 
 export class Rig {
   constructor(scene, def, shadows) {
     this.scene = scene;
     this.shadows = shadows;
-    this.x = 0; this.z = 0; this.h = 0; this.y = 0; this.pitch = 0; this.tpitch = 0;
-    this.v = 0; this.steer = 0; this.acc = 0;
-    this.trailer = null; this.th = 0;
+    this.x = 0; this.z = 0; this.h = 0; this.y = 0; this.pitch = 0; this.tpitch = 0; this.tpitch2 = 0;
+    this.v = 0; this.steer = 0; this.acc = 0; this.yaw = 0;
+    this.trailer = null; this.th = 0; this.trailer2 = null; this.th2 = 0;
     this.cargo = null;
     this.wheelRot = 0;
     this.rpm = 0.2;
@@ -808,6 +830,10 @@ export class Rig {
     this.lastImpact = 0;
     this.lightsOn = false;
     this.engineOn = false;
+    this.slip = 0; this.tipRisk = 0; this.tip = 0; this.wheelspin = 0;
+    this.slosh = 0; this.sloshV = 0;
+    this.rolled = 0;
+    this.surface = 'asphalt';
     this.setTruck(def);
   }
 
@@ -821,28 +847,72 @@ export class Rig {
     if (this.onModel) this.onModel(this.model);
     if (this.trailer && def.rigid) this.detach();
     if (this.model.bedCargo) this.model.bedCargo.visible = !!this.cargo;
+    this.computePhys();
     this.sync();
   }
 
   attach(cargo) {
     this.cargo = cargo;
     if (this.model.bedCargo) this.model.bedCargo.visible = true;
-    if (this.def.rigid) return;
-    const tr = buildTrailer(cargo);
-    tr.blob.visible = !this.shadows;
-    tr.night.visible = this.lightsOn;
-    this.trailer = tr;
-    this.th = this.h;
-    this.scene.add(tr.root);
+    if (!this.def.rigid) {
+      if (cargo.trailer === 'bitrem') {
+        const sub = { ...cargo, trailer: cargo.sub };
+        this.trailer = buildTrailer(sub, { len: 9.2, lead: true });
+        this.trailer2 = buildTrailer(sub, { len: 10.2, front: 0.5 });
+        this.th2 = this.h;
+      } else this.trailer = buildTrailer(cargo);
+      for (const tr of [this.trailer, this.trailer2]) {
+        if (!tr) continue;
+        tr.blob.visible = !this.shadows;
+        tr.night.visible = this.lightsOn;
+        this.scene.add(tr.root);
+      }
+      this.th = this.h;
+    }
+    this.computePhys();
     this.sync();
   }
 
-  // pisca-pisca: dir = -1 esquerda, 1 direita, 2 alerta, 0 desligado; on = fase acesa
+  detach() {
+    if (this.model.bedCargo) this.model.bedCargo.visible = false;
+    if (this.trailer) this.scene.remove(this.trailer.root);
+    if (this.trailer2) this.scene.remove(this.trailer2.root);
+    this.trailer = null; this.trailer2 = null;
+    this.cargo = null;
+    this.computePhys();
+  }
+
+  // Física própria de cada caminhão + carreta + carga
+  computePhys() {
+    const d = this.def, c = this.cargo;
+    const mT = d.mass * 1000;
+    const mC = c ? c.t * 1000 : 0, mTr = c && !d.rigid ? trailerMass(c) * 1000 : 0;
+    const cgC = c ? (d.rigid ? d.cgH * 1.4 : cargoCG(c, false)) : 0;
+    const truckCG = d.rigid && c ? (mT * d.cgH + mC * cgC) / (mT + mC) : d.cgH;
+    const trailerCG = !d.rigid && c ? (mTr * 1.25 + mC * cgC) / (mTr + mC) : 0;
+    const ssf = Math.min((d.track || 2) / 2 / truckCG, trailerCG ? 1.0 / trailerCG : 9);
+    const sub = c ? (c.trailer === 'bitrem' ? c.sub : c.trailer) : null;
+    this.P = {
+      mass: mT + mC + mTr,
+      aRoll: G0 * ssf * 0.92,                     // aceleração lateral que tomba o conjunto
+      tireMu: d.tireMu || 0.9,
+      // peso sobre os eixos de tração (cavalo recebe ~45% da carreta pelo pino-rei)
+      driveMass: (d.drive || 0.4) * (mT + (d.rigid ? mC : (mTr + mC) * 0.5)) * 1.7,
+      steerLock: d.steerLock || 0.6,
+      yawTau: 0.12 + (mT + mC + mTr) / 260000,      // inércia de giro
+      cda: this.trailer ? (sub === 'box' ? 9 : 7) * (this.trailer2 ? 1.25 : 1) : d.rigid ? 6.5 : 5,
+      slosh: sub === 'tank',
+      fragile: !!(c && c.fragile),
+      trailerMu: sub === 'lowboy' ? 0.85 : 0.9,
+    };
+  }
+
   setBlink(dir, on) {
     const show = (arr, v) => { for (const s of arr) s.visible = v; };
     const L = on && (dir === -1 || dir === 2), R = on && (dir === 1 || dir === 2);
     show(this.model.blinkL, L); show(this.model.blinkR, R);
-    if (this.trailer) { show(this.trailer.blinkL, L); show(this.trailer.blinkR, R); }
+    const last = this.trailer2 || this.trailer;
+    if (last) { show(last.blinkL, L); show(last.blinkR, R); }
   }
 
   setLights(on) {
@@ -851,36 +921,36 @@ export class Rig {
     this.lightsOn = on;
     this.model.night.visible = on;
     if (this.trailer) this.trailer.night.visible = on;
+    if (this.trailer2) this.trailer2.night.visible = on;
   }
 
-  detach() {
-    if (this.model.bedCargo) this.model.bedCargo.visible = false;
-    if (this.trailer) this.scene.remove(this.trailer.root);
-    this.trailer = null;
-    this.cargo = null;
-  }
-
-  get mass() {
-    let t = this.def.mass;
-    if (this.cargo) t += this.cargo.t + (this.def.rigid ? 0 : trailerMass(this.cargo));
-    return t * 1000;
-  }
-
+  get mass() { return this.P ? this.P.mass : this.def.mass * 1000; }
   get speedKmh() { return Math.abs(this.v) * 3.6; }
+  // comprimento total (para a câmera)
+  get trainLength() { return (this.trailer ? this.trailer.Lt : 0) + (this.trailer2 ? this.trailer2.Lt - 2 : 0); }
 
   place(x, z, h) {
-    this.x = x; this.z = z; this.h = h; this.th = h;
-    this.v = 0; this.steer = 0;
+    this.x = x; this.z = z; this.h = h; this.th = h; this.th2 = h;
+    this.v = 0; this.steer = 0; this.yaw = 0; this.tip = 0; this.slosh = 0; this.sloshV = 0;
     this.sync();
+  }
+
+  // posição do engate da segunda carreta (bitrem)
+  couple(out) {
+    const md = this.model, t1 = this.trailer;
+    const hx = this.x + Math.sin(this.h) * md.hitchZ, hz = this.z + Math.cos(this.h) * md.hitchZ;
+    out.x = hx + Math.sin(this.th) * t1.coupleZ; out.z = hz + Math.cos(this.th) * t1.coupleZ;
+    return out;
   }
 
   center(out) {
     const fx = Math.sin(this.h), fz = Math.cos(this.h);
     if (this.trailer) {
-      const hx = this.x + fx * this.model.hitchZ, hz = this.z + fz * this.model.hitchZ;
-      const L = this.trailer.Lt * 0.45;
-      out.x = (this.x + fx * this.model.wb * 0.5 + hx - Math.sin(this.th) * L) / 2;
-      out.z = (this.z + fz * this.model.wb * 0.5 + hz - Math.cos(this.th) * L) / 2;
+      let tx, tz;
+      if (this.trailer2) { this.couple(tmp); tx = tmp.x - Math.sin(this.th2) * this.trailer2.Lt * 0.45; tz = tmp.z - Math.cos(this.th2) * this.trailer2.Lt * 0.45; }
+      else { const hx = this.x + fx * this.model.hitchZ, hz = this.z + fz * this.model.hitchZ, L = this.trailer.Lt * 0.45; tx = hx - Math.sin(this.th) * L; tz = hz - Math.cos(this.th) * L; }
+      out.x = (this.x + fx * this.model.wb * 0.5 + tx) / 2;
+      out.z = (this.z + fz * this.model.wb * 0.5 + tz) / 2;
     } else {
       out.x = this.x + fx * this.model.wb * 0.4;
       out.z = this.z + fz * this.model.wb * 0.4;
@@ -890,9 +960,13 @@ export class Rig {
 
   update(dt, inp, world, obstacles) {
     this.world = world;
-    const def = this.def;
-    const m = this.mass;
-    const P = def.hp * 735.5 * 2.3;
+    if (this.rolled > 0) { this.rolled -= dt; this.v = 0; this.sync(); return; }
+    const def = this.def, Pp = this.P;
+    const m = Pp.mass;
+    const S = SURF[world.surfaceAt ? world.surfaceAt(this.x, this.z) : 'asphalt'] || SURF.asphalt;
+    this.surface = S.key;
+    const mu = S.mu * Pp.tireMu;
+    const Pw = def.hp * 735.5 * 2.3;
     const vmax = def.vmax / 3.6;
     let v = this.v;
     let F = 0;
@@ -906,28 +980,86 @@ export class Rig {
     const drive = this.engineOn && inp.gear !== 'N';
     const autoRev = inp.gear === 'auto' && this.reverse;
 
+    // tração limitada pela aderência do piso sobre os eixos de tração
+    const Ftrac = mu * G0 * Pp.driveMass;
+    // frenagem limitada pela aderência (ABS)
+    const Fbrk = Math.min(6.8, mu * G0 * 0.95) * m;
+    let Fdrive = 0;
     if (!this.reverse) {
-      if (drive && thr > 0 && v >= -0.3) F += thr * Math.min(P / Math.max(v, 3), m * 3.0, def.hp * 250);
-      if (brake > 0 && v > 0) F -= brake * m * (6.8 - Math.min(2.2, m / 40000));
-      if (brake > 0 && v < 0) F += brake * m * 6;
+      if (drive && thr > 0 && v >= -0.3) Fdrive = thr * Math.min(Pw / Math.max(v, 3), m * 3.0, def.hp * 250);
+      if (brake > 0 && v > 0) F -= brake * Fbrk;
+      if (brake > 0 && v < 0) F += brake * Fbrk;
     } else if (autoRev) {
-      if (drive && brake > 0 && v > -4.5) F -= brake * Math.min(P / Math.max(-v, 3), m * 1.6);
-      if (thr > 0 && v < 0) F += thr * m * 6;
+      if (drive && brake > 0 && v > -4.5) Fdrive = -brake * Math.min(Pw / Math.max(-v, 3), m * 1.6);
+      if (thr > 0 && v < 0) F += thr * Fbrk;
     } else {
-      if (drive && thr > 0 && v > -5) F -= thr * Math.min(P / Math.max(-v, 3), m * 1.6);
-      if (brake > 0 && v < 0) F += brake * m * 6.5;
-      if (brake > 0 && v > 0) F -= brake * m * 6.5;
+      if (drive && thr > 0 && v > -5) Fdrive = -thr * Math.min(Pw / Math.max(-v, 3), m * 1.6);
+      if (brake > 0 && v < 0) F += brake * Fbrk;
+      if (brake > 0 && v > 0) F -= brake * Fbrk;
     }
-    if (inp.handbrake) F -= Math.sign(v) * m * 5;
-    // gravidade nos aclives: carga pesada sente a subida
-    const grade = Math.sin(this.pitch) * 0.6 + Math.sin(this.trailer ? this.tpitch : this.pitch) * 0.4;
-    const Fg = -m * 9.81 * grade;
-    const cda = this.trailer ? (this.cargo.trailer === 'box' ? 9 : 7) : def.rigid ? 6.5 : 5;
-    const drag = 0.5 * 1.2 * cda * v * Math.abs(v);
-    const roll = (0.011 * m * 9.81 + (thr < 0.05 && brake < 0.05 ? m * 0.35 : 0)) * Math.sign(v);
-    v += ((F + (Math.abs(v) > 0.2 || thr > 0 ? Fg : 0) - drag) / m) * dt;
+    // patinagem: força acima da aderência vira giro em falso
+    this.wheelspin = Math.abs(Fdrive) > Ftrac ? Math.min(1, (Math.abs(Fdrive) - Ftrac) / Ftrac) : 0;
+    F += clamp(Fdrive, -Ftrac, Ftrac);
+    if (inp.handbrake) F -= Math.sign(v) * Math.min(m * 5, mu * G0 * m * 0.6);
+    // gravidade nos aclives
+    const grade = Math.sin(this.pitch) * 0.55 + Math.sin(this.trailer ? this.tpitch : this.pitch) * 0.45;
+    const Fg = -m * G0 * grade;
+    const drag = 0.5 * 1.2 * Pp.cda * v * Math.abs(v);
+    const roll = (S.crr * m * G0 + (thr < 0.05 && brake < 0.05 ? m * 0.3 : 0)) * Math.sign(v);
+
+    // ---- curva: aderência lateral x força centrífuga ----
+    const lockV = Pp.steerLock / (1 + (v * v) / 260);
+    const target = inp.steer * lockV;
+    const rate = (inp.steer === 0 ? 2.4 : 1.4) / (1 + m / 60000);
+    const ds = target - this.steer;
+    this.steer += Math.sign(ds) * Math.min(Math.abs(ds), rate * dt);
+    const wb = this.model.wb;
+    const kWant = Math.tan(this.steer) / wb;
+    const aWant = v * v * Math.abs(kWant);
+    // atrito combinado: frear forte reduz a aderência lateral
+    const brakeUse = Math.min(1, Math.abs(F) / (mu * G0 * m + 1));
+    const aGrip = mu * G0 * 0.92 * Math.sqrt(Math.max(0.15, 1 - brakeUse * brakeUse));
+    let k = kWant;
+    let scrub = 0;
+    this.slip = 0;
+    if (aWant > aGrip && Math.abs(v) > 3) {
+      // sai de frente: a curva fica mais aberta e o pneu arrasta
+      const kMax = aGrip / (v * v);
+      k = Math.sign(kWant) * (kMax + (Math.abs(kWant) - kMax) * 0.12);
+      this.slip = Math.min(1, (aWant - aGrip) / aGrip);
+      scrub = m * Math.min(4, (aWant - aGrip) * 0.3);
+    }
+    const yawTarget = v * k;
+    this.yaw += (yawTarget - this.yaw) * (1 - Math.exp(-dt / Pp.yawTau));
+    // o pneu derrapando limita a força lateral (o vazio derrapa; o carregado alto tomba)
+    const aLat = Math.min(Math.abs(v * this.yaw), aGrip * 1.03);
+
+    // ---- líquido no tanque balança e empurra para fora ----
+    let aRollEff = aLat;
+    if (Pp.slosh) {
+      const w = 2.4, z = 0.12;
+      const aIn = v * this.yaw;
+      this.sloshV += (-w * w * this.slosh - 2 * z * w * this.sloshV + aIn) * dt;
+      this.slosh += this.sloshV * dt;
+      aRollEff = Math.min(Math.abs(aIn), aGrip * 1.03) + Math.abs(this.slosh * w * w * 0.35);
+    }
+    // ---- tombamento ----
+    this.tipRisk = aRollEff / Pp.aRoll;
+    if (this.tipRisk > 1) this.tip += dt * (this.tipRisk - 1) * 1.5;
+    else this.tip = Math.max(0, this.tip - dt * 1.8);
+    this.rollSide = Math.sign(v * this.yaw) || 1;
+    if (this.tip >= 1) {
+      this.rolled = 3;
+      this.tip = 1;
+      this.v = 0;
+      if (this.onRollover) this.onRollover();
+      this.sync();
+      return;
+    }
+
+    v += ((F + (Math.abs(v) > 0.2 || thr > 0 ? Fg : 0) - drag - Math.sign(v) * scrub) / m) * dt;
     const rollA = roll / m;
-    if (Math.abs(rollA * dt) > Math.abs(v) && F === 0) v = 0;
+    if (Math.abs(rollA * dt) > Math.abs(v) && Math.abs(F) < 1) v = 0;
     else v -= rollA * dt;
     const want = !drive ? 0 : !this.reverse ? (thr > 0 ? 1 : 0) : autoRev ? (brake > 0 ? -1 : 0) : (thr > 0 ? -1 : 0);
     if (v !== 0 && Math.sign(v) !== want && Math.sign(v) !== Math.sign(this.v)) v = 0;
@@ -938,39 +1070,45 @@ export class Rig {
     this.v = v;
     this.grade = grade;
 
-    const maxSteer = 0.6 / (1 + (v * v) / 160);
-    const target = inp.steer * maxSteer;
-    const rate = inp.steer === 0 ? 2.6 : 1.7;
-    const ds = target - this.steer;
-    this.steer += Math.sign(ds) * Math.min(Math.abs(ds), rate * dt);
-    const wb = this.model.wb;
-    const yaw = (v * Math.tan(this.steer)) / wb;
-    this.h += yaw * dt;
-    this.yaw = yaw;
+    this.h += this.yaw * dt;
     this.x += Math.sin(this.h) * v * dt;
     this.z += Math.cos(this.h) * v * dt;
 
+    // ---- carretas (articulação) ----
     if (this.trailer) {
       const hz = this.model.hitchZ;
-      const rel = this.h - this.th;
-      const dth = (v * Math.sin(rel) - hz * yaw * Math.cos(rel)) / this.trailer.Lk;
+      const rel = wrap(this.h - this.th);
+      let dth = (v * Math.sin(rel) - hz * this.yaw * Math.cos(rel)) / this.trailer.Lk;
+      // carreta escorrega (L) se frear forte em curva / lama
+      const aTr = Math.abs(v * dth);
+      if (aTr > mu * G0 * Pp.trailerMu && Math.abs(v) > 4) dth += Math.sign(rel || 1) * (aTr - mu * G0 * Pp.trailerMu) * 0.02;
+      const prevTh = this.th;
       this.th += dth * dt;
-      let r = this.h - this.th;
-      r = Math.atan2(Math.sin(r), Math.cos(r));
-      const lim = 1.3;
-      if (Math.abs(r) > lim) this.th = this.h - Math.sign(r) * lim;
+      let r = wrap(this.h - this.th);
+      if (Math.abs(r) > 1.3) this.th = this.h - Math.sign(r) * 1.3;
+      if (this.trailer2) {
+        const yaw1 = wrap(this.th - prevTh) / dt;
+        const va = v * Math.cos(rel);
+        const rel2 = wrap(this.th - this.th2);
+        const c = this.trailer.Lk + this.trailer.coupleZ; // engate à frente do eixo da 1ª carreta
+        const dth2 = (va * Math.sin(rel2) - c * yaw1 * Math.cos(rel2)) / this.trailer2.Lk;
+        this.th2 += dth2 * dt;
+        r = wrap(this.th - this.th2);
+        if (Math.abs(r) > 1.1) this.th2 = this.th - Math.sign(r) * 1.1;
+      }
     }
 
     this.collide(world, obstacles, dt);
 
-    this.wheelRot += (v * dt) / this.model.wr;
+    this.wheelRot += (v * dt) / this.model.wr * (1 + this.wheelspin * 2);
     const ratio = Math.abs(v) / vmax;
     const gear = Math.min(5, Math.floor(ratio * 6));
     const inGear = ratio * 6 - gear;
     this.gear = this.reverse ? 'R' : inp.gear === 'N' ? 'N' : Math.abs(v) < 0.3 ? (inp.gear === 'auto' ? 'N' : 'D') : String(gear + 1);
     const load = Math.max(thr, grade > 0.02 ? 0.7 : 0);
-    const rpmT = !this.engineOn ? 0 : Math.abs(v) < 0.3 || inp.gear === 'N' ? 0.18 + thr * 0.5 : 0.3 + inGear * 0.6 * (0.5 + load * 0.5);
+    const rpmT = !this.engineOn ? 0 : Math.abs(v) < 0.3 || inp.gear === 'N' ? 0.18 + thr * 0.5 : 0.3 + inGear * 0.6 * (0.5 + load * 0.5) + this.wheelspin * 0.3;
     this.rpm += (rpmT - this.rpm) * Math.min(1, dt * 6);
+    this.shake = S.shake * Math.min(1, Math.abs(v) / 12);
     this.sync();
   }
 
@@ -979,13 +1117,13 @@ export class Rig {
     const fx = Math.sin(this.h), fz = Math.cos(this.h);
     out.length = 0;
     for (const s of [md.zf - 0.9, (md.zf + md.rearEnd) / 2, md.rearEnd + 0.9]) out.push({ x: this.x + fx * s, z: this.z + fz * s, r: md.cabW / 2 + 0.1, t: false });
-    if (this.trailer) {
-      const hx = this.x + fx * md.hitchZ, hz = this.z + fz * md.hitchZ;
-      const tx = Math.sin(this.th), tz = Math.cos(this.th);
-      const tr = this.trailer;
+    const addTr = (tr, hx, hz, th) => {
+      const tx = Math.sin(th), tz = Math.cos(th);
       for (let s = tr.front - 1.2; s > tr.back + 0.5; s -= 2.4) out.push({ x: hx + tx * s, z: hz + tz * s, r: 1.35, t: true });
       out.push({ x: hx + tx * (tr.back + 1.3), z: hz + tz * (tr.back + 1.3), r: 1.35, t: true });
-    }
+    };
+    if (this.trailer) addTr(this.trailer, this.x + fx * md.hitchZ, this.z + fz * md.hitchZ, this.th);
+    if (this.trailer2) { const c = this.couple({}); addTr(this.trailer2, c.x, c.z, this.th2); }
     return out;
   }
 
@@ -1034,8 +1172,11 @@ export class Rig {
     }
     this.y = yr;
     this.pitch = Math.atan2(yf - yr, md.wb);
+    // rolagem da carroceria pela força lateral e tombamento
+    const rollVis = this.rolled > 0 ? 1.45 * Math.min(1, (3 - this.rolled) * 2.5) : clamp((this.tipRisk || 0) * 0.07, 0, 0.12) + this.tip * 0.35;
+    const rs = this.rollSide || 1;
     md.root.position.set(this.x, yr, this.z);
-    md.root.rotation.set(-this.pitch, this.h, 0);
+    md.root.rotation.set(-this.pitch, this.h, -rs * rollVis * 0.6);
     for (let i = 0; i < md.front.length; i++) {
       const w = md.front[i];
       w.rotation.y = this.steer * (i < 2 ? 1 : 0.6);
@@ -1043,19 +1184,28 @@ export class Rig {
     }
     for (const a of md.rear) a.rotation.x = this.wheelRot;
     const lat = (this.yaw || 0) * this.v;
-    md.body.rotation.z += (Math.max(-0.05, Math.min(0.05, -lat * 0.012)) - md.body.rotation.z) * 0.2;
-    md.body.rotation.x += (Math.max(-0.03, Math.min(0.03, -this.acc * 0.006)) - md.body.rotation.x) * 0.2;
-    if (this.trailer) {
-      const tr = this.trailer;
-      const hx = this.x + fx * md.hitchZ, hz = this.z + fz * md.hitchZ;
-      const yh = yr + (yf - yr) * (md.hitchZ / md.wb);
-      const ax = hx - Math.sin(this.th) * tr.Lk, az = hz - Math.cos(this.th) * tr.Lk;
+    md.body.rotation.z += (clamp(-lat * 0.01, -0.06, 0.06) - md.body.rotation.z) * 0.2;
+    md.body.rotation.x += (clamp(-this.acc * 0.006, -0.03, 0.03) - md.body.rotation.x) * 0.2;
+    const placeTr = (tr, hx, hz, hy, th, key) => {
+      const ax = hx - Math.sin(th) * tr.Lk, az = hz - Math.cos(th) * tr.Lk;
       const ya = W ? W.heightAt(ax, az) : 0;
-      this.tpitch = Math.atan2(yh - ya, tr.Lk);
-      tr.root.position.set(hx, yh, hz);
-      tr.root.rotation.set(-this.tpitch, this.th, 0);
+      const tp = Math.atan2(hy - ya, tr.Lk);
+      this[key] = tp;
+      tr.root.position.set(hx, hy, hz);
+      tr.root.rotation.set(-tp, th, -rs * rollVis);
       const rot = this.wheelRot * (md.wr / 0.5);
       for (const a of tr.axles) a.rotation.x = rot;
+      return { ya, tp };
+    };
+    if (this.trailer) {
+      const hx = this.x + fx * md.hitchZ, hz = this.z + fz * md.hitchZ;
+      const yh = yr + (yf - yr) * (md.hitchZ / md.wb);
+      const r1 = placeTr(this.trailer, hx, hz, yh, this.th, 'tpitch');
+      if (this.trailer2) {
+        const c = this.couple({});
+        const yc = yh + (r1.ya - yh) * ((-this.trailer.coupleZ) / this.trailer.Lk);
+        placeTr(this.trailer2, c.x, c.z, yc, this.th2, 'tpitch2');
+      }
     }
   }
 }

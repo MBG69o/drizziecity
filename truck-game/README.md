@@ -20,6 +20,15 @@ Faça entregas pela cidade, suba de nível, compre caminhões mais fortes e libe
 3. Leve a carga até o **destino** antes do prazo. Batidas avariam a carga e reduzem o pagamento.
 4. Ganhe dinheiro + XP, suba de nível e compre caminhões na **Garagem 🚚**.
 
+### Física
+
+* Cada caminhão tem bitola, altura do centro de gravidade, tração (4x2, 6x2, 6x4, 8x4), aderência dos pneus,
+  esterçamento e inércia próprios; cada carreta/carga muda massa e centro de gravidade (contêiner e
+  transformador altos, bobinas baixas, tanque com líquido que balança).
+* Curva rápida demais: o caminhão **sai de frente** (derrapa e perde velocidade) ou, se a carga for alta,
+  **tomba** — com aviso de risco no painel. Tração e frenagem limitadas pelo piso (na lama o 6x2 carregado patina).
+* **Bitrem**: duas carretas articuladas (soja, toras e combustível — até 50 t), exige cavalo 6x4 ou 8x4.
+
 ### Progressão
 
 * **19 tipos de carga**: encomendas (1 t), medicamentos, eletrônicos, hortifrúti, móveis, bebidas, ração,
@@ -35,6 +44,12 @@ Faça entregas pela cidade, suba de nível, compre caminhões mais fortes e libe
 * Bônus por entrega no prazo, multa por atraso, avarias, 30 níveis, estatísticas e salvamento automático.
 
 ## Mundo
+
+* **Terreno contínuo** com serras, vales e colinas (ruído fractal), encostas rochosas, vale do rio escavado e
+  litoral descendo ao mar; as estradas acompanham o relevo com rampa máxima, cortes e aterros.
+* **Tipos de estrada**: asfalto (rodovias), **calçamento** (ruas de Vila Serrana e Monte Alto), **cascalho**
+  (Estrada da Olaria), **terra** (Estrada do Café) e **lama** (Trilha do Rio Escuro) — cada piso com aderência,
+  resistência ao rolamento e trepidação próprias.
 
 * **4 cidades** — Drizzie City (metrópole), Vila Serrana (interior), Porto Azul (litoral com porto) e Monte Alto
   (serra, com mineradora e vinícola, pela BR-040).

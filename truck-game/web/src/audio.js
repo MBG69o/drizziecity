@@ -131,6 +131,22 @@ export class Audio {
     s.start();
   }
 
+  // chiado de pneu ao derrapar
+  screech(level) {
+    if (!this.ctx) return;
+    if (!this.scr) {
+      const ctx = this.ctx, len = ctx.sampleRate;
+      const buf = ctx.createBuffer(1, len, ctx.sampleRate), d = buf.getChannelData(0);
+      for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+      const src = ctx.createBufferSource(); src.buffer = buf; src.loop = true;
+      const f = ctx.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 2400; f.Q.value = 6;
+      const g = ctx.createGain(); g.gain.value = 0;
+      src.connect(f).connect(g).connect(this.master); src.start();
+      this.scr = g;
+    }
+    this.scr.gain.setTargetAtTime(level * 0.22, this.ctx.currentTime, 0.08);
+  }
+
   starter() {
     if (!this.ctx) return;
     const ctx = this.ctx, t = ctx.currentTime;

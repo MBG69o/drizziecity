@@ -1,6 +1,6 @@
 // Drizzie Truck — núcleo do jogo: renderização, controles, fretes, progressão e HUD.
 import * as THREE from 'three';
-import { BLOCK, ROAD_W, HW_HALF, CITIES, cx1, cz1, zoneOf, LOCATIONS, LOC, TRUCKS, TRUCK, CARGOS, CARGO, xpForLevel, MAX_LEVEL, WORLD, SEA_Z, RIVER_W } from './data.js';
+import { SURFACES, BLOCK, ROAD_W, HW_HALF, CITIES, cx1, cz1, zoneOf, LOCATIONS, LOC, TRUCKS, TRUCK, CARGOS, CARGO, xpForLevel, MAX_LEVEL, WORLD, SEA_Z, RIVER_W } from './data.js';
 import { configureTextures, tex } from './textures.js';
 import { World } from './world.js';
 import { Rig, setTruckQuality, MODELS } from './truck.js';
@@ -43,9 +43,9 @@ function save() {
 
 // ---------------- Qualidade gráfica ----------------
 const QUALITY = {
-  low: { pr: 1.0, minPr: 0.75, shadows: false, shadowSize: 0, tex: 512, aniso: 2, traffic: 10, fogNear: 150, fogFar: 650, far: 900, trees: 5000 },
-  medium: { pr: 1.5, minPr: 0.85, shadows: true, shadowSize: 1024, tex: 1024, aniso: 4, traffic: 16, fogNear: 260, fogFar: 1050, far: 1500, trees: 9000 },
-  high: { pr: 2.0, minPr: 1.0, shadows: true, shadowSize: 2048, tex: 1024, aniso: 8, traffic: 22, fogNear: 380, fogFar: 1600, far: 2600, trees: 14000 },
+  low: { pr: 1.0, minPr: 0.75, shadows: false, shadowSize: 0, tex: 512, aniso: 2, traffic: 10, fogNear: 150, fogFar: 650, far: 900, trees: 5000, terrainStep: 34 },
+  medium: { pr: 1.5, minPr: 0.85, shadows: true, shadowSize: 1024, tex: 1024, aniso: 4, traffic: 16, fogNear: 260, fogFar: 1050, far: 1500, trees: 9000, terrainStep: 26 },
+  high: { pr: 2.0, minPr: 1.0, shadows: true, shadowSize: 2048, tex: 1024, aniso: 8, traffic: 22, fogNear: 380, fogFar: 1600, far: 2600, trees: 14000, terrainStep: 20 },
 };
 function detectQuality() {
   let r = '';
@@ -157,6 +157,15 @@ async function boot() {
     rig.onModel(rig.model);
   }
   placeAtStart();
+  rig.onRollover = () => {
+    audio.crash(60);
+    S.stats.crashes++;
+    if (navigator.vibrate) try { navigator.vibrate([200, 80, 300]); } catch (e) { /* */ }
+    let msg = '💥 O caminhão TOMBOU! Curva rápida demais para a carga.';
+    if (S.job && S.job.phase === 'deliver') { S.job.damage = Math.min(100, S.job.damage + 55); msg += ' Carga avariada +55%'; }
+    toast(msg, 4200);
+    setTimeout(() => { rescue(); toast('Guincho: caminhão desvirado e recolocado na via', 2600); }, 3000);
+  };
   traffic = new Traffic(scene, Q.traffic, world);
   buildMarkers();
   await step(85, 'Desenhando o mapa…');
@@ -281,6 +290,7 @@ function titleCamera(dt) {
   camera.updateProjectionMatrix();
   if (Q.shadows) { sun.target.position.set(rig.x, 0, rig.z); sun.position.set(rig.x + 150, 170, rig.z + 95); }
   sky.position.copy(camera.position);
+  if (mountains) mountains.position.y = -camera.position.y - 4;
 }
 
 // cordilheira no horizonte (acompanha o céu; tingida pela névoa)
@@ -304,7 +314,7 @@ function buildMountains() {
     const P = (a, h) => [Math.cos(a) * R, h - R * 0.01, Math.sin(a) * R];
     const b0 = P(a0, 0), b1 = P(a1, 0), t0 = P(a0, h0), t1 = P(a1, h1);
     pos.push(...b0, ...b1, ...t1, ...b0, ...t1, ...t0);
-    const cb = forest, ct0 = h0 > R * 0.12 ? snow : rock, ct1 = h1 > R * 0.12 ? snow : rock;
+    const cb = forest, ct0 = rock, ct1 = rock;
     col.push(cb.r, cb.g, cb.b, cb.r, cb.g, cb.b, ct1.r, ct1.g, ct1.b, cb.r, cb.g, cb.b, ct1.r, ct1.g, ct1.b, ct0.r, ct0.g, ct0.b);
   }
   const g = new THREE.BufferGeometry();
@@ -432,6 +442,7 @@ function lockReason(j, def = rig.def) {
   if (c.lvl > S.level) return `Requer nível ${c.lvl}`;
   if (c.t > def.cap) return `Caminhão fraco (máx. ${def.cap} t)`;
   if (def.rigid && c.trailer !== 'box') return 'Requer cavalo mecânico';
+  if (c.trailer === 'bitrem' && (def.axles < 3 || def.drive < 0.45)) return 'Bitrem exige cavalo com tração 6x4 ou 8x4';
   return null;
 }
 const canTake = (j) => !lockReason(j);
@@ -762,7 +773,7 @@ function updateCamera(dt, instant = false) {
     camera.lookAt(ex + lx * 20, rig.y + 2.0 + Math.sin(rig.pitch) * 20, ez + lz * 20);
     camera.fov = 70;
   } else {
-    const len = rig.trailer ? rig.trailer.Lt : 0;
+    const len = rig.trainLength;
     const tl = md.zf - md.rearEnd; // comprimento do caminhão
     let dist = (cam.mode === 0 ? 3.5 + tl : 12 + tl * 1.2) + len * (cam.mode === 0 ? 0.75 : 1.1);
     const hgt = (cam.mode === 0 ? 2.2 + tl * 0.3 : 9 + tl * 0.7) + len * (cam.mode === 0 ? 0.18 : 0.4);
@@ -782,6 +793,7 @@ function updateCamera(dt, instant = false) {
     const ty = rig.y + hgt;
     cam.pos.y += (ty - cam.pos.y) * kp;
     camera.position.copy(cam.pos);
+    if (rig.shake) { camera.position.x += (Math.random() - 0.5) * rig.shake; camera.position.y += (Math.random() - 0.5) * rig.shake; }
     camera.lookAt(px, rig.y + (cam.mode === 1 ? 1.5 : 1.3), pz);
     camera.fov = 58 + Math.min(8, rig.speedKmh * 0.08);
   }
@@ -792,13 +804,14 @@ function updateCamera(dt, instant = false) {
     sun.position.set(rig.x + 150, 170, rig.z + 95);
   }
   sky.position.copy(camera.position);
+  if (mountains) mountains.position.y = -camera.position.y - 4;
 }
 
 // ---------------- Mapa ----------------
 let MP = null; // camadas vetoriais do mapa (coordenadas do mundo)
 function buildMapCanvas() {
   const P = () => new Path2D();
-  MP = { blocks: {}, lots: P(), roads: P(), hw: P(), river: P(), fields: P(), hills: P() };
+  MP = { blocks: {}, lots: P(), roads: P(), hw: P(), dirt: P(), river: P(), fields: P(), hills: P() };
   const zc = { downtown: '#8b95a3', residential: '#a8a294', town: '#b4ab98', park: '#4f8a3a', industrial: '#8d8473', port: '#7b8790' };
   for (const c of CITIES) {
     for (let bx = 0; bx < c.nx; bx++)
@@ -810,7 +823,7 @@ function buildMapCanvas() {
     for (let j = 0; j <= c.nz; j++) { MP.roads.moveTo(c.x0, c.z0 + j * BLOCK); MP.roads.lineTo(cx1(c), c.z0 + j * BLOCK); }
   }
   for (const L of LOCATIONS) { const [x0, z0, x1, z1] = world.depots[L.id].lot; MP.lots.rect(x0, z0, x1 - x0, z1 - z0); }
-  for (const h of world.hws) { MP.hw.moveTo(h.x[0], h.z[0]); for (let i = 1; i < h.n; i += 2) MP.hw.lineTo(h.x[i], h.z[i]); MP.hw.lineTo(h.x[h.n - 1], h.z[h.n - 1]); }
+  for (const h of world.hws) { const pth = h.surface === 'asphalt' ? MP.hw : MP.dirt; pth.moveTo(h.x[0], h.z[0]); for (let i = 1; i < h.n; i += 2) pth.lineTo(h.x[i], h.z[i]); pth.lineTo(h.x[h.n - 1], h.z[h.n - 1]); }
   const R = world.river;
   MP.river.moveTo(R.x[0], R.z[0]);
   for (let i = 1; i < R.n; i++) MP.river.lineTo(R.x[i], R.z[i]);
@@ -832,6 +845,7 @@ function drawWorldMap(ctx, k) {
   ctx.lineCap = 'round';
   ctx.strokeStyle = '#1d1f22'; ctx.lineWidth = Math.max(HW_HALF * 2 + 4, 4.5 / k); ctx.stroke(MP.hw);
   ctx.strokeStyle = '#4a4d52'; ctx.lineWidth = Math.max(HW_HALF * 2, 3 / k); ctx.stroke(MP.hw);
+  ctx.strokeStyle = '#8a6a44'; ctx.lineWidth = Math.max(11, 2.6 / k); ctx.setLineDash([24, 10]); ctx.stroke(MP.dirt); ctx.setLineDash([]);
 }
 
 function mapIcon(ctx, x, y, color, r) {
@@ -1270,7 +1284,16 @@ function updateHUD(dt) {
   $('money').textContent = fmt(S.money);
   const need = xpForLevel(S.level);
   $('xpbar').style.width = (S.level >= MAX_LEVEL ? 100 : (S.xp / need) * 100) + '%';
-  $('ic-load').textContent = `${(rig.mass / 1000).toFixed(1)} t`;
+  $('ic-load').textContent = `${(rig.mass / 1000).toFixed(1)} t • ${SURFACES[rig.surface] ? SURFACES[rig.surface].name : ''}`;
+  const pw = $('physwarn');
+  let w = '';
+  if (rig.rolled > 0) w = '<b class="r">TOMBOU</b>';
+  else if ((rig.tipRisk > 0.75 || rig.tip > 0.05) && rig.speedKmh > 12) w = '<b class="r">⚠ RISCO DE TOMBAMENTO — reduza!</b>';
+  else if (rig.slip > 0.08) w = '<b class="o">DERRAPANDO — curva rápida demais</b>';
+  else if (rig.wheelspin > 0.25) w = '<b class="o">PATINANDO — pouca tração no piso</b>';
+  pw.innerHTML = w;
+  pw.classList.toggle('hidden', !w);
+  audio.screech(rig.slip > 0.08 ? Math.min(1, rig.slip * 2) : 0);
   $('ic-light').classList.toggle('on', rig.lightsOn);
   $('lightsbtn').classList.toggle('on', rig.lightsOn);
   $('ic-hand').classList.toggle('on', ctl.hand);
@@ -1419,6 +1442,6 @@ window.addEventListener('error', (e) => {
 });
 
 // Expõe ganchos para testes automatizados
-window.__game = { TRUCK, CARGO, get scene() { return scene; }, get sun() { return sun; }, get renderer() { return renderer; }, S, get rig() { return rig; }, get state() { return state; }, ctl, acceptJob: (i) => acceptJob(i), get jobs() { return jobs; }, world: () => world, cam };
+window.__game = { makeCam: (x, y, z, tx, ty, tz) => { const c = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 1, Q.far); c.position.set(x, y, z); c.lookAt(tx, ty, tz); sky.position.copy(c.position); mountains.position.y = -y - 4; return c; }, TRUCK, CARGO, get scene() { return scene; }, get sun() { return sun; }, get renderer() { return renderer; }, S, get rig() { return rig; }, get state() { return state; }, ctl, acceptJob: (i) => acceptJob(i), get jobs() { return jobs; }, world: () => world, cam };
 
 boot().catch((e) => { $("loadmsg").textContent = "Erro ao iniciar: " + e.message; console.error(e); });

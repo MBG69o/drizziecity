@@ -139,7 +139,7 @@ export class Traffic {
     car.mode = null;
     const q = this.world.hw(px, pz);
     const city = CITIES.find((c) => px > c.x0 - 350 && px < cx1(c) + 350 && pz > c.z0 - 350 && pz < cz1(c) + 350);
-    if (q && (!city || Math.random() < 0.45)) {
+    if (q && q.o.surface === 'asphalt' && (!city || Math.random() < 0.45)) {
       const h = q.o;
       const sp = h.s[q.i];
       const s = sp + (Math.random() < 0.5 ? -1 : 1) * (140 + Math.random() * 320);

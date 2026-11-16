@@ -1,7 +1,7 @@
 // Rodovias em spline (curvas suaves), perfil de elevação (morros e pontes)
 // e índice espacial para consultas rápidas (colisão, altura, rota, tráfego).
 import * as THREE from 'three';
-import { HIGHWAYS, RIVER, RIVER_W, HW_HALF, LOCATIONS } from './data.js';
+import { HIGHWAYS, RIVER, RIVER_W } from './data.js';
 
 const smooth = (t) => (t <= 0 ? 0 : t >= 1 ? 1 : t * t * (3 - 2 * t));
 
@@ -70,9 +70,11 @@ export class River {
 }
 
 export class Highway {
-  constructor(def, river) {
+  constructor(def, river, terrain, parents) {
     this.def = def;
     this.id = def.id;
+    this.half = def.half;
+    this.surface = def.surface;
     const { x, z } = sampleCurve(def.pts, 4);
     const n = (this.n = x.length);
     this.x = x; this.z = z;
@@ -87,32 +89,47 @@ export class Highway {
       const vx = x[b] - x[a], vz = z[b] - z[a], l = Math.hypot(vx, vz) || 1;
       this.dx[i] = vx / l; this.dz[i] = vz / l;
     }
-    // perfil de elevação: pontes sobre o rio + morros suaves
-    const lots = LOCATIONS.filter((L) => L.hw === def.id).map((L) => [(L.lot[0] + L.lot[2]) / 2, (L.lot[1] + L.lot[3]) / 2]);
+    // ---- perfil: acompanha o relevo, com rampa máxima, pontes sobre o rio ----
     const raw = new Float32Array(n);
     this.bridge = new Uint8Array(n);
-    const BR = 7.5;
-    for (let i = 0; i < n; i++) {
-      const dr = river.dist(x[i], z[i]);
-      const over = dr < RIVER_W / 2 + 14;
-      if (over) this.bridge[i] = 1;
-      const yb = BR * smooth(1 - (dr - (RIVER_W / 2 + 22)) / 150);
-      let mask = smooth(Math.min(this.s[i], this.length - this.s[i]) / 220 - 0.3);
-      for (const [lx, lz] of lots) mask = Math.min(mask, smooth((Math.hypot(x[i] - lx, z[i] - lz) - 110) / 160));
-      const hs = this.s[i];
-      const yh = (def.hills || 0) * mask * (0.55 * Math.pow(Math.sin(hs / 260), 2) + 0.45 * Math.pow(Math.sin(hs / 610 + 1.3), 2));
-      raw[i] = Math.max(yb, yh);
-    }
-    // suaviza
+    for (let i = 0; i < n; i++) raw[i] = terrain.raw(x[i], z[i]);
+    const y = this.y;
     for (let i = 0; i < n; i++) {
       let acc = 0, w = 0;
-      for (let k = -8; k <= 8; k++) {
-        const j = Math.min(n - 1, Math.max(0, i + k));
-        acc += raw[j]; w++;
-      }
-      this.y[i] = this.bridge[i] ? Math.max(BR, acc / w) : acc / w;
+      for (let k = -14; k <= 14; k++) { acc += raw[Math.min(n - 1, Math.max(0, i + k))]; w++; }
+      y[i] = acc / w;
     }
-    this.y[0] = this.y[n - 1] = 0;
+    const g = this.surface === 'asphalt' ? 0.06 : 0.1; // rampa máxima
+    let y0 = 0;
+    if (def.from && def.from[0] === 'hw') {
+      const p = parents.find((h) => h.id === def.from[1]);
+      y0 = p ? p.yAt(x[0], z[0]) : 0;
+      this.parent = p;
+    }
+    const limit = () => {
+      y[0] = y0;
+      for (let i = 1; i < n; i++) { const d = (this.s[i] - this.s[i - 1]) * g; y[i] = Math.min(y[i - 1] + d, Math.max(y[i - 1] - d, y[i])); }
+      y[n - 1] = 0;
+      for (let i = n - 2; i >= 0; i--) { const d = (this.s[i + 1] - this.s[i]) * g; y[i] = Math.min(y[i + 1] + d, Math.max(y[i + 1] - d, y[i])); }
+    };
+    limit();
+    // pontes: vão livre sobre o rio e rampas de acesso
+    const BR = 7.5;
+    for (let i = 0; i < n; i++) if (river.dist(x[i], z[i]) < RIVER_W / 2 + 16) { this.bridge[i] = 1; y[i] = Math.max(y[i], BR); }
+    for (let i = 1; i < n; i++) y[i] = Math.max(y[i], y[i - 1] - (this.s[i] - this.s[i - 1]) * g);
+    for (let i = n - 2; i >= 0; i--) y[i] = Math.max(y[i], y[i + 1] - (this.s[i + 1] - this.s[i]) * g);
+    y[0] = y0; y[n - 1] = 0;
+    // suavização final (sem mexer nas pontas)
+    const t = Float32Array.from(y);
+    for (let i = 3; i < n - 3; i++) y[i] = (t[i - 3] + t[i - 2] + t[i - 1] + t[i] + t[i + 1] + t[i + 2] + t[i + 3]) / 7;
+    for (let i = 0; i < n; i++) if (this.bridge[i]) y[i] = Math.max(y[i], BR);
+  }
+
+  // altura da pista no ponto mais próximo
+  yAt(px, pz) {
+    let best = 0, bd = Infinity;
+    for (let i = 0; i < this.n; i++) { const d = (this.x[i] - px) ** 2 + (this.z[i] - pz) ** 2; if (d < bd) { bd = d; best = i; } }
+    return this.y[best];
   }
 
   // posição ao longo da rodovia (s em metros)
@@ -131,9 +148,9 @@ export class Highway {
   }
 }
 
-export function buildHighways() {
-  const river = new River();
-  const hws = HIGHWAYS.map((d) => new Highway(d, river));
+export function buildHighways(terrain, river) {
+  const hws = [];
+  for (const d of HIGHWAYS) hws.push(new Highway(d, river, terrain, hws));
   const idx = new PolyIndex(80, 40);
   for (const h of hws) idx.addSegments(h, h.x, h.z);
   return { river, hws, idx };

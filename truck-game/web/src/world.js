@@ -2,8 +2,9 @@
 import * as THREE from 'three';
 import { Builder, mat, G } from './geo.js';
 import { tex } from './textures.js';
-import { BLOCK, ROAD_W, HW_HALF, CITIES, CITY, cx1, cz1, zoneOf, LOCATIONS, RIVER_W, SEA_Z, WORLD } from './data.js';
-import { buildHighways } from './highway.js';
+import { BLOCK, ROAD_W, HW_HALF, CITIES, CITY, cx1, cz1, zoneOf, LOCATIONS, RIVER_W, SEA_Z, WORLD, SURFACES } from './data.js';
+import { buildHighways, River } from './highway.js';
+import { Terrain } from './terrain.js';
 
 const RH = ROAD_W / 2;
 
@@ -37,7 +38,10 @@ export class World {
     this.areas = []; // regiões trafegáveis (cidades, pátios, trevos)
     this.hills = [];
     this.fields = [];
-    const H = buildHighways();
+    const river = new River();
+    this.terrain = new Terrain(river);
+    const H = buildHighways(this.terrain, river);
+    this.terrain.setRoads(H.hws);
     this.river = H.river;
     this.hws = H.hws;
     this.hwIdx = H.idx;
@@ -62,17 +66,31 @@ export class World {
   hw(x, z) { return this.hwIdx.nearest(x, z, this._q); }
 
   inArea(x, z, r) {
-    for (const a of this.areas) if (x >= a.x0 + r && x <= a.x1 - r && z >= a.z0 + r && z <= a.z1 - r) return a;
+    for (const a of this.areas) {
+      if (a.circle) { if ((x - a.x) ** 2 + (z - a.z) ** 2 <= (a.r - r) ** 2) return a; continue; }
+      if (x >= a.x0 + r && x <= a.x1 - r && z >= a.z0 + r && z <= a.z1 - r) return a;
+    }
     return null;
   }
 
-  // altura do piso (rodovias têm aclives e pontes)
+  // altura do piso (rodovias acompanham o relevo e têm pontes)
   heightAt(x, z) {
-    for (const a of this.areas) if (x >= a.x0 && x <= a.x1 && z >= a.z0 && z <= a.z1) return 0;
+    for (const a of this.areas) if (!a.circle && x >= a.x0 && x <= a.x1 && z >= a.z0 && z <= a.z1) return 0;
     const q = this.hw(x, z);
-    if (!q || q.d > HW_HALF + 3) return 0;
+    if (!q || q.d > q.o.half + 3) return this.terrain.meshHeight(x, z);
     const h = q.o;
     return h.y[q.i] + (h.y[q.i + 1] - h.y[q.i]) * q.t;
+  }
+
+  // tipo de piso sob o ponto (aderência e resistência ao rolamento)
+  surfaceAt(x, z) {
+    for (const a of this.areas) {
+      if (a.circle) continue;
+      if (x >= a.x0 && x <= a.x1 && z >= a.z0 && z <= a.z1) return a.city ? (a.city.surface || 'asphalt') : a.lot ? 'concrete' : 'asphalt';
+    }
+    const q = this.hw(x, z);
+    if (q && q.d < q.o.half + 2) return q.o.surface;
+    return 'dirt';
   }
 
   // Empurra um círculo para dentro das áreas trafegáveis e para fora de prédios
@@ -81,7 +99,7 @@ export class World {
     out.x = 0; out.z = 0;
     if (!buildingsOnly && !this.inArea(p.x, p.z, r)) {
       const q = this.hw(p.x, p.z);
-      const lim = HW_HALF - r * 0.8;
+      const lim = (q ? q.o.half : HW_HALF) - r * 0.8;
       if (!q || q.d > lim) {
         let bx = p.x, bz = p.z, bd = Infinity;
         if (q) {
@@ -90,6 +108,11 @@ export class World {
           bd = Math.hypot(p.x - bx, p.z - bz);
         }
         for (const a of this.areas) {
+          if (a.circle) {
+            const d = Math.hypot(p.x - a.x, p.z - a.z);
+            if (d < a.r + 40) { const k = Math.max(0, a.r - r) / (d || 1); const cx = a.x + (p.x - a.x) * Math.min(1, k), cz = a.z + (p.z - a.z) * Math.min(1, k); const dd = Math.hypot(p.x - cx, p.z - cz); if (dd < bd) { bd = dd; bx = cx; bz = cz; } }
+            continue;
+          }
           if (p.x < a.x0 - 60 || p.x > a.x1 + 60 || p.z < a.z0 - 60 || p.z > a.z1 + 60) continue;
           const cx = Math.max(a.x0 + r, Math.min(p.x, a.x1 - r)), cz = Math.max(a.z0 + r, Math.min(p.z, a.z1 - r));
           const d = Math.hypot(p.x - cx, p.z - cz);
@@ -129,21 +152,19 @@ export class World {
   }
 
   terrainH(x, z) {
-    let y = 0;
-    for (const h of this.hills) {
-      const d2 = ((x - h.x) ** 2 + (z - h.z) ** 2) / (h.r * h.r);
-      if (d2 < 1) y = Math.max(y, h.h * Math.sqrt(1 - d2) - 3);
-    }
-    return y;
+    return this.terrain.meshHeight(x, z);
   }
 
   // local livre de rodovias, rio, cidades, pátios, campos e mar?
   isFree(x, z, m) {
     if (z > SEA_Z - 40) return false;
     const q = this.hw(x, z);
-    if (q && q.d < HW_HALF + 6 + q.o.y[q.i] * 1.9 + m) return false;
+    if (q && q.d < q.o.half + 8 + m) return false;
     if (this.river.dist(x, z) < RIVER_W / 2 + 12 + m) return false;
-    for (const a of this.areas) if (x > a.x0 - 25 - m && x < a.x1 + 25 + m && z > a.z0 - 25 - m && z < a.z1 + 25 + m) return false;
+    for (const a of this.areas) {
+      if (a.circle) { if (Math.hypot(x - a.x, z - a.z) < a.r + 10 + m) return false; continue; }
+      if (x > a.x0 - 25 - m && x < a.x1 + 25 + m && z > a.z0 - 25 - m && z < a.z1 + 25 + m) return false;
+    }
     for (const f of this.fields) if (x > f.x0 - m && x < f.x1 + m && z > f.z0 - m && z < f.z1 + m) return false;
     return true;
   }
@@ -155,6 +176,9 @@ export class World {
       grass: lam(tex.grass(), { vertexColors: true, side: THREE.DoubleSide, color: 0xc9d2b2 }),
       road: lam(tex.road()),
       hwy: lam(tex.highway()),
+      dirt: lam(tex.surface('dirt')), mud: new THREE.MeshPhongMaterial({ map: tex.surface('mud'), shininess: 60, specular: 0x333322 }),
+      gravel: lam(tex.surface('gravel')), cobble: lam(tex.surface('cobble')), cobbleI: lam(tex.surface('cobble')),
+      terrain: new THREE.MeshLambertMaterial({ map: tex.grass(), vertexColors: true, color: 0xd6d8c4 }),
       inter: lam(tex.intersection()),
       concrete: lam(tex.concrete()),
       bridge: lam(tex.concrete(), { side: THREE.DoubleSide }),
@@ -172,7 +196,7 @@ export class World {
     };
     this.M = M;
     const B = {
-      grass: new Builder(true), road: new Builder(), hwy: new Builder(), inter: new Builder(), concrete: new Builder(), bridge: new Builder(),
+      grass: new Builder(true), road: new Builder(), hwy: new Builder(), dirt: new Builder(), mud: new Builder(), gravel: new Builder(), cobble: new Builder(), cobbleI: new Builder(), inter: new Builder(), concrete: new Builder(), bridge: new Builder(),
       lot: new Builder(), field: new Builder(true), sand: new Builder(), roof: new Builder(), tiles: new Builder(),
       wh: new Builder(true), f: [new Builder(), new Builder(), new Builder(), new Builder()],
       flat: new Builder(true), metal: new Builder(true), cont: new Builder(true),
@@ -188,7 +212,7 @@ export class World {
     for (const c of CITIES) this.areas.push({ x0: c.x0 - RH, z0: c.z0 - RH, x1: cx1(c) + RH, z1: cz1(c) + RH, city: c });
     for (const h of this.hws) {
       for (const end of [h.def.from, h.def.to]) {
-        if (!end) continue;
+        if (!end || end[0] === 'hw') continue;
         const c = CITY[end[0]];
         const x = c.x0 + end[1] * BLOCK, z = c.z0 + end[2] * BLOCK;
         this.areas.push({ x0: x - 22, z0: z - 22, x1: x + 22, z1: z + 22, pad: true });
@@ -196,14 +220,21 @@ export class World {
       }
     }
     for (const L of LOCATIONS) if (L.lot) this.areas.push({ x0: L.lot[0], z0: L.lot[1], x1: L.lot[2], z1: L.lot[3], lot: L.id });
+    // entroncamentos de estradas secundárias: área circular para manobrar
+    for (const h of this.hws) if (h.def.from && h.def.from[0] === 'hw') this.areas.push({ circle: true, x: h.x[0], z: h.z[0], r: 20 });
 
+    this.terrain.build(this.scene, M.terrain, this.q.terrainStep || 24);
     this.layoutCountry();
-    this.buildGround();
+    this.buildFields();
     for (const c of CITIES) this.buildCity(c);
     for (const L of LOCATIONS) if (L.lot) this.buildDepot(L, ...L.lot);
     for (const h of this.hws) this.buildHighway(h);
     this.buildRiverAndSea();
-    this.buildHills();
+    for (let i = 0; i < 14; i++) {
+      const x = 500 + this.r() * 1500, z = -900 + this.r() * 700;
+      const y = this.terrainH(x, z);
+      if (this.isFree(x, z, 20) && y > 8) this.turbine(x, z, 50, 1, y - 1);
+    }
     this.scatterForest();
 
     const add = (b, m, cast = false) => {
@@ -211,7 +242,7 @@ export class World {
       if (mesh) this.scene.add(mesh);
       return mesh;
     };
-    add(B.grass, M.grass); add(B.road, M.road); add(B.hwy, M.hwy); add(B.inter, M.inter); add(B.concrete, M.concrete, true);
+    add(B.grass, M.grass); add(B.road, M.road); add(B.hwy, M.hwy); add(B.dirt, M.dirt); add(B.mud, M.mud); add(B.gravel, M.gravel); add(B.cobble, M.cobble); add(B.cobbleI, M.cobbleI); add(B.inter, M.inter); add(B.concrete, M.concrete, true);
     add(B.bridge, M.bridge, true); add(B.lot, M.lot); add(B.field, M.field); add(B.sand, M.sand); add(B.roof, M.roof);
     add(B.tiles, M.tiles, true); add(B.wh, M.wh, true); add(B.flat, M.flat, true);
     add(B.metal, M.metal, true); add(B.cont, M.cont, true);
@@ -231,56 +262,36 @@ export class World {
 
   layoutCountry() {
     const r = this.r;
-    for (let i = 0; i < 900 && this.hills.length < 46; i++) {
-      const x = WORLD.x0 - 300 + r() * (WORLD.x1 - WORLD.x0 + 600), z = WORLD.z0 - 300 + r() * (WORLD.z1 - WORLD.z0 + 300);
-      const rad = 120 + r() * 260, h = 30 + r() * 110;
-      // o morro (com taludes) não pode encostar em rodovia, rio, cidade, pátio ou mar
-      if (z + rad > SEA_Z - 60) continue;
-      if (this.hwDistFar(x, z) < rad * 1.2 + HW_HALF + 35) continue;
-      if (this.river.dist(x, z) < rad + RIVER_W) continue;
-      if (this.areas.some((a) => x + rad > a.x0 - 40 && x - rad < a.x1 + 40 && z + rad > a.z0 - 40 && z - rad < a.z1 + 40)) continue;
-      let riverNear = false;
-      for (let k = 0; k < this.river.n; k += 4) if ((this.river.x[k] - x) ** 2 + (this.river.z[k] - z) ** 2 < (rad + RIVER_W) ** 2) { riverNear = true; break; }
-      if (riverNear) continue;
-      if (this.hills.some((o) => Math.hypot(o.x - x, o.z - z) < (o.r + rad) * 0.55)) continue;
-      this.hills.push({ x, z, r: rad, h, rot: r() * 6.28, v: (r() * 4) | 0 });
-    }
-    // lavouras perto da fazenda, de Serrana e ao longo da SP-280
-    const zones = [[-1000, 160, -600, 700], [-2900, -1600, -2300, -1100], [600, 150, 1700, 1000], [1200, -700, 1900, -150]];
+    // lavouras perto da fazenda, de Serrana e ao longo da SP-280 (só em terreno suave)
+    const zones = [[-1000, 160, -600, 700], [-2900, -1600, -2300, -1100], [600, 150, 1700, 1000], [1200, -700, 1900, -150], [-2500, -800, -1950, -150]];
     for (const [x0, z0, x1, z1] of zones)
       for (let x = x0; x < x1; x += 140)
         for (let z = z0; z < z1; z += 110) {
           const f = { x0: x + 6, z0: z + 6, x1: x + 134, z1: z + 104 };
           const pts = [[f.x0, f.z0], [f.x1, f.z0], [f.x0, f.z1], [f.x1, f.z1], [(f.x0 + f.x1) / 2, (f.z0 + f.z1) / 2]];
-          if (pts.every(([a, b]) => this.isFree(a, b, 12)) && r() > 0.2) this.fields.push(f);
+          if (pts.every(([a, b]) => this.isFree(a, b, 12) && this.terrain.slope(a, b) < 0.12) && r() > 0.2) this.fields.push(f);
         }
-    // morros não podem invadir lavouras
-    this.hills = this.hills.filter((h) => !this.fields.some((f) => h.x + h.r > f.x0 && h.x - h.r < f.x1 && h.z + h.r > f.z0 && h.z - h.r < f.z1));
   }
 
-  buildGround() {
-    const B = this.B;
-    const g = new THREE.PlaneGeometry(12000, 12000, 120, 120);
-    g.rotateX(-Math.PI / 2);
-    const pos = g.attributes.position;
-    const o = B.grass.count;
-    for (let i = 0; i < pos.count; i++) {
-      const x = pos.getX(i), z = pos.getZ(i);
-      B.grass.pos.push(x, -0.03, z);
-      B.grass.nor.push(0, 1, 0);
-      B.grass.uv.push(x / 14, -z / 14);
-      const n = vnoise(x / 420, z / 420) * 0.6 + vnoise(x / 90, z / 90) * 0.4;
-      B.grass.col.push(0.74 + n * 0.34, 0.84 + n * 0.24, 0.68 + n * 0.2);
-    }
-    const ia = g.index.array;
-    for (let i = 0; i < ia.length; i++) B.grass.idx.push(ia[i] + o);
+  // lavouras acompanhando o relevo
+  buildFields() {
     const cols = [0xffffff, 0xe8f0c0, 0xd8c890, 0xc8e0a8];
-    this.fields.forEach((f, i) => B.field.ground(f.x0, f.z0, f.x1, f.z1, 0.03, 24, cols[i % cols.length]));
+    const T = this.terrain, B = this.B.field;
+    this.fields.forEach((f, n) => {
+      const st = 10, nx = Math.ceil((f.x1 - f.x0) / st), nz = Math.ceil((f.z1 - f.z0) / st);
+      for (let i = 0; i < nx; i++)
+        for (let j = 0; j < nz; j++) {
+          const xa = f.x0 + i * st, xb = Math.min(f.x1, xa + st), za = f.z0 + j * st, zb = Math.min(f.z1, za + st);
+          const y = (x, z) => T.meshHeight(x, z) + 0.12;
+          B.quad([xa, y(xa, zb), zb], [xb, y(xb, zb), zb], [xb, y(xb, za), za], [xa, y(xa, za), za], [0, 1, 0], [xa / 24, -zb / 24, xb / 24, -zb / 24, xb / 24, -za / 24, xa / 24, -za / 24], cols[n % cols.length]);
+        }
+    });
   }
 
   // ---------- cidades ----------
   buildCity(c) {
-    const B = this.B;
+    const B = { ...this.B };
+    if (c.surface === 'cobble') { B.road = this.B.cobble; B.inter = this.B.cobbleI; }
     const X = (i) => c.x0 + i * BLOCK, Z = (j) => c.z0 + j * BLOCK;
     for (let i = 0; i <= c.nx; i++) {
       const x = X(i);
@@ -631,28 +642,22 @@ export class World {
   buildHighway(h) {
     const B = this.B;
     const n = h.n;
-    const E = HW_HALF;
+    const E = h.half, T = this.terrain;
+    const RB = h.surface === 'asphalt' ? B.hwy : B[h.surface];
+    const tile = h.surface === 'asphalt' ? 18 : E * 2;
     for (let i = 0; i < n - 1; i++) {
       const a = i, b = i + 1;
       const ra = [-h.dz[a], h.dx[a]], rb = [-h.dz[b], h.dx[b]]; // vetor à direita
       const ya = h.y[a] + 0.04, yb = h.y[b] + 0.04;
-      const va = h.s[a] / 18, vb = h.s[b] / 18;
+      const va = h.s[a] / tile, vb = h.s[b] / tile;
       const P = (k, rr, o, y) => [h.x[k] + rr[0] * o, y, h.z[k] + rr[1] * o];
-      B.hwy.quad(P(a, ra, -E, ya), P(a, ra, E, ya), P(b, rb, E, yb), P(b, rb, -E, yb), [0, 1, 0], [0, va, 1, va, 1, vb, 0, vb]);
+      RB.quad(P(a, ra, -E, ya), P(a, ra, E, ya), P(b, rb, E, yb), P(b, rb, -E, yb), [0, 1, 0], [0, va, 1, va, 1, vb, 0, vb]);
       const bridge = h.bridge[a] || h.bridge[b];
       for (const side of [-1, 1]) {
         const ea = P(a, ra, side * E, ya - 0.04), eb = P(b, rb, side * E, yb - 0.04);
         if (bridge) {
           // lateral da laje + guarda-corpo de concreto
           B.bridge.quad([ea[0], ya - 1.6, ea[2]], [eb[0], yb - 1.6, eb[2]], [eb[0], yb + 1.0, eb[2]], [ea[0], ya + 1.0, ea[2]], [ra[0] * side, 0, ra[1] * side], [h.s[a] / 4, 0, h.s[b] / 4, 0, h.s[b] / 4, 0.6, h.s[a] / 4, 0.6]);
-        } else if (ya > 0.25 || yb > 0.25) {
-          // talude do aterro
-          const wa = 2 + ya * 1.9, wb = 2 + yb * 1.9;
-          const oa = P(a, ra, side * (E + wa), -0.02), ob = P(b, rb, side * (E + wb), -0.02);
-          const uv = (q) => [q[0] / 14, -q[2] / 14];
-          const nrm = [ra[0] * side * 0.45, 0.89, ra[1] * side * 0.45];
-          if (side > 0) B.grass.quad(ea, oa, ob, eb, nrm, [...uv(ea), ...uv(oa), ...uv(ob), ...uv(eb)], 0xc8d8a8);
-          else B.grass.quad(ea, eb, ob, oa, nrm, [...uv(ea), ...uv(eb), ...uv(ob), ...uv(oa)], 0xc8d8a8);
         }
       }
       if (bridge) {
@@ -666,19 +671,26 @@ export class World {
           B.bridge.add(G.box(), mat(h.x[a], h.y[a] - 2.0, h.z[a], 0, Math.atan2(h.dx[a], h.dz[a]), 0, 13, 0.8, 1.6));
         }
       }
-      if (!bridge && h.y[a] > 1.6) this.rails.push({ h, i: a });
-      if (i % 12 === 0) for (const side of [-1, 1]) this.posts.push({ x: h.x[a] + ra[0] * side * (E + 0.7), y: h.y[a], z: h.z[a] + ra[1] * side * (E + 0.7), rot: Math.atan2(h.dx[a], h.dz[a]) });
+      // defensa onde há aterro alto ou corte (só no asfalto)
+      if (!bridge && h.surface === 'asphalt' && i % 2 === 0) {
+        const rr = [-h.dz[a], h.dx[a]];
+        const t1 = T.raw(h.x[a] + rr[0] * (E + 6), h.z[a] + rr[1] * (E + 6)), t2 = T.raw(h.x[a] - rr[0] * (E + 6), h.z[a] - rr[1] * (E + 6));
+        if (h.y[a] - Math.min(t1, t2) > 2.5) { this.rails.push({ h, i: a }); this.rails.push({ h, i: a + 1 }); }
+      }
+      if (i % 12 === 0 && h.surface === 'asphalt') for (const side of [-1, 1]) this.posts.push({ x: h.x[a] + ra[0] * side * (E + 0.7), y: h.y[a], z: h.z[a] + ra[1] * side * (E + 0.7), rot: Math.atan2(h.dx[a], h.dz[a]) });
     }
     // placas de destino
-    const name = (end) => (end ? CITY[end[0]].name : 'Serraria • Pedreira');
+    const lotsHere = LOCATIONS.filter((L) => L.hw === h.id).map((L) => L.name);
+    const name = (end) => (end && end[0] !== 'hw' ? CITY[end[0]].name : lotsHere.slice(-2).join(' • ') || h.id);
     const km = (h.length / 1000).toFixed(1).replace('.', ',');
     const sgn = (k, dir, txt) => {
       const rr = [-h.dz[k], h.dx[k]];
       const x = h.x[k] + rr[0] * dir * (E + 3), z = h.z[k] + rr[1] * dir * (E + 3);
-      this.roadSign(x, z, Math.atan2(h.dx[k], h.dz[k]) + (dir > 0 ? Math.PI : 0), txt, `${h.id} • ${km} km`, '#0f6b3a', h.y[k]);
+      this.roadSign(x, z, Math.atan2(h.dx[k], h.dz[k]) + (dir > 0 ? Math.PI : 0), txt, `${h.id} • ${km} km${h.surface !== 'asphalt' ? ' • ' + SURFACES[h.surface].name : ''}`, h.surface === 'asphalt' ? '#0f6b3a' : '#7a5230', h.y[k]);
     };
     sgn(Math.min(h.n - 1, 16), 1, name(h.def.to));
     if (h.def.to) sgn(Math.max(0, h.n - 17), -1, name(h.def.from));
+    if (h.surface !== 'asphalt') return;
     const mid = (h.n / 2) | 0;
     const rr = [-h.dz[mid], h.dx[mid]];
     const sp = new THREE.Mesh(new THREE.CircleGeometry(0.9, 24), new THREE.MeshBasicMaterial({ map: tex.speedSign(80), side: THREE.DoubleSide }));
@@ -693,7 +705,7 @@ export class World {
     for (const { h, i } of this.rails) {
       const j = Math.min(h.n - 1, i + 1);
       for (const side of [-1, 1]) {
-        const o = HW_HALF + 0.3;
+        const o = h.half + 0.3;
         const ax = h.x[i] - h.dz[i] * side * o, az = h.z[i] + h.dx[i] * side * o;
         const bx = h.x[j] - h.dz[j] * side * o, bz = h.z[j] + h.dx[j] * side * o;
         const ya = h.y[i], yb = h.y[j];
@@ -722,21 +734,18 @@ export class World {
     for (let i = 0; i < R.n - 1; i++) {
       const ra = dir(i), rb = dir(i + 1);
       const P = (k, rr, o, y) => [R.x[k] + rr[0] * o, y, R.z[k] + rr[1] * o];
-      const a1 = P(i, ra, -W, 0.06), a2 = P(i, ra, W, 0.06), b2 = P(i + 1, rb, W, 0.06), b1 = P(i + 1, rb, -W, 0.06);
+      const WY = -0.7;
+      const a1 = P(i, ra, -W - 4, WY), a2 = P(i, ra, W + 4, WY), b2 = P(i + 1, rb, W + 4, WY), b1 = P(i + 1, rb, -W - 4, WY);
       water.quad(a1, a2, b2, b1, [0, 1, 0], [a1[0] / 30, a1[2] / 30, a2[0] / 30, a2[2] / 30, b2[0] / 30, b2[2] / 30, b1[0] / 30, b1[2] / 30]);
-      for (const s of [-1, 1]) {
-        const c1 = P(i, ra, s * W, 0.045), c2 = P(i, ra, s * (W + 11), 0.0), d1 = P(i + 1, rb, s * W, 0.045), d2 = P(i + 1, rb, s * (W + 11), 0.0);
-        this.B.sand.quad(c1, c2, d2, d1, [0, 1, 0], [0, 0, 1, 0, 1, 1, 0, 1]);
-      }
+
       // vegetação ciliar
-      if (i % 3 === 0) for (const s of [-1, 1]) { const p = P(i, ra, s * (W + 16 + this.r() * 10), 0); this.tree(p[0], p[2], 1.2, 0, -0.1); }
+      if (i % 3 === 0) for (const s of [-1, 1]) { const p = P(i, ra, s * (W + 22 + this.r() * 14), 0); this.tree(p[0], p[2], 1.2, 0, this.terrain.meshHeight(p[0], p[2]) - 0.3); }
     }
     this.M.sand.side = THREE.DoubleSide;
     const wm = new THREE.MeshPhongMaterial({ map: tex.water().clone(), color: 0x9cc6d6, shininess: 110, specular: 0x99bbdd, transparent: true, opacity: 0.94, side: THREE.DoubleSide });
     wm.map.needsUpdate = true;
     this.riverMesh = water.mesh(wm);
     this.scene.add(this.riverMesh);
-    this.B.sand.ground(-6000, SEA_Z - 45, 6000, SEA_Z + 10, 0.02, 10);
     const sea = new THREE.Mesh(new THREE.PlaneGeometry(12000, 4000), new THREE.MeshPhongMaterial({ map: tex.water().clone(), shininess: 90, specular: 0x88aacc, transparent: true, opacity: 0.95 }));
     sea.material.map.needsUpdate = true;
     sea.material.map.repeat.set(400, 130);
@@ -744,52 +753,6 @@ export class World {
     sea.position.set(0, 0.07, SEA_Z + 2000);
     this.water = sea;
     this.scene.add(sea);
-  }
-
-  buildHills() {
-    if (!this.hills.length) return;
-    // 4 variações de relevo irregular; 2 e 3 têm topo rochoso
-    const geos = [0, 1, 2, 3].map((v) => {
-      const g = new THREE.SphereGeometry(1, 40, 14, 0, Math.PI * 2, 0, Math.PI / 2);
-      const p = g.attributes.position, uv = g.attributes.uv;
-      const col = [];
-      const c = new THREE.Color(), grass = new THREE.Color(0x6f8f4a), dry = new THREE.Color(0x8f8a5a), rock = new THREE.Color(0x77736d), snow = new THREE.Color(0xc8ccd0);
-      for (let k = 0; k < p.count; k++) {
-        let x = p.getX(k), y = p.getY(k), z = p.getZ(k);
-        const ang = Math.atan2(z, x);
-        const n1 = vnoise(Math.cos(ang) * 2.2 + v * 7, Math.sin(ang) * 2.2 + y * 2.5) - 0.5;
-        const n2 = vnoise(x * 5 + v * 3, z * 5 + y * 4) - 0.5;
-        const rr = 1 + n1 * 0.32 * (1 - y * 0.4);
-        const hy = y * (1 + n2 * 0.5) * (v >= 2 ? 1 + 0.25 * Math.pow(y, 3) : 1);
-        p.setXYZ(k, x * rr, Math.max(0, hy), z * rr);
-        uv.setXY(k, uv.getX(k) * 40, uv.getY(k) * 10);
-        const t = Math.max(0, hy);
-        if (v >= 2) {
-          c.copy(grass).lerp(rock, Math.min(1, Math.max(0, (t - 0.35) * 2.2)));
-          if (v === 3 && t > 0.85) c.lerp(snow, Math.min(1, (t - 0.85) * 5));
-        } else c.copy(grass).lerp(dry, Math.max(0, n2 + 0.3) * 0.6);
-        c.multiplyScalar(1.25);
-        col.push(c.r, c.g, c.b);
-      }
-      g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
-      g.computeVertexNormals();
-      return g;
-    });
-    const groups = [[], [], [], []];
-    for (const h of this.hills) groups[h.h > 95 ? 2 + (h.v % 2) : h.v % 2].push(h);
-    const ic = new THREE.Color();
-    groups.forEach((list, v) => {
-      if (!list.length) return;
-      const mesh = new THREE.InstancedMesh(geos[v], this.M.grass, list.length);
-      list.forEach((h, i) => {
-        mesh.setMatrixAt(i, mat(h.x, -3, h.z, 0, h.rot || 0, 0, h.r, h.h, h.r * (0.8 + ((i * 7) % 5) * 0.08)));
-        mesh.setColorAt(i, ic.setHSL(0.25, 0.1, 0.9 + ((i * 13) % 7) / 60));
-      });
-      mesh.computeBoundingSphere();
-      mesh.receiveShadow = true;
-      this.scene.add(mesh);
-    });
-    for (const h of this.hills) if (h.x > 300 && h.z < 900 && h.h < 95 && this.r() > 0.45) this.turbine(h.x, h.z, 50, 1, h.h * 0.85 - 6);
   }
 
   // ---------- vegetação ----------
@@ -803,13 +766,13 @@ export class World {
       const dense = vnoise(x / 520, z / 520) * 0.8 + (x < -300 && z < 600 ? 0.55 : -0.15);
       if (r() > dense) continue;
       if (!this.isFree(x, z, 2)) continue;
-      const pine = x < -1500 || x > 2600 || vnoise(x / 300 + 9, z / 300) > 0.62;
       const ty = this.terrainH(x, z);
-      if (ty > 55) continue; // topo rochoso
-      this.tree(x, z, 1.3 + r() * 0.8, pine ? 1 : 0, ty * 0.85 - 0.6);
+      if (ty > 145 || ty < 0.3 || this.terrain.slope(x, z) > 0.55) continue; // neve, água ou penhasco
+      const pine = x < -1500 || x > 2600 || ty > 60 || vnoise(x / 300 + 9, z / 300) > 0.62;
+      this.tree(x, z, 1.3 + r() * 0.8, pine ? 1 : 0, ty - 0.3);
       placed++;
     }
-    for (const f of this.fields) for (let t = 0; t < 5; t++) this.tree(f.x0 + r() * (f.x1 - f.x0), f.z0 - 5, 1.1, 0, 0);
+    for (const f of this.fields) for (let t = 0; t < 5; t++) { const x = f.x0 + r() * (f.x1 - f.x0), z = f.z0 - 5; this.tree(x, z, 1.1, 0, this.terrainH(x, z) - 0.3); }
     // mata fechada beirando a BR-101 e a RS-030
     const dens = this.q.trees / 7000;
     for (const h of this.hws) {
@@ -818,11 +781,13 @@ export class World {
         const k = Math.round(3 * dens + r());
         for (let j = 0; j < k; j++) {
           const side = r() < 0.5 ? -1 : 1;
-          const o = HW_HALF + 9 + h.y[i] * 1.9 + Math.pow(r(), 1.6) * 70;
+          const o = h.half + 10 + Math.pow(r(), 1.6) * 70;
           const x = h.x[i] - h.dz[i] * side * o + (r() - 0.5) * 6, z = h.z[i] + h.dx[i] * side * o + (r() - 0.5) * 6;
           if (!this.isFree(x, z, 0)) continue;
           const pine = h.id === 'RS-030' ? r() < 0.7 : r() < 0.3;
-          this.tree(x, z, 1.5 + r() * 1.1, pine ? 1 : 0, this.terrainH(x, z) - 0.2);
+          const ty = this.terrainH(x, z);
+          if (ty < 0.3 || this.terrain.slope(x, z) > 0.6) continue;
+          this.tree(x, z, 1.5 + r() * 1.1, pine ? 1 : 0, ty - 0.3);
         }
       }
     }
