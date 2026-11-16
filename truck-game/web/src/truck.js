@@ -818,6 +818,9 @@ const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 // furos por km rodado em cada piso
 const PUNCT = { asphalt: 0.003, concrete: 0.002, cobble: 0.008, gravel: 0.03, dirt: 0.015, mud: 0.012 };
 
+// inclinação da suspensão (só enquanto as rodas estão no chão)
+const phiSusp = (susp, phi, max) => (phi > 0 ? max : Math.max(0, susp) * max);
+
 export class Rig {
   constructor(scene, def, shadows) {
     this.scene = scene;
@@ -835,7 +838,8 @@ export class Rig {
     this.engineOn = false;
     this.slip = 0; this.tipRisk = 0; this.tip = 0; this.wheelspin = 0;
     this.slosh = 0; this.sloshV = 0;
-    this.rolled = 0;
+    this.rolled = 0;          // 1 = deitado de lado
+    this.rollT = { phi: 0, w: 0 }; this.rollR = { phi: 0, w: 0 }; this.liftSide = 1; this.susp = 0;
     this.surface = 'asphalt';
     this.sink = 0; this.stuck = false; this.stuckT = 0;   // atolamento
     this.flat = 0; this.spare = true;                     // pneu furado (-1 esq / 1 dir) e estepe
@@ -914,6 +918,9 @@ export class Rig {
       slosh: sub === 'tank',
       fragile: !!(c && c.fragile),
       trailerMu: sub === 'lowboy' ? 0.85 : 0.9,
+      // geometria de tombamento: meia bitola efetiva (pneus/molas cedem) e altura do CG
+      bT: ((d.track || 2) / 2) * 0.9, hT: truckCG,
+      bR: 1.0 * 0.9, hR: trailerCG,
     };
     // consumo: calibrado para que, a 80 km/h no plano com meia carga, o caminhão faça def.kml km/L
     const vr = 22.2, mRef = mT + d.cap * 500 + (d.rigid ? 0 : 7000);
@@ -957,6 +964,7 @@ export class Rig {
     this.x = x; this.z = z; this.h = h; this.th = h; this.th2 = h;
     this.sink = 0; this.stuck = false; this.stuckT = 0;
     this.v = 0; this.steer = 0; this.yaw = 0; this.tip = 0; this.slosh = 0; this.sloshV = 0;
+    this.rolled = 0; this.rollT.phi = this.rollT.w = 0; this.rollR.phi = this.rollR.w = 0; this.susp = 0;
     this.sync();
   }
 
@@ -985,7 +993,20 @@ export class Rig {
 
   update(dt, inp, world, obstacles) {
     this.world = world;
-    if (this.rolled > 0) { this.rolled -= dt; this.v = 0; this.sync(); return; }
+    if (this.rolled) {
+      // deitado: arrasta de lado até parar, sem direção nem tração
+      const sv = Math.abs(this.v);
+      this.v = sv <= 5.5 * dt ? 0 : this.v - Math.sign(this.v) * 5.5 * dt;
+      this.yaw *= Math.exp(-dt * 2.5);
+      this.h += this.yaw * dt;
+      this.x += Math.sin(this.h) * this.v * dt;
+      this.z += Math.cos(this.h) * this.v * dt;
+      for (const st of [this.rollT, this.rollR]) if (st.phi > 0) { st.phi = Math.min(1.5, st.phi + Math.max(st.w, 1.2) * dt); st.w = st.phi >= 1.5 ? 0 : st.w; }
+      this.rpm += (0 - this.rpm) * Math.min(1, dt * 3);
+      this.collide(world, obstacles, dt);
+      this.sync();
+      return;
+    }
     const def = this.def, Pp = this.P;
     const m = Pp.mass;
     const S = SURF[world.surfaceAt ? world.surfaceAt(this.x, this.z) : 'asphalt'] || SURF.asphalt;
@@ -1096,15 +1117,40 @@ export class Rig {
       this.slosh += this.sloshV * dt;
       aRollEff = Math.min(Math.abs(aIn), aGrip * 1.03) + Math.abs(this.slosh * w * w * 0.35);
     }
-    // ---- tombamento ----
+    // ---- tombamento (corpo rígido girando sobre as rodas de fora) ----
+    // Abaixo do limite só a suspensão inclina. Acima, as rodas internas levantam e o
+    // conjunto gira em torno dos pneus externos: se a força lateral cair a tempo ele volta
+    // ao chão; se passar do ângulo crítico, a gravidade termina de derrubar.
     this.tipRisk = aRollEff / Pp.aRoll;
-    if (this.tipRisk > 1) this.tip += dt * (this.tipRisk - 1) * 1.5;
-    else this.tip = Math.max(0, this.tip - dt * 1.8);
-    this.rollSide = Math.sign(v * this.yaw) || 1;
-    if (this.tip >= 1) {
-      this.rolled = 3;
-      this.tip = 1;
-      this.v = 0;
+    const latSign = Math.sign(v * this.yaw) || this.liftSide;
+    const up = this.rollT.phi <= 0 && this.rollR.phi <= 0;
+    if (up) this.liftSide = latSign;
+    const aSide = aRollEff * (latSign === this.liftSide ? 1 : -1);
+    this.susp += (clamp(aSide / Pp.aRoll, -1, 1) - this.susp) * Math.min(1, dt * 5);
+    const step = (st, a, b, h, couple) => {
+      if (h <= 0) { st.phi = 0; st.w = 0; return 0; }
+      if (st.phi <= 0 && a * h + couple <= G0 * b) { st.phi = 0; st.w = 0; return 0; }
+      const c = Math.cos(st.phi), sn = Math.sin(st.phi);
+      const tau = a * (h * c + b * sn) - G0 * (b * c - h * sn) + couple;
+      st.w += (tau / ((h * h + b * b) * 1.3) - st.w * 0.8) * dt;
+      st.phi += st.w * dt;
+      if (st.phi < 0) { const hit = -st.w; st.phi = 0; st.w = 0; return hit; }
+      return 0;
+    };
+    const kC = 14; // quinta-roda transmite o giro entre cavalo e carreta
+    const dT = this.trailer ? Math.max(0, this.rollR.phi - this.rollT.phi) * kC : 0;
+    const dR = this.trailer ? Math.max(0, this.rollT.phi - this.rollR.phi) * kC : 0;
+    const land = Math.max(step(this.rollT, aSide, Pp.bT, Pp.hT, dT), this.trailer ? step(this.rollR, aSide, Pp.bR, Pp.hR, dR) : 0);
+    if (land > 0.15 && this.onWheelsDown) this.onWheelsDown(land);
+    this.tip = Math.max(this.rollT.phi, this.rollR.phi);
+    this.rollSide = this.liftSide;
+    const crit = (b, h) => Math.atan2(b, Math.max(h, 0.1));
+    if ((this.rollT.phi > crit(Pp.bT, Pp.hT) + 0.05) || (this.trailer && this.rollR.phi > crit(Pp.bR, Pp.hR) + 0.05)) {
+      // passou do ponto: tudo vai ao chão (a carreta arrasta o cavalo pela quinta-roda)
+      this.rolled = 1;
+      for (const st of [this.rollT, this.rollR]) st.w = Math.max(st.w, 1.0);
+      if (!this.trailer) this.rollR.phi = 0;
+      else { this.rollT.phi = Math.max(this.rollT.phi, 0.01); this.rollR.phi = Math.max(this.rollR.phi, 0.01); }
       if (this.onRollover) this.onRollover();
       this.sync();
       return;
@@ -1248,10 +1294,17 @@ export class Rig {
     this.y = yr;
     this.pitch = Math.atan2(yf - yr, md.wb);
     // rolagem da carroceria pela força lateral e tombamento
-    const rollVis = this.rolled > 0 ? 1.45 * Math.min(1, (3 - this.rolled) * 2.5) : clamp((this.tipRisk || 0) * 0.07, 0, 0.12) + this.tip * 0.35;
     const rs = this.rollSide || 1;
-    md.root.position.set(this.x, yr, this.z);
-    md.root.rotation.set(-this.pitch, this.h, -rs * rollVis * 0.6);
+    // giro em torno do pneu externo: o centro sobe e desloca para o lado
+    const rollAt = (b, phi, susp) => {
+      const s = Math.sin(phi), c = Math.cos(phi);
+      return { ang: -rs * (phi + susp), lx: rs * b * (1 - c), ly: b * s };
+    };
+    const P = this.P || {};
+    const RT = rollAt(P.bT || 1, this.rollT.phi, phiSusp(this.susp, this.rollT.phi, 0.05));
+    const rgt = [Math.cos(this.h), -Math.sin(this.h)]; // eixo x local no mundo
+    md.root.position.set(this.x + rgt[0] * RT.lx, yr + RT.ly, this.z + rgt[1] * RT.lx);
+    md.root.rotation.set(-this.pitch, this.h, RT.ang);
     for (let i = 0; i < md.front.length; i++) {
       const w = md.front[i];
       w.rotation.y = this.steer * (i < 2 ? 1 : 0.6);
@@ -1266,8 +1319,10 @@ export class Rig {
       const ya = W ? W.heightAt(ax, az) : 0;
       const tp = Math.atan2(hy - ya, tr.Lk);
       this[key] = tp;
-      tr.root.position.set(hx, hy, hz);
-      tr.root.rotation.set(-tp, th, -rs * rollVis);
+      const RR = rollAt(P.bR || 1, this.rollR.phi, phiSusp(this.susp, this.rollR.phi, 0.07));
+      const rx = Math.cos(th), rz = -Math.sin(th);
+      tr.root.position.set(hx + rx * RR.lx, hy + RR.ly, hz + rz * RR.lx);
+      tr.root.rotation.set(-tp, th, RR.ang);
       const rot = this.wheelRot * (md.wr / 0.5);
       for (const a of tr.axles) a.rotation.x = rot;
       return { ya, tp };

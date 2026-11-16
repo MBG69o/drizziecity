@@ -27,7 +27,10 @@ Faça entregas pela cidade, suba de nível, compre caminhões mais fortes e libe
   esterçamento e inércia próprios; cada carreta/carga muda massa e centro de gravidade (contêiner e
   transformador altos, bobinas baixas, tanque com líquido que balança).
 * Curva rápida demais: o caminhão **sai de frente** (derrapa e perde velocidade) ou, se a carga for alta,
-  **tomba** — com aviso de risco no painel. Tração e frenagem limitadas pelo piso (na lama o 6x2 carregado patina).
+  **tomba**. O tombamento é simulado como corpo rígido girando sobre os pneus de fora: as rodas internas
+  levantam, e se a força lateral diminuir a tempo o caminhão volta ao chão (com tranco); se passar do ângulo
+  crítico, a gravidade termina de derrubar. A carreta (mais alta) costuma tombar primeiro e arrasta o cavalo
+  pela quinta-roda. Deitado, o conjunto arrasta até parar, o motor apaga e é preciso chamar o guincho pesado. Tração e frenagem limitadas pelo piso (na lama o 6x2 carregado patina).
 * **Relevo**: a gravidade age sempre — o caminhão perde força e velocidade nas subidas (carregado sobe devagar)
   e embala nas descidas, podendo passar do limitador. Parado na rampa sem freio, desce de ré.
 * **Freio-motor (FM)** segura o caminhão nas descidas. Descer só no pedal aquece os freios, que perdem eficiência

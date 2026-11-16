@@ -169,11 +169,14 @@ async function boot() {
     audio.crash(60);
     S.stats.crashes++;
     if (navigator.vibrate) try { navigator.vibrate([200, 80, 300]); } catch (e) { /* */ }
-    let msg = '💥 O caminhão TOMBOU! Curva rápida demais para a carga.';
+    rig.engineOn = false; $('enginebtn').classList.remove('hidden');
+    let msg = '💥 Tombou!';
     if (S.job && S.job.phase === 'deliver') { S.job.damage = Math.min(100, S.job.damage + 55); msg += ' Carga avariada +55%'; }
-    toast(msg, 4200);
-    setTimeout(() => { rescue(); toast('Guincho: caminhão desvirado e recolocado na via', 2600); }, 3000);
+    toast(msg, 3500);
+    setTimeout(() => audio.crash(35), 450);
   };
+  // rodas voltando ao chão depois de levantar numa curva
+  rig.onWheelsDown = (w) => { audio.crash(Math.min(40, w * 25)); if (navigator.vibrate) try { navigator.vibrate(Math.min(150, w * 80)); } catch (e) { /* */ } };
   traffic = new Traffic(scene, Q.traffic, world);
   buildMarkers();
   await step(85, 'Desenhando o mapa…');
@@ -1149,7 +1152,9 @@ function updateAction() {
   const stopped = rig.speedKmh < 1.5;
   let a = null;
   const st = stopped ? nearStation() : null;
-  if (rig.stuck) a = { id: 'tow', label: `🚜 Chamar guincho • ${fmt(TOW_BASE + rig.mass / 50)}` };
+  if (rig.rolled && stopped) a = { id: 'upright', label: `🚜 Guincho pesado: desvirar • ${fmt(TOW_BASE * 2 + rig.mass / 25)}` };
+  else if (rig.rolled) a = null;
+  else if (rig.stuck) a = { id: 'tow', label: `🚜 Chamar guincho • ${fmt(TOW_BASE + rig.mass / 50)}` };
   else if (st) {
     const need = rig.def.tank - rig.fuel;
     const tire = rig.flat || !rig.spare;
@@ -1185,6 +1190,10 @@ function doAction() {
   } else if (a.id === 'spare') {
     busyT = 2; toast('🛞 Trocando o pneu…', 1800);
     setTimeout(() => { rig.flat = 0; rig.spare = false; toast('Estepe instalado. Reponha o estepe em um posto.', 2600); }, 1800);
+  } else if (a.id === 'upright') {
+    S.money -= Math.min(Math.max(0, S.money), TOW_BASE * 2 + rig.mass / 25); // nunca deixa o jogador preso
+    rescue();
+    toast('🚜 Caminhão desvirado e recolocado na via', 2600);
   } else if (a.id === 'tow') {
     if (!pay(TOW_BASE + rig.mass / 50)) return;
     // puxa o caminhão para frente, para fora do lamaçal
@@ -1410,8 +1419,7 @@ function updateHUD(dt) {
   $('ic-load').textContent = `⛽ ${Math.round(rig.range)} km • ${(rig.mass / 1000).toFixed(1)} t`;
   const pw = $('physwarn');
   let w = '';
-  if (rig.rolled > 0) w = '<b class="r">TOMBOU</b>';
-  else if ((rig.tipRisk > 0.75 || rig.tip > 0.05) && rig.speedKmh > 12) w = '<b class="r">⚠ RISCO DE TOMBAMENTO — reduza!</b>';
+  if (rig.rolled) w = '';
   else if (rig.stuck) w = '<b class="r">ATOLADO — chame o guincho ou tente de ré</b>';
   else if (rig.fade < 0.85) w = '<b class="r">FREIOS SUPERAQUECIDOS — use o freio-motor</b>';
   else if (rig.slip > 0.08) w = '<b class="o">DERRAPANDO — curva rápida demais</b>';
