@@ -47,7 +47,69 @@ export class World {
     this.hwIdx = H.idx;
     this.hwById = Object.fromEntries(this.hws.map((h) => [h.id, h]));
     this._q = {};
+    this.stations = this.placeStations();
+    this.terrain.pads = this.stations.map((st) => ({ x: st.x, z: st.z, r: st.r + 2, y: st.y }));
     this.build();
+  }
+
+  // Postos de combustível à beira das rodovias asfaltadas: procura trechos retos,
+  // planos, sem ponte, longe de rios, cidades e outras estradas.
+  placeStations() {
+    const NAMES = ['Posto Estrela da Serra', 'Posto Beira-Rio', 'Posto Caminhoneiro', 'Posto Mata Verde', 'Posto Trevo Azul', 'Posto Serra Alta', 'Posto Bandeirante', 'Posto Vale do Sol'];
+    const out = [], q = {};
+    const rects = [...CITIES.map((c) => [c.x0 - 150, c.z0 - 150, cx1(c) + 150, cz1(c) + 150]), ...LOCATIONS.filter((L) => L.lot).map((L) => [L.lot[0] - 120, L.lot[1] - 120, L.lot[2] + 120, L.lot[3] + 120])];
+    for (const h of this.hws) {
+      if (h.surface !== 'asphalt') continue;
+      const len = h.s[h.n - 1];
+      if (len < 1200) continue;
+      const targets = len > 3000 ? [0.33, 0.72] : [0.5];
+      for (const f of targets) {
+        const i0 = Math.round(f * (h.n - 1));
+        let found = null;
+        for (let k = 0; k < h.n && !found; k++) {
+          const i = i0 + (k % 2 ? 1 : -1) * Math.ceil(k / 2) * 2;
+          if (i < 16 || i > h.n - 17) continue;
+          let ok = true;
+          for (let j = i - 14; j <= i + 14; j++) if (h.bridge[j]) { ok = false; break; }
+          if (!ok || Math.abs(h.y[i + 12] - h.y[i - 12]) > 1.6) continue;
+          const ax = h.x[i + 12] - h.x[i - 12], az = h.z[i + 12] - h.z[i - 12], bx = h.x[i + 1] - h.x[i - 1], bz = h.z[i + 1] - h.z[i - 1];
+          if ((ax * bx + az * bz) / (Math.hypot(ax, az) * Math.hypot(bx, bz)) < 0.995) continue;
+          const hd = Math.atan2(bx, bz), y = h.y[i];
+          for (const side of [1, -1]) {
+            const nx = Math.cos(hd) * side, nz = -Math.sin(hd) * side, r = 20, off = h.half + 17;
+            const cx = h.x[i] + nx * off, cz = h.z[i] + nz * off;
+            if (cz > SEA_Z - 220 || this.river.dist(cx, cz) < RIVER_W / 2 + r + 25) continue;
+            if (rects.some((a) => cx > a[0] && cx < a[2] && cz > a[1] && cz < a[3])) continue;
+            if (out.some((o) => Math.hypot(o.x - cx, o.z - cz) < 600)) continue;
+            let good = true;
+            for (let a = 0; a < 16 && good; a++) {
+              const px = cx + Math.cos(a * 0.39) * (r + 12), pz = cz + Math.sin(a * 0.39) * (r + 12);
+              const n = this.hwIdx.nearest(px, pz, q);
+              if (n && n.o !== h && n.d < n.o.half + 6) good = false;
+              if (Math.abs(this.terrain.raw(px, pz) - y) > 14) good = false;
+            }
+            if (!good) continue;
+            for (const c of this.hws) if (c !== h && Math.hypot(c.x[0] - cx, c.z[0] - cz) < 90) good = false;
+            if (!good) continue;
+            found = { id: 'st' + out.length, name: NAMES[out.length % NAMES.length], hw: h.id, x: cx, z: cz, y, r, hd, side, rx: h.x[i], rz: h.z[i] };
+            break;
+          }
+        }
+        if (found) out.push(found);
+      }
+    }
+    return out;
+  }
+
+  // poças fundas nas estradas de lama (0..1)
+  mudDepth(x, z) {
+    const n = vnoise(x / 55 + 3.1, z / 55 - 7.7);
+    return n < 0.42 ? 0 : Math.min(1, (n - 0.42) / 0.2);
+  }
+
+  stationAt(x, z, pad = 0) {
+    for (const st of this.stations) if (Math.hypot(x - st.x, z - st.z) < st.r + pad) return st;
+    return null;
   }
 
   // ---------- consultas ----------
@@ -77,7 +139,10 @@ export class World {
   heightAt(x, z) {
     for (const a of this.areas) if (!a.circle && x >= a.x0 && x <= a.x1 && z >= a.z0 && z <= a.z1) return 0;
     const q = this.hw(x, z);
-    if (!q || q.d > q.o.half + 3) return this.terrain.meshHeight(x, z);
+    if (!q || q.d > q.o.half + 3) {
+      const st = this.stationAt(x, z, 1);
+      return st ? st.y : this.terrain.meshHeight(x, z);
+    }
     const h = q.o;
     return h.y[q.i] + (h.y[q.i + 1] - h.y[q.i]) * q.t;
   }
@@ -90,6 +155,7 @@ export class World {
     }
     const q = this.hw(x, z);
     if (q && q.d < q.o.half + 2) return q.o.surface;
+    if (this.stationAt(x, z)) return 'concrete';
     return 'dirt';
   }
 
@@ -183,6 +249,7 @@ export class World {
       concrete: lam(tex.concrete()),
       bridge: lam(tex.concrete(), { side: THREE.DoubleSide }),
       lot: lam(tex.lot()),
+      puddle: new THREE.MeshPhongMaterial({ color: 0x35271a, shininess: 90, specular: 0x55524a, transparent: true, opacity: 0.9, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 }),
       field: lam(tex.field(), { vertexColors: true }),
       sand: lam(tex.sand()),
       roof: lam(tex.roof()),
@@ -197,7 +264,7 @@ export class World {
     this.M = M;
     const B = {
       grass: new Builder(true), road: new Builder(), hwy: new Builder(), dirt: new Builder(), mud: new Builder(), gravel: new Builder(), cobble: new Builder(), cobbleI: new Builder(), inter: new Builder(), concrete: new Builder(), bridge: new Builder(),
-      lot: new Builder(), field: new Builder(true), sand: new Builder(), roof: new Builder(), tiles: new Builder(),
+      lot: new Builder(), puddle: new Builder(), field: new Builder(true), sand: new Builder(), roof: new Builder(), tiles: new Builder(),
       wh: new Builder(true), f: [new Builder(), new Builder(), new Builder(), new Builder()],
       flat: new Builder(true), metal: new Builder(true), cont: new Builder(true),
     };
@@ -222,6 +289,7 @@ export class World {
     for (const L of LOCATIONS) if (L.lot) this.areas.push({ x0: L.lot[0], z0: L.lot[1], x1: L.lot[2], z1: L.lot[3], lot: L.id });
     // entroncamentos de estradas secundárias: área circular para manobrar
     for (const h of this.hws) if (h.def.from && h.def.from[0] === 'hw') this.areas.push({ circle: true, x: h.x[0], z: h.z[0], r: 20 });
+    for (const st of this.stations) this.areas.push({ circle: true, x: st.x, z: st.z, r: st.r, station: st.id });
 
     this.terrain.build(this.scene, M.terrain, this.q.terrainStep || 24);
     this.layoutCountry();
@@ -229,6 +297,7 @@ export class World {
     for (const c of CITIES) this.buildCity(c);
     for (const L of LOCATIONS) if (L.lot) this.buildDepot(L, ...L.lot);
     for (const h of this.hws) this.buildHighway(h);
+    for (const st of this.stations) this.buildStation(st);
     this.buildRiverAndSea();
     for (let i = 0; i < 14; i++) {
       const x = 500 + this.r() * 1500, z = -900 + this.r() * 700;
@@ -243,7 +312,7 @@ export class World {
       return mesh;
     };
     add(B.grass, M.grass); add(B.road, M.road); add(B.hwy, M.hwy); add(B.dirt, M.dirt); add(B.mud, M.mud); add(B.gravel, M.gravel); add(B.cobble, M.cobble); add(B.cobbleI, M.cobbleI); add(B.inter, M.inter); add(B.concrete, M.concrete, true);
-    add(B.bridge, M.bridge, true); add(B.lot, M.lot); add(B.field, M.field); add(B.sand, M.sand); add(B.roof, M.roof);
+    add(B.bridge, M.bridge, true); add(B.lot, M.lot); add(B.puddle, M.puddle); add(B.field, M.field); add(B.sand, M.sand); add(B.roof, M.roof);
     add(B.tiles, M.tiles, true); add(B.wh, M.wh, true); add(B.flat, M.flat, true);
     add(B.metal, M.metal, true); add(B.cont, M.cont, true);
     B.f.forEach((b, i) => add(b, M.f[i], true));
@@ -607,6 +676,51 @@ export class World {
     this.lamps.push({ x: x0 + 2, z: z0 + 2 }, { x: x1 - 2, z: z1 - 2 });
   }
 
+  // posto de beira de estrada: pátio de concreto, cobertura, bombas, loja e placa
+  buildStation(st) {
+    const B = this.B, y = st.y, hd = st.hd;
+    const fx = Math.sin(hd), fz = Math.cos(hd), nx = Math.cos(hd) * st.side, nz = -Math.sin(hd) * st.side;
+    const P = (a, b) => [st.x + fx * a + nx * b, st.z + fz * a + nz * b]; // a: ao longo da via, b: para fora
+    B.lot.add(G.cyl(32), mat(st.x, y - 0.12, st.z, 0, 0, 0, st.r * 2, 0.3, st.r * 2), 0xffffff, 6);
+    // cobertura
+    const [cx, cz] = P(0, 1);
+    B.flat.add(G.box(), mat(cx, y + 6.6, cz, 0, hd, 0, 13, 0.9, 22), 0xd02020);
+    B.flat.add(G.box(), mat(cx, y + 7.2, cz, 0, hd, 0, 13.2, 0.3, 22.2), 0xf2f2f2);
+    for (const a of [-8, 8]) for (const b of [-4.5, 4.5]) {
+      const [px, pz] = P(a, 1 + b);
+      B.flat.add(G.box(), mat(px, y + 3.2, pz, 0, hd, 0, 0.5, 6.4, 0.5), 0xecf0f1);
+    }
+    // ilhas com bombas
+    for (const a of [-5, 5]) {
+      const [px, pz] = P(a, 1);
+      B.flat.add(G.box(), mat(px, y + 0.15, pz, 0, hd, 0, 1.6, 0.3, 4.2), 0xbdc3c7);
+      for (const b of [-1.2, 1.2]) {
+        const [qx, qz] = P(a + b, 1);
+        B.flat.add(G.box(), mat(qx, y + 1.0, qz, 0, hd, 0, 0.8, 1.7, 0.6), 0xf5f5f5);
+        B.flat.add(G.box(), mat(qx, y + 1.5, qz, 0, hd, 0, 0.84, 0.35, 0.64), 0xd02020);
+      }
+      this.addCollider(px - 0.9, pz - 0.9, px + 0.9, pz + 0.9);
+    }
+    // loja de conveniência e borracharia (fora do pátio)
+    const [lx, lz] = P(-4, st.r + 6);
+    B.flat.add(G.box(), mat(lx, y + 2.4, lz, 0, hd, 0, 9, 4.8, 18), 0xf4f1ea);
+    B.flat.add(G.box(), mat(lx, y + 5.0, lz, 0, hd, 0, 9.6, 0.5, 18.6), 0xd02020);
+    const [wx, wz] = P(-4, st.r + 1.45);
+    B.flat.add(G.box(), mat(wx, y + 1.6, wz, 0, hd, 0, 0.1, 2.4, 12), 0x2b3a46);
+    const [bx, bz] = P(14, st.r + 5);
+    B.flat.add(G.box(), mat(bx, y + 2.0, bz, 0, hd, 0, 8, 4, 8), 0xe8c547);
+    for (let t = 0; t < 4; t++) { const [tx, tz] = P(18.5, st.r + 2 + t * 1.2); B.flat.add(G.cyl(12), mat(tx, y + 0.5, tz, 0, hd, Math.PI / 2, 1, 0.35, 1), 0x1b1b1b); }
+    // placa alta com nome
+    const [sx, sz] = P(-st.r + 2, -1.5);
+    B.flat.add(G.box(), mat(sx, y + 5, sz, 0, hd, 0, 0.5, 10, 0.5), 0x666666);
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(9, 9 * (192 / 1024) * 1.8), new THREE.MeshBasicMaterial({ map: tex.sign('⛽ ' + st.name.toUpperCase(), '#b01818', '#ffffff'), side: THREE.DoubleSide }));
+    m.position.set(sx, y + 10.5, sz);
+    m.rotation.y = hd + Math.PI / 2;
+    m.matrixAutoUpdate = false; m.updateMatrix();
+    this.scene.add(m);
+    for (const a of [-14, 14]) { const [px, pz] = P(a, 10); this.lamps.push({ x: px, z: pz, y, ang: hd + (st.side > 0 ? -Math.PI / 2 : Math.PI / 2) }); }
+  }
+
   signFor(L, face, bld, h, freestanding = false) {
     const [bx0, bz0, bx1, bz1] = bld;
     const w = 26, hh = 26 * (192 / 1024);
@@ -652,6 +766,14 @@ export class World {
       const va = h.s[a] / tile, vb = h.s[b] / tile;
       const P = (k, rr, o, y) => [h.x[k] + rr[0] * o, y, h.z[k] + rr[1] * o];
       RB.quad(P(a, ra, -E, ya), P(a, ra, E, ya), P(b, rb, E, yb), P(b, rb, -E, yb), [0, 1, 0], [0, va, 1, va, 1, vb, 0, vb]);
+      // lamaçal: poças fundas e brilhantes
+      if (h.surface === 'mud') {
+        const da = this.mudDepth(h.x[a], h.z[a]), db = this.mudDepth(h.x[b], h.z[b]);
+        if (da + db > 0.05) {
+          const wa = E * Math.min(0.95, 0.35 + da), wb = E * Math.min(0.95, 0.35 + db);
+          B.puddle.quad(P(a, ra, -wa * Math.sign(da), ya + 0.03), P(a, ra, wa * Math.sign(da), ya + 0.03), P(b, rb, wb * Math.sign(db), yb + 0.03), P(b, rb, -wb * Math.sign(db), yb + 0.03), [0, 1, 0], [0, 0, 1, 0, 1, 1, 0, 1]);
+        }
+      }
       const bridge = h.bridge[a] || h.bridge[b];
       for (const side of [-1, 1]) {
         const ea = P(a, ra, side * E, ya - 0.04), eb = P(b, rb, side * E, yb - 0.04);
@@ -868,7 +990,8 @@ export class World {
         const rx = Math.round((l.x - c.x0) / BLOCK) * BLOCK + c.x0, rz = Math.round((l.z - c.z0) / BLOCK) * BLOCK + c.z0;
         ang = Math.abs(l.x - rx) < Math.abs(l.z - rz) ? (rx > l.x ? Math.PI / 2 : -Math.PI / 2) : (rz > l.z ? 0 : Math.PI);
       }
-      const m4 = mat(l.x, 0, l.z, 0, ang, 0);
+      if (l.ang !== undefined) ang = l.ang;
+      const m4 = mat(l.x, l.y || 0, l.z, 0, ang, 0);
       poles.setMatrixAt(i, m4); arms.setMatrixAt(i, m4); heads.setMatrixAt(i, m4); pools.setMatrixAt(i, m4);
     });
     this.lampHeads = heads;

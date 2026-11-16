@@ -80,13 +80,24 @@ export class Terrain {
     const r = this.raw(x, z);
     if (!this.idx) return r;
     const q = this.idx.nearest(x, z, this._q);
-    if (!q) return r;
+    if (!q) return this.pads ? this.padBlend(x, z, r) : r;
     const h = q.o;
     const ry = h.y[q.i] + (h.y[q.i + 1] - h.y[q.i]) * q.t;
     const w0 = h.half + 1.5;
     const span = Math.max(10, Math.abs(r - ry) * 1.7);
     const w = smooth(w0, w0 + span, q.d);
-    return ry - 0.3 + (r - ry + 0.3) * w;
+    const y = ry - 0.3 + (r - ry + 0.3) * w;
+    return this.pads ? this.padBlend(x, z, y) : y;
+  }
+
+  padBlend(x, z, y) {
+    for (const p of this.pads) {
+      const d = Math.hypot(x - p.x, z - p.z) - p.r;
+      if (d > 60) continue;
+      const k = smooth(0, Math.max(8, Math.abs(y - p.y) * 1.7), d);
+      y = p.y - 0.3 + (y - p.y + 0.3) * k;
+    }
+    return y;
   }
 
   // malha em pedaços (descartados fora da câmera)

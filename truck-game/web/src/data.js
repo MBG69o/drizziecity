@@ -92,14 +92,19 @@ export const LOC = Object.fromEntries(LOCATIONS.map((l) => [l.id, l]));
 
 // Caminhões. cab: 'cabover' (cara-chata) ou 'conventional' (bicudo).
 export const TRUCKS = [
-  { id: 'mini', track: 1.25, cgH: 0.8, drive: 0.45, tireMu: 0.95, steerLock: 0.66, name: 'Mini Carga 1.0', hp: 95, cap: 1.5, mass: 1.0, level: 1, price: 0, rigid: true, axles: 2, model: 'labo', color: 0x3d7fd1, vmax: 95, desc: 'Picape de carga compacta para entregas leves.' },
-  { id: 'urbano', track: 1.6, cgH: 1.0, drive: 0.5, tireMu: 0.95, steerLock: 0.62, name: 'Leve Baú 4.5', hp: 160, cap: 5, mass: 4.5, level: 2, price: 8000, rigid: true, axles: 2, model: 'canter', color: 0xf2f2f2, vmax: 100, desc: 'Caminhão leve com baú, ágil na cidade.' },
-  { id: 'toco', track: 1.85, cgH: 1.2, drive: 0.5, tireMu: 0.92, steerLock: 0.6, name: 'Toco 11-240', hp: 240, cap: 12, mass: 7.5, level: 3, price: 15000, rigid: true, axles: 2, cab: 'cabover', roof: 'mid', color: 0x2f6fde, vmax: 100, desc: 'Caminhão médio de carroceria baú.' },
-  { id: 'cavalo', track: 2.0, cgH: 1.05, drive: 0.33, tireMu: 0.9, steerLock: 0.58, cfg: '6x2', name: 'Cavalo 360', hp: 360, cap: 30, mass: 8.5, level: 6, price: 60000, rigid: false, axles: 3, model: 'volvo', cab: 'cabover', roof: 'high', color: 0xb5121b, vmax: 110, desc: 'Cavalo mecânico cara-chata para carretas.' },
-  { id: 'rodo', track: 2.0, cgH: 1.05, drive: 0.5, tireMu: 0.92, steerLock: 0.56, cfg: '6x4', name: 'Rodomax 480', hp: 480, cap: 45, mass: 9, level: 10, price: 140000, rigid: false, axles: 3, model: 'volvo', cab: 'cabover', roof: 'high', color: 0x1d3f6e, vmax: 110, desc: 'Cavalo 6x2 de teto alto para longas viagens.' },
-  { id: 'titan', track: 2.0, cgH: 1.1, drive: 0.52, tireMu: 0.93, steerLock: 0.54, cfg: '6x4', name: 'Titan 620 Bicudo', hp: 620, cap: 65, mass: 10.5, level: 15, price: 280000, rigid: false, axles: 3, cab: 'conventional', roof: 'high', color: 0x222831, vmax: 105, desc: 'Bicudo 6x4 de capô longo e muita tração.' },
-  { id: 'colosso', track: 2.05, cgH: 1.15, drive: 0.55, tireMu: 0.95, steerLock: 0.5, cfg: '8x4', name: 'Colosso 750 8x4', hp: 750, cap: 90, mass: 12.5, level: 20, price: 500000, rigid: false, axles: 4, cab: 'conventional', roof: 'high', color: 0xf0a000, vmax: 95, desc: 'Gigante para cargas especiais e indivisíveis.' },
+  { id: 'mini', tank: 40, kml: 9.5, track: 1.25, cgH: 0.8, drive: 0.45, tireMu: 0.95, steerLock: 0.66, name: 'Mini Carga 1.0', hp: 95, cap: 1.5, mass: 1.0, level: 1, price: 0, rigid: true, axles: 2, model: 'labo', color: 0x3d7fd1, vmax: 95, desc: 'Picape de carga compacta para entregas leves.' },
+  { id: 'urbano', tank: 110, kml: 5.2, track: 1.6, cgH: 1.0, drive: 0.5, tireMu: 0.95, steerLock: 0.62, name: 'Leve Baú 4.5', hp: 160, cap: 5, mass: 4.5, level: 2, price: 8000, rigid: true, axles: 2, model: 'canter', color: 0xf2f2f2, vmax: 100, desc: 'Caminhão leve com baú, ágil na cidade.' },
+  { id: 'toco', tank: 200, kml: 3.6, track: 1.85, cgH: 1.2, drive: 0.5, tireMu: 0.92, steerLock: 0.6, name: 'Toco 11-240', hp: 240, cap: 12, mass: 7.5, level: 3, price: 15000, rigid: true, axles: 2, cab: 'cabover', roof: 'mid', color: 0x2f6fde, vmax: 100, desc: 'Caminhão médio de carroceria baú.' },
+  { id: 'cavalo', tank: 450, kml: 2.6, track: 2.0, cgH: 1.05, drive: 0.33, tireMu: 0.9, steerLock: 0.58, cfg: '6x2', name: 'Cavalo 360', hp: 360, cap: 30, mass: 8.5, level: 6, price: 60000, rigid: false, axles: 3, model: 'volvo', cab: 'cabover', roof: 'high', color: 0xb5121b, vmax: 110, desc: 'Cavalo mecânico cara-chata para carretas.' },
+  { id: 'rodo', tank: 600, kml: 2.3, track: 2.0, cgH: 1.05, drive: 0.5, tireMu: 0.92, steerLock: 0.56, cfg: '6x4', name: 'Rodomax 480', hp: 480, cap: 45, mass: 9, level: 10, price: 140000, rigid: false, axles: 3, model: 'volvo', cab: 'cabover', roof: 'high', color: 0x1d3f6e, vmax: 110, desc: 'Cavalo 6x2 de teto alto para longas viagens.' },
+  { id: 'titan', tank: 700, kml: 2.0, track: 2.0, cgH: 1.1, drive: 0.52, tireMu: 0.93, steerLock: 0.54, cfg: '6x4', name: 'Titan 620 Bicudo', hp: 620, cap: 65, mass: 10.5, level: 15, price: 280000, rigid: false, axles: 3, cab: 'conventional', roof: 'high', color: 0x222831, vmax: 105, desc: 'Bicudo 6x4 de capô longo e muita tração.' },
+  { id: 'colosso', tank: 900, kml: 1.7, track: 2.05, cgH: 1.15, drive: 0.55, tireMu: 0.95, steerLock: 0.5, cfg: '8x4', name: 'Colosso 750 8x4', hp: 750, cap: 90, mass: 12.5, level: 20, price: 500000, rigid: false, axles: 4, cab: 'conventional', roof: 'high', color: 0xf0a000, vmax: 95, desc: 'Gigante para cargas especiais e indivisíveis.' },
 ];
+export const FUEL_PRICE = 6.19; // R$/L diesel
+// o mapa é uma versão compacta do mundo real: o consumo é escalado para que o tanque dure
+// algumas viagens (kml = km/L reais, a 80 km/h com meia carga)
+export const FUEL_SCALE = 14;
+export const autonomy = (t) => Math.round((t.tank * t.kml) / FUEL_SCALE);
 export const TRUCK = Object.fromEntries(TRUCKS.map((t) => [t.id, t]));
 
 // Cargas: t = toneladas; lvl = nível mínimo; trailer = tipo de implemento

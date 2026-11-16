@@ -11,11 +11,12 @@ Faça entregas pela cidade, suba de nível, compre caminhões mais fortes e libe
 | Acelerar / Frear | pedais à direita | `W`/`↑` e `S`/`↓`/`Espaço` |
 | Câmbio | seletor **D / N / R** (ou automático em Ajustes) | `R` ré, `N` neutro |
 | Direção | **volante** (arraste), setas ou inclinação do celular | `A` `D` / `←` `→` |
-| Freio de mão / Faróis | **(P)** no painel / botão de farol | `P` / `L` |
+| Freio de mão / Faróis / Freio-motor | **P** / **◐** / **FM** sob o velocímetro | `P` / `L` / `B` |
+| Abastecer, trocar estepe, guincho | botão que aparece no centro quando disponível | `F` |
 | Pisca-pisca (seta) | setas ◀ ▶ acima do volante (desligam sozinhas após a curva), ⚠ alerta | `Z` / `X` |
-| Buzina / Câmera / Mapa | centro do volante / 🎥 / toque no minimapa | `H` / `C` / `M` |
+| Buzina / Câmera / Mapa / Menu | centro do volante / 🎥 / toque no minimapa / ☰ | `H` / `C` / `M` / `Esc` |
 
-1. Abra a **Central de Fretes 📋** e aceite uma carga.
+1. Abra o **menu ☰ → Fretes** e aceite uma carga.
 2. Siga a seta verde e a rota laranja do GPS até o local de **coleta** e pare dentro da área amarela.
 3. Leve a carga até o **destino** antes do prazo. Batidas avariam a carga e reduzem o pagamento.
 4. Ganhe dinheiro + XP, suba de nível e compre caminhões na **Garagem 🚚**.
@@ -27,6 +28,17 @@ Faça entregas pela cidade, suba de nível, compre caminhões mais fortes e libe
   transformador altos, bobinas baixas, tanque com líquido que balança).
 * Curva rápida demais: o caminhão **sai de frente** (derrapa e perde velocidade) ou, se a carga for alta,
   **tomba** — com aviso de risco no painel. Tração e frenagem limitadas pelo piso (na lama o 6x2 carregado patina).
+* **Relevo**: a gravidade age sempre — o caminhão perde força e velocidade nas subidas (carregado sobe devagar)
+  e embala nas descidas, podendo passar do limitador. Parado na rampa sem freio, desce de ré.
+* **Freio-motor (FM)** segura o caminhão nas descidas. Descer só no pedal aquece os freios, que perdem eficiência
+  (aviso "freios superaquecidos").
+* **Lama**: as estradas de lama têm poças fundas. Parar ou patinar dentro delas faz o caminhão afundar e atolar —
+  aí só com o **guincho** (pago). Passe embalado e com aceleração leve.
+* **Pneu furado**: chance maior em cascalho/terra, alta velocidade, excesso de peso e batidas. Puxa para um lado
+  e limita a 60 km/h. Pare e use o **estepe** (um por vez) ou vá a um posto (**borracharia**).
+* **Combustível**: cada caminhão tem tanque e consumo próprios (autonomia da Mini Carga ~27 km até ~150 km do
+  Colosso, na escala do mapa). Consumo cresce com carga, subidas e acelerador. **Postos** à beira das rodovias
+  (⛽ no mapa) e o Posto Rodoviário da cidade abastecem e consertam pneus. Sem diesel, o motor apaga.
 * **Bitrem**: duas carretas articuladas (soja, toras e combustível — até 50 t), exige cavalo 6x4 ou 8x4.
 
 ### Progressão
@@ -41,6 +53,7 @@ Faça entregas pela cidade, suba de nível, compre caminhões mais fortes e libe
 * Implementos diferentes por carga: baú, tanque, graneleiro, prancha (madeira/contêiner/bobinas/vigas) e
   prancha rebaixada para cargas indivisíveis. A carreta é articulada (física de engate real).
 * Física baseada em potência × massa: com 60 t o caminhão acelera e freia de forma bem diferente de vazio.
+* HUD limpo: minimapa, frete em uma linha, um único mostrador (velocidade, rotação, marcha, combustível).
 * Bônus por entrega no prazo, multa por atraso, avarias, 30 níveis, estatísticas e salvamento automático.
 
 ## Mundo

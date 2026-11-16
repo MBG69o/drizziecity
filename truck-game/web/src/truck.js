@@ -4,7 +4,7 @@ import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { Builder, mat, G } from './geo.js';
 import { tex } from './textures.js';
-import { trailerMass, cargoCG, SURFACES } from './data.js';
+import { trailerMass, cargoCG, SURFACES, FUEL_SCALE } from './data.js';
 const SURF = Object.fromEntries(Object.entries(SURFACES).map(([k, v]) => [k, { ...v, key: k }]));
 
 let QUAL = 'medium';
@@ -815,6 +815,9 @@ const G0 = 9.81;
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 
+// furos por km rodado em cada piso
+const PUNCT = { asphalt: 0.003, concrete: 0.002, cobble: 0.008, gravel: 0.03, dirt: 0.015, mud: 0.012 };
+
 export class Rig {
   constructor(scene, def, shadows) {
     this.scene = scene;
@@ -834,12 +837,19 @@ export class Rig {
     this.slosh = 0; this.sloshV = 0;
     this.rolled = 0;
     this.surface = 'asphalt';
+    this.sink = 0; this.stuck = false; this.stuckT = 0;   // atolamento
+    this.flat = 0; this.spare = true;                     // pneu furado (-1 esq / 1 dir) e estepe
+    this.brakeT = 0;                                      // temperatura dos freios (0..1+)
+    this.retarder = true;                                 // freio-motor
+    this.fuel = def.tank; this.lpm = FUEL_SCALE / (def.kml * 1000); // litros e consumo médio (L/m)
     this.setTruck(def);
   }
 
   setTruck(def) {
     if (this.model) this.scene.remove(this.model.root);
     this.def = def;
+    this.fuel = Math.min(this.fuel, def.tank);
+    this.lpm = FUEL_SCALE / (def.kml * 1000);
     this.model = buildTruck(def);
     this.model.blob.visible = !this.shadows;
     this.scene.add(this.model.root);
@@ -905,6 +915,11 @@ export class Rig {
       fragile: !!(c && c.fragile),
       trailerMu: sub === 'lowboy' ? 0.85 : 0.9,
     };
+    // consumo: calibrado para que, a 80 km/h no plano com meia carga, o caminhão faça def.kml km/L
+    const vr = 22.2, mRef = mT + d.cap * 500 + (d.rigid ? 0 : 7000);
+    const Fref = 0.008 * mRef * G0 + 0.6 * (d.rigid ? 6.5 : 8) * vr * vr;
+    this.P.Ej = (Fref * vr) / ((vr / 1000 / d.kml) * FUEL_SCALE); // joules úteis por litro (escala do mapa)
+    this.P.idle = ((0.6 + d.hp / 220) / 3600) * FUEL_SCALE * 0.5;       // L/s em marcha lenta
   }
 
   setBlink(dir, on) {
@@ -924,6 +939,15 @@ export class Rig {
     if (this.trailer2) this.trailer2.night.visible = on;
   }
 
+  puncture(side) {
+    if (this.flat) return false;
+    this.flat = side || (Math.random() < 0.5 ? -1 : 1);
+    if (this.onPuncture) this.onPuncture();
+    return true;
+  }
+  // autonomia estimada (km) com o consumo médio recente
+  get range() { return this.fuel / Math.max(this.lpm, 1e-5) / 1000; }
+
   get mass() { return this.P ? this.P.mass : this.def.mass * 1000; }
   get speedKmh() { return Math.abs(this.v) * 3.6; }
   // comprimento total (para a câmera)
@@ -931,6 +955,7 @@ export class Rig {
 
   place(x, z, h) {
     this.x = x; this.z = z; this.h = h; this.th = h; this.th2 = h;
+    this.sink = 0; this.stuck = false; this.stuckT = 0;
     this.v = 0; this.steer = 0; this.yaw = 0; this.tip = 0; this.slosh = 0; this.sloshV = 0;
     this.sync();
   }
@@ -965,12 +990,16 @@ export class Rig {
     const m = Pp.mass;
     const S = SURF[world.surfaceAt ? world.surfaceAt(this.x, this.z) : 'asphalt'] || SURF.asphalt;
     this.surface = S.key;
-    const mu = S.mu * Pp.tireMu;
-    const Pw = def.hp * 735.5 * 2.3;
-    const vmax = def.vmax / 3.6;
+    // estradas de lama: firme entre as poças, mole e escorregadia dentro delas
+    const deep = S.key === 'mud' && world.mudDepth ? world.mudDepth(this.x, this.z) : 0;
+    const mu = (S.key === 'mud' ? 0.5 - 0.2 * deep : S.mu) * Pp.tireMu;
+    const Pw = def.hp * 735.5 * 1.45;
+    const vmax = (this.flat ? Math.min(def.vmax, 60) : def.vmax) / 3.6;
     let v = this.v;
-    let F = 0;
+    let F = 0;          // forças que movem (motor + gravidade)
+    let R = 0;          // resistências: sempre se opõem ao movimento (não invertem o sentido)
     const brake = inp.brake, thr = inp.throttle;
+    if (this.fuel <= 0 && this.engineOn) { this.engineOn = false; this.fuel = 0; if (this.onFuelOut) this.onFuelOut(); }
 
     if (inp.gear === 'auto') {
       this.stopT = brake > 0.1 && Math.abs(v) < 0.4 && thr < 0.1 ? (this.stopT || 0) + dt : 0;
@@ -980,32 +1009,56 @@ export class Rig {
     const drive = this.engineOn && inp.gear !== 'N';
     const autoRev = inp.gear === 'auto' && this.reverse;
 
+    // ---- lama: o caminhão afunda se parar ou patinar ----
+    const av = Math.abs(v);
+    if (deep > 0) {
+      const heavy = Math.sqrt(m / 20000);
+      this.sink += dt * deep * heavy * ((av < 3 ? 0.07 : 0) + this.wheelspin * 0.3 - (av > 6 ? 0.05 : 0));
+    } else this.sink -= dt * (av > 1 ? 0.5 : 0.15);
+    this.sink = clamp(this.sink, 0, 1);
+    const crr = S.crr * (S.key === 'mud' ? 0.4 + 0.6 * deep : 1) * (1 + this.sink * 3.5) + (this.flat ? 0.012 : 0);
+
     // tração limitada pela aderência do piso sobre os eixos de tração
-    const Ftrac = mu * G0 * Pp.driveMass;
-    // frenagem limitada pela aderência (ABS)
-    const Fbrk = Math.min(6.8, mu * G0 * 0.95) * m;
-    let Fdrive = 0;
+    const Ftrac = mu * G0 * Pp.driveMass * (1 - this.sink * 0.45);
+    // freios: aquecem nas descidas longas e perdem eficiência (fading)
+    const fade = clamp(1 - Math.max(0, this.brakeT - 0.55) * 1.4, 0.3, 1);
+    this.fade = fade;
+    const Fbrk = Math.min(6.8, mu * G0 * 0.95) * m * fade;
+    let Fdrive = 0, Fb = 0;
+    // limitador: o motor não empurra acima da velocidade máxima (mas a gravidade pode)
+    const lim = (sp) => clamp((vmax - sp) / 1.5, 0, 1);
     if (!this.reverse) {
-      if (drive && thr > 0 && v >= -0.3) Fdrive = thr * Math.min(Pw / Math.max(v, 3), m * 3.0, def.hp * 250);
-      if (brake > 0 && v > 0) F -= brake * Fbrk;
-      if (brake > 0 && v < 0) F += brake * Fbrk;
+      if (drive && thr > 0 && v >= -0.3) Fdrive = thr * lim(v) * Math.min(Pw / Math.max(v, 3), m * 3.0, def.hp * 250);
+      Fb = brake * Fbrk;
     } else if (autoRev) {
       if (drive && brake > 0 && v > -4.5) Fdrive = -brake * Math.min(Pw / Math.max(-v, 3), m * 1.6);
-      if (thr > 0 && v < 0) F += thr * Fbrk;
+      Fb = thr * Fbrk;
     } else {
       if (drive && thr > 0 && v > -5) Fdrive = -thr * Math.min(Pw / Math.max(-v, 3), m * 1.6);
-      if (brake > 0 && v < 0) F += brake * Fbrk;
-      if (brake > 0 && v > 0) F -= brake * Fbrk;
+      Fb = brake * Fbrk;
     }
     // patinagem: força acima da aderência vira giro em falso
     this.wheelspin = Math.abs(Fdrive) > Ftrac ? Math.min(1, (Math.abs(Fdrive) - Ftrac) / Ftrac) : 0;
-    F += clamp(Fdrive, -Ftrac, Ftrac);
-    if (inp.handbrake) F -= Math.sign(v) * Math.min(m * 5, mu * G0 * m * 0.6);
-    // gravidade nos aclives
+    Fdrive = clamp(Fdrive, -Ftrac, Ftrac);
+    F += Fdrive;
+    R += Fb;
+    if (inp.handbrake) R += Math.min(m * 5, mu * G0 * m * 0.6);
+    // freio-motor / retarder (só engatado, sem acelerar)
+    let Feng = 0;
+    if (drive && thr < 0.05 && av > 2 && !autoRev) {
+      Feng = m * 0.2 * clamp(av / 12, 0.3, 1) + (this.retarder ? Math.min(m * 0.6 * clamp(av / 22, 0, 1), (0.6 * Pw) / Math.max(av, 4)) : 0);
+      R += Feng;
+    } else if (thr < 0.05 && brake < 0.05) R += m * 0.05;
+    this.engBrake = Feng;
+    // gravidade: sempre age — perde força na subida, embala na descida, desce de ré se soltar o freio
     const grade = Math.sin(this.pitch) * 0.55 + Math.sin(this.trailer ? this.tpitch : this.pitch) * 0.45;
     const Fg = -m * G0 * grade;
-    const drag = 0.5 * 1.2 * Pp.cda * v * Math.abs(v);
-    const roll = (S.crr * m * G0 + (thr < 0.05 && brake < 0.05 ? m * 0.3 : 0)) * Math.sign(v);
+    F += Fg;
+    R += crr * m * G0 + 0.5 * 1.2 * Pp.cda * v * v;
+    // temperatura dos freios
+    const pBrake = Fb * av / m;                    // W/kg dissipados
+    this.brakeT += dt * (pBrake / 220 - (0.01 + av * 0.0007) * this.brakeT);
+    this.brakeT = Math.max(0, this.brakeT);
 
     // ---- curva: aderência lateral x força centrífuga ----
     const lockV = Pp.steerLock / (1 + (v * v) / 260);
@@ -1057,15 +1110,36 @@ export class Rig {
       return;
     }
 
-    v += ((F + (Math.abs(v) > 0.2 || thr > 0 ? Fg : 0) - drag - Math.sign(v) * scrub) / m) * dt;
-    const rollA = roll / m;
-    if (Math.abs(rollA * dt) > Math.abs(v) && Math.abs(F) < 1) v = 0;
-    else v -= rollA * dt;
-    const want = !drive ? 0 : !this.reverse ? (thr > 0 ? 1 : 0) : autoRev ? (brake > 0 ? -1 : 0) : (thr > 0 ? -1 : 0);
-    if (v !== 0 && Math.sign(v) !== want && Math.sign(v) !== Math.sign(this.v)) v = 0;
-    if (inp.handbrake && Math.abs(v) < 0.3) v = 0;
-    v = Math.min(v, vmax);
-    v = Math.max(v, -5);
+    R += scrub;
+    // integra: resistências levam a velocidade a zero sem inverter; parado, seguram até o limite estático
+    if (Math.abs(v) < 0.05 && Math.abs(F) <= R * 1.05) v = 0;
+    else {
+      const dir = Math.abs(v) >= 0.05 ? Math.sign(v) : Math.sign(F);
+      const nv = v + (F / m) * dt;
+      const dv = (R / m) * dt;
+      v = Math.sign(nv) !== dir && Math.abs(v) >= 0.05 ? nv : Math.abs(nv) <= dv ? 0 : nv - Math.sign(nv) * dv;
+    }
+    // atolado: patinando sem sair do lugar
+    if ((this.sink > 0.4 || deep > 0.2) && Math.abs(v) < 1.3 && (thr > 0.4 || (autoRev && brake > 0.4))) this.stuckT += dt;
+    else if (Math.abs(v) > 1.5) this.stuckT = 0;
+    this.stuck = this.stuckT > 3;
+    // pneu furado puxa para um lado
+    if (this.flat && Math.abs(v) > 2) this.h += this.flat * 0.012 * Math.min(1, Math.abs(v) / 15) * dt * Math.sign(v);
+    // furos: depende do piso, da velocidade e do excesso de peso
+    if (!this.flat && Math.abs(v) > 3) {
+      const over = this.cargo ? Math.max(0, this.cargo.t / def.cap - 1) : 0;
+      const perKm = (PUNCT[S.key] || 0.004) * (1 + Math.max(0, Math.abs(v) - 20) / 15) * (1 + over * 4);
+      if (Math.random() < (perKm * Math.abs(v) * dt) / 1000) this.puncture();
+    }
+    // consumo de combustível: trabalho do motor / energia útil do diesel + marcha lenta
+    if (this.engineOn) {
+      const work = Math.max(0, Fdrive * v) * (1 + this.wheelspin);
+      const use = (work / Pp.Ej + Pp.idle * (0.6 + this.rpm)) * dt;
+      this.fuel = Math.max(0, this.fuel - use);
+      if (Math.abs(v) > 1) this.lpm += (use / (Math.abs(v) * dt) - this.lpm) * Math.min(1, dt * 0.02);
+    }
+    v = Math.min(v, vmax * 1.45);
+    v = Math.max(v, -12);
     this.acc = (v - this.v) / Math.max(dt, 1e-3);
     this.v = v;
     this.grade = grade;
@@ -1108,7 +1182,7 @@ export class Rig {
     const load = Math.max(thr, grade > 0.02 ? 0.7 : 0);
     const rpmT = !this.engineOn ? 0 : Math.abs(v) < 0.3 || inp.gear === 'N' ? 0.18 + thr * 0.5 : 0.3 + inGear * 0.6 * (0.5 + load * 0.5) + this.wheelspin * 0.3;
     this.rpm += (rpmT - this.rpm) * Math.min(1, dt * 6);
-    this.shake = S.shake * Math.min(1, Math.abs(v) / 12);
+    this.shake = (S.shake + (this.flat ? 0.03 : 0) + this.sink * 0.02) * Math.min(1, Math.abs(v) / 12);
     this.sync();
   }
 
@@ -1156,6 +1230,7 @@ export class Rig {
       if (sp > 4 && maxPen > 0.12 && this.collCooldown <= 0) {
         this.lastImpact = sp;
         this.collCooldown = 0.6;
+        if (sp > 20 && Math.random() < 0.3) this.puncture();
       }
       this.v *= sp > 15 && maxPen > 0.3 ? -0.12 : maxPen > 0.12 ? 0.6 : 0.97;
     }

@@ -1,6 +1,6 @@
 // Drizzie Truck — núcleo do jogo: renderização, controles, fretes, progressão e HUD.
 import * as THREE from 'three';
-import { SURFACES, BLOCK, ROAD_W, HW_HALF, CITIES, cx1, cz1, zoneOf, LOCATIONS, LOC, TRUCKS, TRUCK, CARGOS, CARGO, xpForLevel, MAX_LEVEL, WORLD, SEA_Z, RIVER_W } from './data.js';
+import { FUEL_PRICE, FUEL_SCALE, autonomy, SURFACES, BLOCK, ROAD_W, HW_HALF, CITIES, cx1, cz1, zoneOf, LOCATIONS, LOC, TRUCKS, TRUCK, CARGOS, CARGO, xpForLevel, MAX_LEVEL, WORLD, SEA_Z, RIVER_W } from './data.js';
 import { configureTextures, tex } from './textures.js';
 import { World } from './world.js';
 import { Rig, setTruckQuality, MODELS } from './truck.js';
@@ -18,7 +18,7 @@ const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
 // ---------------- Save ----------------
 const DEFAULTS = {
-  money: 3000, xp: 0, level: 1, owned: ['mini'], truck: 'mini', job: null, pos: null, name: 'Motorista', clock: 15.5,
+  money: 3000, xp: 0, level: 1, owned: ['mini'], truck: 'mini', job: null, pos: null, name: 'Motorista', clock: 15.5, fuelBy: {}, tire: { flat: 0, spare: true },
   stats: { deliveries: 0, km: 0, earned: 0, tons: 0, crashes: 0 },
   settings: { quality: 'auto', volume: 0.7, fps: false, steer: 'wheel', camera: 0, time: 'cycle', gearbox: 'manual', gauge: 'analog', accent: 'amber', hud: 'normal' },
 };
@@ -37,6 +37,7 @@ const S = loadSave();
 function save() {
   try {
     S.pos = rig ? { x: rig.x, z: rig.z, h: rig.h } : S.pos;
+    if (rig) { S.fuelBy[S.truck] = +rig.fuel.toFixed(2); S.tire = { flat: rig.flat, spare: rig.spare }; }
     localStorage.setItem(SAVE_KEY, JSON.stringify(S));
   } catch (e) { /* armazenamento indisponível */ }
 }
@@ -157,6 +158,13 @@ async function boot() {
     rig.onModel(rig.model);
   }
   placeAtStart();
+  restoreTruckState();
+  rig.onPuncture = () => {
+    audio.crash(18); audio.airBrake();
+    if (navigator.vibrate) try { navigator.vibrate([60, 40, 60]); } catch (e) { /* */ }
+    toast(`💥 <b>Pneu furado!</b> ${rig.spare ? 'Pare e troque pelo estepe' : 'Sem estepe — vá até um posto (borracharia)'}`, 3800);
+  };
+  rig.onFuelOut = () => { audio.beep(300, 0.4, 'sawtooth', 0.15); toast('⛽ <b>Acabou o diesel!</b> O motor apagou.', 4000); $('enginebtn').classList.remove('hidden'); };
   rig.onRollover = () => {
     audio.crash(60);
     S.stats.crashes++;
@@ -621,7 +629,9 @@ function setupInput() {
   $('ic-haz').addEventListener('pointerdown', (e) => { e.preventDefault(); setBlink(2); });
   window.__setBlink = setBlink;
   $('ic-hand').addEventListener('pointerdown', (e) => { e.preventDefault(); ctl.hand = !ctl.hand; audio.airBrake(); });
-  $('lightsbtn').addEventListener('pointerdown', (e) => { e.preventDefault(); lightsManual = !rig.lightsOn; rig.setLights(lightsManual); audio.beep(1400, 0.04, 'square', 0.08); });
+  $('ic-light').addEventListener('pointerdown', (e) => { e.preventDefault(); lightsManual = !rig.lightsOn; rig.setLights(lightsManual); audio.beep(1400, 0.04, 'square', 0.08); });
+  $('ic-ret').addEventListener('pointerdown', (e) => { e.preventDefault(); rig.retarder = !rig.retarder; audio.beep(rig.retarder ? 1100 : 600, 0.04, 'square', 0.08); toast(`Freio-motor ${rig.retarder ? 'LIGADO' : 'desligado'}`, 1000); });
+  $('actionbtn').addEventListener('click', doAction);
   $('enginebtn').addEventListener('click', startEngine);
 
   const keys = { ArrowUp: 'gas', KeyW: 'gas', ArrowDown: 'brake', KeyS: 'brake', Space: 'brake', ArrowLeft: 'left', KeyA: 'left', ArrowRight: 'right', KeyD: 'right' };
@@ -634,6 +644,8 @@ function setupInput() {
     if (e.code === 'KeyE' && !e.repeat) startEngine();
     if (e.code === 'KeyL' && !e.repeat) { lightsManual = !rig.lightsOn; rig.setLights(lightsManual); }
     if (e.code === 'KeyP' && !e.repeat) ctl.hand = !ctl.hand;
+    if (e.code === 'KeyB' && !e.repeat) rig.retarder = !rig.retarder;
+    if (e.code === 'KeyF' && !e.repeat) doAction();
     if (e.code === 'KeyZ' && !e.repeat) window.__setBlink(-1);
     if (e.code === 'KeyX' && !e.repeat) window.__setBlink(1);
     if (e.code === 'KeyC' && !e.repeat) cycleCamera();
@@ -855,6 +867,12 @@ function mapIcon(ctx, x, y, color, r) {
   ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.fill(); ctx.stroke();
 }
 
+function fuelIcon(ctx, x, y, r) {
+  ctx.fillStyle = '#d02020'; ctx.strokeStyle = '#fff'; ctx.lineWidth = r * 0.3;
+  ctx.beginPath(); ctx.rect(x - r, y - r, r * 2, r * 2); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = '#fff'; ctx.fillRect(x - r * 0.45, y - r * 0.55, r * 0.6, r * 1.1);
+}
+
 function drawMinimap() {
   const cv = $('minimap'), ctx = cv.getContext('2d');
   const W = cv.width, H = cv.height;
@@ -877,6 +895,7 @@ function drawMinimap() {
     const d = world.depots[L.id];
     mapIcon(ctx, d.zone.x, d.zone.z, tgt === d ? accentHex() : L.id === 'garagem' ? '#2f6fde' : 'rgba(30,30,30,0.85)', (tgt === d ? 9 : 6) / k);
   }
+  for (const st of world.stations) fuelIcon(ctx, st.x, st.z, 7 / k);
   ctx.fillStyle = 'rgba(255,255,255,0.7)';
   for (const c of traffic.cars) if (c.mode) ctx.fillRect(c.x - 2 / k, c.z - 2 / k, 4 / k, 4 / k);
   ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -922,6 +941,7 @@ function openMap() {
     mapIcon(ctx, d.zone.x, d.zone.z, tgt === d ? accentHex() : L.id === 'garagem' ? '#2f6fde' : '#222', 6 * dpr / k);
     label(L.name, d.zone.x, d.zone.z - 14 * dpr / k, 10 * dpr);
   }
+  for (const st of world.stations) { fuelIcon(ctx, st.x, st.z, 6 * dpr / k); label(st.name, st.x, st.z - 12 * dpr / k, 9 * dpr, '#ffb3b3'); }
   ctx.save();
   ctx.translate(rig.x, rig.z);
   ctx.rotate(Math.PI + rig.h);
@@ -941,7 +961,7 @@ function setupUI() {
     if (b.dataset.tab) { renderTab(b.dataset.tab); return; }
     const a = b.dataset.act, arg = b.dataset.arg;
     if (a === 'jobs' || a === 'garage' || a === 'settings') openModal(a);
-    else if (a === 'menu' || a === 'pause') openModal('settings');
+    else if (a === 'menu' || a === 'pause') openModal('jobs');
     else if (a === 'rename') { const n = prompt('Nome do motorista:', S.name); if (n && n.trim()) { S.name = n.trim().slice(0, 18); save(); showTitle(); } }
     else if (a === 'map') openMap();
     else if (a === 'gauge') { S.settings.gauge = arg; save(); renderTab('settings'); }
@@ -1006,7 +1026,7 @@ function showTitle() {
   $('tmoney').textContent = fmt(S.money);
   const t = rig.def;
   $('tiname').textContent = t.name;
-  $('tispecs').innerHTML = `<span>${t.hp} cv</span><span>${t.cap} t</span><span>${t.vmax} km/h</span><span>${t.rigid ? 'Rígido' : 'Cavalo ' + t.cfg}</span>`;
+  $('tispecs').innerHTML = `<span>${t.hp} cv</span><span>${t.cap} t</span><span>${t.vmax} km/h</span><span>⛽ ${autonomy(t)} km</span><span>${t.rigid ? 'Rígido' : 'Cavalo ' + t.cfg}</span>`;
   const j = S.job;
   $('tjob').innerHTML = j ? `${CARGO[j.cargo].icon} ${CARGO[j.cargo].name} → <b>${LOC[j.phase === 'pickup' ? j.from : j.to].name}</b>` : 'Nenhum frete ativo';
   $('tstats').innerHTML = `<div><b>${S.stats.deliveries}</b><small>entregas</small></div><div><b>${S.stats.km.toFixed(0)}</b><small>km</small></div><div><b>${S.stats.tons.toFixed(0)}</b><small>toneladas</small></div><div><b>${S.owned.length}</b><small>caminhões</small></div>`;
@@ -1015,6 +1035,7 @@ function showTitle() {
 function openModal(tab) {
   state = state === 'title' ? 'title' : 'menu';
   $('modal').classList.remove('hidden');
+  $('mstat').innerHTML = `Nv <b>${S.level}</b> • ${fmt(S.money)}`;
   ctl.gas = ctl.brake = ctl.left = ctl.right = false;
   document.querySelectorAll('.pad').forEach((p) => p.classList.remove('on'));
   renderTab(tab);
@@ -1093,6 +1114,7 @@ function garageHTML() {
         <div class="stat"><span>Potência</span><b>${t.hp} cv</b></div><div class="meter"><i style="width:${(t.hp / maxHp) * 100}%"></i></div>
         <div class="stat"><span>Capacidade</span><b>${t.cap} t</b></div><div class="meter"><i style="width:${(t.cap / maxCap) * 100}%"></i></div>
         <div class="stat"><span>Velocidade máx.</span><b>${t.vmax} km/h</b></div>
+        <div class="stat"><span>Tanque • autonomia</span><b>${t.tank} L • ~${autonomy(t)} km</b></div>
         <div class="stat"><span>Tipo</span><b>${t.rigid ? 'Rígido (baú)' : `Cavalo mecânico ${t.cfg}`}</b></div>
         ${btn}</div>`;
     }).join('') + '</div>';
@@ -1108,12 +1130,97 @@ function buyTruck(id) {
   useTruck(id);
 }
 
+function restoreTruckState() {
+  const f = S.fuelBy[S.truck];
+  rig.fuel = f === undefined ? rig.def.tank : Math.min(f, rig.def.tank);
+  rig.flat = S.tire.flat || 0; rig.spare = S.tire.spare !== false;
+}
+
+// ---------------- Posto, borracharia e guincho ----------------
+function nearStation() {
+  const st = world.stationAt(rig.x, rig.z, 4);
+  if (st) return st;
+  for (const L of LOCATIONS) if (L.kind === 'fuel') { const d = world.depots[L.id]; if (Math.abs(rig.x - d.zone.x) < 30 && Math.abs(rig.z - d.zone.z) < 30) return { name: L.name }; }
+  return null;
+}
+const TIRE_PRICE = 450, TOW_BASE = 600;
+let act = null;
+function updateAction() {
+  const stopped = rig.speedKmh < 1.5;
+  let a = null;
+  const st = stopped ? nearStation() : null;
+  if (rig.stuck) a = { id: 'tow', label: `🚜 Chamar guincho • ${fmt(TOW_BASE + rig.mass / 50)}` };
+  else if (st) {
+    const need = rig.def.tank - rig.fuel;
+    const tire = rig.flat || !rig.spare;
+    const cost = (need > 0.5 ? need * FUEL_PRICE : 0) + (tire ? TIRE_PRICE : 0);
+    if (need > 0.5 || tire) a = { id: 'station', label: `⛽ ${need > 0.5 ? 'Abastecer ' + need.toFixed(0) + ' L' : ''}${need > 0.5 && tire ? ' + ' : ''}${tire ? 'Borracharia' : ''} • ${fmt(cost)}`, cost, need, tire, st };
+  } else if (rig.flat && stopped && rig.spare) a = { id: 'spare', label: '🛞 Trocar pelo estepe' };
+  else if (rig.fuel <= 0 && stopped) a = { id: 'fuelcall', label: `⛽ Pedir socorro (40 L) • ${fmt(40 * FUEL_PRICE + 350)}` };
+  const key = a ? a.label : '';
+  if (key !== (act ? act.label : '')) {
+    $('actionbtn').textContent = key;
+    $('actionbtn').classList.toggle('hidden', !a);
+  }
+  act = a;
+}
+let busyT = 0;
+function doAction() {
+  if (!act || busyT > 0) return;
+  audio.init();
+  const a = act;
+  const pay = (v) => { if (S.money < v) { toast('Dinheiro insuficiente'); return false; } S.money -= v; return true; };
+  if (a.id === 'station') {
+    let cost = a.cost, litres = a.need > 0.5 ? a.need : 0;
+    if (S.money < cost && litres > 0) { // abastece o que der
+      const afford = Math.max(0, S.money - (a.tire ? TIRE_PRICE : 0));
+      litres = Math.min(litres, afford / FUEL_PRICE);
+      cost = litres * FUEL_PRICE + (a.tire ? TIRE_PRICE : 0);
+    }
+    if (!pay(cost)) return;
+    rig.fuel += litres;
+    if (a.tire) { rig.flat = 0; rig.spare = true; }
+    audio.beep(900, 0.08); busyT = 1;
+    toast(`⛽ ${litres > 0 ? `<b>${litres.toFixed(0)} L</b> abastecidos` : ''}${litres > 0 && a.tire ? ' • ' : ''}${a.tire ? 'pneus em ordem' : ''} • ${fmt(cost)}`, 2600);
+  } else if (a.id === 'spare') {
+    busyT = 2; toast('🛞 Trocando o pneu…', 1800);
+    setTimeout(() => { rig.flat = 0; rig.spare = false; toast('Estepe instalado. Reponha o estepe em um posto.', 2600); }, 1800);
+  } else if (a.id === 'tow') {
+    if (!pay(TOW_BASE + rig.mass / 50)) return;
+    // puxa o caminhão para frente, para fora do lamaçal
+    const q = world.hw(rig.x, rig.z);
+    let x = rig.x, z = rig.z, h = rig.h;
+    if (q) {
+      const hw = q.o, dir = Math.cos(Math.atan2(hw.dx[q.i], hw.dz[q.i]) - rig.h) >= 0 ? 1 : -1;
+      let i = q.i;
+      for (let n = 0; n < 200; n++) {
+        i = Math.max(0, Math.min(hw.n - 1, i + dir * 3));
+        if ((world.mudDepth(hw.x[i], hw.z[i]) === 0 && Math.abs(hw.s[i] - hw.s[q.i]) > 40) || i === 0 || i === hw.n - 1) break;
+      }
+      x = hw.x[i]; z = hw.z[i]; h = Math.atan2(hw.dx[i], hw.dz[i]) + (dir < 0 ? Math.PI : 0);
+    }
+    rig.place(x, z, h); rig.stuckT = 0; rig.sink = 0;
+    updateCamera(0, true);
+    toast('🚜 Guincho puxou o caminhão para fora da lama', 2600);
+  } else if (a.id === 'fuelcall') {
+    const c = 40 * FUEL_PRICE + 350;
+    if (!pay(c)) return;
+    rig.fuel = Math.min(rig.def.tank, rig.fuel + 40);
+    toast('⛽ Socorro entregou 40 L. Ligue o motor.', 2600);
+  }
+  save();
+}
+
 function useTruck(id) {
   const t = TRUCK[id];
   if (!S.owned.includes(id)) return;
   if (S.job && S.job.phase === 'deliver') { toast('Conclua ou cancele o frete antes de trocar'); return; }
+  S.fuelBy[S.truck] = rig.fuel;
   S.truck = id;
   rig.setTruck(t);
+  const f = S.fuelBy[id];
+  rig.fuel = f === undefined ? t.tank : Math.min(f, t.tank);
+  rig.lpm = FUEL_SCALE / (t.kml * 1000);
   if (S.job && lockReason(S.job, t)) { cancelJob(); }
   save();
   renderTab('garage');
@@ -1272,31 +1379,53 @@ function drawGauge(id, val, max, majors, label, center, sub, redFrom) {
   ctx.fillText(sub, c, c + W * 0.1 + (classic ? W * 0.12 : 0));
 }
 
+// mostrador único: velocidade (ponteiro) + anel de rotação + marcha
+function drawCluster(sp, rpm) {
+  const max = Math.max(120, Math.ceil((rig.def.vmax * 1.3) / 20) * 20);
+  drawGauge('gauge', sp, max, 20, (v) => v, String(Math.round(sp)), rig.engineOn ? 'km/h' : 'OFF', rig.def.vmax);
+  const cv = $('gauge'), ctx = cv.getContext('2d'), W = cv.width, c = W / 2, R = W * 0.49;
+  const a0 = Math.PI * 0.75, a1 = Math.PI * 2.25, f = clamp(rpm / 2500, 0, 1);
+  ctx.lineCap = 'round'; ctx.lineWidth = W * 0.022;
+  ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+  ctx.beginPath(); ctx.arc(c, c, R, a0, a1); ctx.stroke();
+  ctx.strokeStyle = f > 0.86 ? '#ff3b4e' : '#3ee07a';
+  if (f > 0.01) { ctx.beginPath(); ctx.arc(c, c, R, a0, a0 + (a1 - a0) * f); ctx.stroke(); }
+  ctx.lineCap = 'butt';
+  ctx.font = `900 ${W * 0.1}px sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillStyle = rig.reverse ? '#ff9d3c' : '#fff';
+  ctx.fillText(rig.engineOn ? rig.gear || 'N' : '–', c, c + W * 0.33);
+}
+
 function updateHUD(dt) {
   hudT -= dt;
+  busyT -= dt;
   const sp = rig.speedKmh;
-  drawGauge('spdg', sp, 120, 20, (v) => v, String(Math.round(sp)), 'km/h', 100);
-  const rpm = rig.rpm * 2500;
-  drawGauge('rpmg', rpm / 100, 25, 5, (v) => v, rig.engineOn ? (rig.gear || 'N') : 'OFF', 'x100 rpm', 21);
+  drawCluster(sp, rig.rpm * 2500);
   if (hudT > 0) return;
   hudT = 0.2;
-  $('lvl').textContent = 'Nv ' + S.level;
-  $('money').textContent = fmt(S.money);
-  const need = xpForLevel(S.level);
-  $('xpbar').style.width = (S.level >= MAX_LEVEL ? 100 : (S.xp / need) * 100) + '%';
-  $('ic-load').textContent = `${(rig.mass / 1000).toFixed(1)} t • ${SURFACES[rig.surface] ? SURFACES[rig.surface].name : ''}`;
+  updateAction();
+  const fr = rig.fuel / rig.def.tank;
+  $('fuelbar').style.width = (fr * 100).toFixed(1) + '%';
+  $('fuel').classList.toggle('low', fr < 0.12);
+  $('ic-load').textContent = `⛽ ${Math.round(rig.range)} km • ${(rig.mass / 1000).toFixed(1)} t`;
   const pw = $('physwarn');
   let w = '';
   if (rig.rolled > 0) w = '<b class="r">TOMBOU</b>';
   else if ((rig.tipRisk > 0.75 || rig.tip > 0.05) && rig.speedKmh > 12) w = '<b class="r">⚠ RISCO DE TOMBAMENTO — reduza!</b>';
+  else if (rig.stuck) w = '<b class="r">ATOLADO — chame o guincho ou tente de ré</b>';
+  else if (rig.fade < 0.85) w = '<b class="r">FREIOS SUPERAQUECIDOS — use o freio-motor</b>';
   else if (rig.slip > 0.08) w = '<b class="o">DERRAPANDO — curva rápida demais</b>';
+  else if (rig.sink > 0.25) w = '<b class="o">AFUNDANDO NA LAMA — não pare, acelere leve</b>';
   else if (rig.wheelspin > 0.25) w = '<b class="o">PATINANDO — pouca tração no piso</b>';
+  else if (rig.flat) w = `<b class="o">PNEU FURADO${rig.spare ? '' : ' • sem estepe'}</b>`;
+  else if (rig.fuel > 0 && fr < 0.1) w = '<b class="o">RESERVA — procure um posto ⛽</b>';
+  else if (rig.v > rig.def.vmax / 3.6 + 1.5) w = '<b class="o">EMBALANDO NA DESCIDA — segure no freio-motor</b>';
   pw.innerHTML = w;
   pw.classList.toggle('hidden', !w);
   audio.screech(rig.slip > 0.08 ? Math.min(1, rig.slip * 2) : 0);
   $('ic-light').classList.toggle('on', rig.lightsOn);
-  $('lightsbtn').classList.toggle('on', rig.lightsOn);
   $('ic-hand').classList.toggle('on', ctl.hand);
+  $('ic-ret').classList.toggle('on', rig.retarder);
   const j = S.job;
   if (j) {
     const c = CARGO[j.cargo];
@@ -1313,8 +1442,8 @@ function updateHUD(dt) {
     $('ic-dmg').classList.toggle('hidden', j.phase !== 'deliver');
     $('dmg').textContent = j.damage.toFixed(0) + '%';
   } else {
-    $('jobtitle').textContent = 'Sem frete ativo';
-    $('jobsub').innerHTML = 'Toque em 📋 para escolher uma carga';
+    $('jobtitle').textContent = 'Sem frete';
+    $('jobsub').innerHTML = 'Abra o menu ☰ para escolher uma carga';
     $('dist').textContent = '';
     $('ic-dmg').classList.add('hidden');
   }
