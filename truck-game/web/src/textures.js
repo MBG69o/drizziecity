@@ -565,6 +565,63 @@ export const tex = {
     return finish(c, false);
   }),
 
+
+  // Árvores em cartão (fundo transparente): 0 = copa larga, 1 = pinheiro, 2 = eucalipto
+  treeCard: (kind) => memo('treecard' + kind, () => {
+    const w = 256, h = 512;
+    const [c, ctx] = canvas(w, h);
+    ctx.clearRect(0, 0, w, h);
+    const r = rng(900 + kind);
+    // tronco
+    const tg = ctx.createLinearGradient(w / 2 - 10, 0, w / 2 + 10, 0);
+    tg.addColorStop(0, '#3b2a1c'); tg.addColorStop(0.5, '#6d5038'); tg.addColorStop(1, '#2e2016');
+    ctx.fillStyle = tg;
+    const tw = kind === 1 ? 9 : kind === 2 ? 7 : 12;
+    ctx.beginPath(); ctx.moveTo(w / 2 - tw, h); ctx.lineTo(w / 2 + tw, h); ctx.lineTo(w / 2 + tw * 0.4, h * 0.25); ctx.lineTo(w / 2 - tw * 0.4, h * 0.25); ctx.fill();
+    const leaf = (x, y, rad, light) => {
+      const g = ctx.createRadialGradient(x - rad * 0.3, y - rad * 0.35, rad * 0.1, x, y, rad);
+      const base = kind === 1 ? [38, 72, 40] : kind === 2 ? [86, 110, 70] : [62, 98, 44];
+      const k = 0.65 + light * 0.6;
+      g.addColorStop(0, `rgba(${base[0] * k * 1.35 | 0},${base[1] * k * 1.3 | 0},${base[2] * k * 1.2 | 0},1)`);
+      g.addColorStop(0.7, `rgba(${base[0] * k | 0},${base[1] * k | 0},${base[2] * k | 0},1)`);
+      g.addColorStop(1, `rgba(${base[0] * k * 0.7 | 0},${base[1] * k * 0.7 | 0},${base[2] * k * 0.7 | 0},0)`);
+      ctx.fillStyle = g;
+      ctx.beginPath(); ctx.arc(x, y, rad, 0, 7); ctx.fill();
+    };
+    if (kind === 1) {
+      // pinheiro: camadas em cone com pontas
+      for (let i = 0; i < 260; i++) {
+        const t = r();
+        const y = h * 0.06 + t * h * 0.78;
+        const half = (t * 0.42 + 0.04) * w;
+        const x = w / 2 + (r() * 2 - 1) * half;
+        leaf(x, y, 6 + r() * 12 + t * 8, 1 - t * 0.6 + (x < w / 2 ? 0.15 : -0.1));
+      }
+    } else {
+      const top = kind === 2 ? h * 0.05 : h * 0.08, bot = kind === 2 ? h * 0.62 : h * 0.72;
+      const rx = kind === 2 ? w * 0.3 : w * 0.45;
+      for (let i = 0; i < 420; i++) {
+        const a = r() * Math.PI * 2, d = Math.sqrt(r());
+        const x = w / 2 + Math.cos(a) * d * rx;
+        const y = (top + bot) / 2 + Math.sin(a) * d * (bot - top) / 2;
+        const light = 1 - (y - top) / (bot - top) * 0.7 + (x < w / 2 ? 0.15 : -0.1);
+        leaf(x, y, 5 + r() * (kind === 2 ? 10 : 15), light);
+      }
+      // galhos aparecendo
+      ctx.strokeStyle = 'rgba(60,42,28,0.8)'; ctx.lineWidth = 3;
+      for (let i = 0; i < 6; i++) { ctx.beginPath(); ctx.moveTo(w / 2, bot - 10); ctx.lineTo(w / 2 + (r() - 0.5) * rx * 1.2, bot - 30 - r() * 60); ctx.stroke(); }
+    }
+    // pontinhos de folhas para quebrar a borda
+    for (let i = 0; i < 900; i++) {
+      const x = r() * w, y = r() * h * 0.85;
+      const px = ctx.getImageData(x | 0, y | 0, 1, 1).data;
+      if (px[3] > 200) { ctx.fillStyle = `rgba(${px[0] * (0.7 + r() * 0.6) | 0},${px[1] * (0.7 + r() * 0.6) | 0},${px[2] * (0.7 + r() * 0.5) | 0},1)`; ctx.fillRect(x, y, 2, 2); }
+    }
+    const t = finish(c, false);
+    t.premultiplyAlpha = false;
+    return t;
+  }),
+
   warehouse: () => memo('warehouse', () => {
     const s = SIZE / 2;
     const [c, ctx] = canvas(s, s);

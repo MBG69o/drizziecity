@@ -166,12 +166,23 @@ const MODEL_CFG = {
   // vidros (para-brisa e laterais) e caçamba, em coordenadas do modelo
   canter: { glass: { ws: [5.1, 1.73, 4.76, 2.2, 1.76], side: [[4.3, 1.5], [5.08, 1.5], [4.8, 2.12], [4.3, 2.12]], sideX: 0.965 }, lampY: 0.78, blinkY: 0.62 },
   labo: { lampY: 0.78, blinkY: 0.62, bed: { z0: -0.62, z1: 1.18, y: 0.66, w: 1.3 } },
+  volvo: { lampY: 0.85, blinkY: 0.75, tractor: true },
 };
+
+// metadados do modelo (podem vir como texto JSON no glTF)
+function modelMeta(src) {
+  let meta = {};
+  src.traverse((o) => {
+    const u = o.userData || {};
+    if (u.meta) { try { meta = { ...JSON.parse(u.meta), ...meta }; } catch (e) { /* */ } }
+    else if (u.wb && !meta.wb) meta = { ...u, ...meta };
+  });
+  return meta;
+}
 
 function buildFromModel(def, src) {
   const M = mats();
-  let meta = {};
-  src.traverse((o) => { if (o.userData && o.userData.wb) meta = o.userData; });
+  const meta = modelMeta(src);
   const cfg = MODEL_CFG[def.model] || {};
   const root = new THREE.Group();
   root.rotation.order = 'YXZ';
@@ -186,13 +197,18 @@ function buildFromModel(def, src) {
   // modelos importados podem ter faces invertidas: materiais dupla face
   const ds = {};
   const two = (m) => { if (!m) return m; if (m.side === THREE.DoubleSide) return m; return ds[m.uuid] || (ds[m.uuid] = Object.assign(m.clone(), { side: THREE.DoubleSide })); };
+  src.updateMatrixWorld(true);
+  const bbox = new THREE.Box3();
   src.traverse((o) => {
     if (!o.isMesh) return;
-    const m = new THREE.Mesh(o.geometry, two(byRole[o.name] || byRole[o.material && o.material.name] || M.steel));
+    const m = new THREE.Mesh(o.geometry, two(byRole[o.material && o.material.name] || byRole[o.name] || M.steel));
+    m.matrixAutoUpdate = false;
+    m.matrix.copy(o.matrixWorld); // inclui a desquantização do arquivo comprimido
     m.castShadow = true;
     body.add(m);
+    bbox.expandByObject(o);
   });
-  const zf = meta.zFront, rearEnd = meta.zRear, W = meta.width, W2 = W / 2;
+  const zf = bbox.max.z, rearEnd = bbox.min.z, W = bbox.max.x - bbox.min.x, W2 = W / 2;
   // vidros que faltam no modelo
   if (cfg.glass) {
     const G2 = new Builder();
@@ -226,9 +242,13 @@ function buildFromModel(def, src) {
     root.add(g);
   }
   const rl = wheels.filter((w) => w.tag[0] === 'R');
-  if (rl.length) {
-    const dual = rl[0].w > 0.3;
-    const a = axleMesh(rl[0].z, Math.abs(rl[0].x) * 2, rl[0].r, dual ? rl[0].w / 2.1 : Math.max(0.16, rl[0].w), dual);
+  const rz = [];
+  for (const w of rl) if (!rz.some((z) => Math.abs(z - w.z) < 0.3)) rz.push(w.z);
+  for (const z of rz) {
+    const w = rl.find((q) => Math.abs(q.z - z) < 0.3);
+    const track = rl.filter((q) => Math.abs(q.z - z) < 0.3).reduce((s, q) => s + Math.abs(q.x), 0) / rl.filter((q) => Math.abs(q.z - z) < 0.3).length * 2;
+    const dual = w.w > 0.3;
+    const a = axleMesh(z, track, w.r, dual ? w.w / 2.1 : Math.max(0.16, w.w), dual);
     rear.push(a);
     root.add(a);
   }
@@ -266,7 +286,7 @@ function buildFromModel(def, src) {
   blob.rotation.x = -Math.PI / 2;
   blob.position.set(0, 0.05, (zf + rearEnd) / 2);
   root.add(blob);
-  return { root, body, front, rear, wb, wr, hitchZ: rearEnd, zf, rearEnd, paint, blob, cabW: W, night, y0: 1.0, cabFront: zf, ch: meta.height || 2, conv: false, blinkL, blinkR, bedCargo };
+  return { root, body, front, rear, wb, wr, hitchZ: cfg.tractor ? (meta.hitchZ ?? 0.1) : rearEnd, zf, rearEnd, paint, blob, cabW: Math.min(W, 2.6), night, y0: 1.0, cabFront: zf, ch: meta.height || 2, conv: false, blinkL, blinkR, bedCargo };
 }
 
 // ---------- caminhão ----------
@@ -565,15 +585,44 @@ export function buildTrailer(cargo) {
   const box = (b, w, h, d, x, y, z, color, rx = 0, ry = 0, rz = 0) => b.add(G.box(), mat(x, y, z, rx, ry, rz, w, h, d), color);
   const cyl = (b, rad, len, x, y, z, rx, ry, rz, color, seg = 18) => b.add(G.cyl(seg), mat(x, y, z, rx, ry, rz, rad * 2, len, rad * 2), color);
   const type = cargo.trailer, model = cargo.model;
-  const Lt = model === 'blade' ? 20 : type === 'tank' ? 12.5 : type === 'bulk' ? 12 : type === 'lowboy' ? 14.5 : 13.6;
-  const front = 1.0, back = -(Lt - front);
+  const useModel = type === 'flatbed' && MODELS.flatbed;
+  const tm = useModel ? modelMeta(MODELS.flatbed) : null;
+  const Lt = useModel ? tm.front - tm.back : model === 'blade' ? 20 : type === 'tank' ? 12.5 : type === 'bulk' ? 12 : type === 'lowboy' ? 14.5 : 13.6;
+  const front = useModel ? tm.front : 1.0, back = useModel ? tm.back : -(Lt - front);
   const nAx = type === 'lowboy' ? (cargo.t > 60 ? 5 : 4) : 3;
   const axleSpacing = 1.35;
-  const axC = back + 1.6 + ((nAx - 1) * axleSpacing) / 2;
-  const deck = 1.35;
+  const axC = useModel ? tm.axles.reduce((a, b) => a + b, 0) / tm.axles.length : back + 1.6 + ((nAx - 1) * axleSpacing) / 2;
+  const deck = useModel ? tm.deckY - 0.11 : 1.35;
   const extra = [];
+  const modelAxles = [];
+  if (useModel) {
+    // reboque prancha importado (texturas PBR); eixos giram separadamente
+    const src = MODELS.flatbed;
+    src.updateMatrixWorld(true);
+    src.traverse((o) => {
+      if (!o.isMesh) return;
+      let node = o;
+      while (node.parent && !/^axle_/.test(node.name)) node = node.parent;
+      const m = new THREE.Mesh(o.geometry, o.material);
+      m.castShadow = true;
+      m.receiveShadow = true;
+      if (/^axle_/.test(node.name)) {
+        // malha em coordenadas locais do eixo
+        const piv = new THREE.Group();
+        piv.position.setFromMatrixPosition(node.matrixWorld);
+        m.matrixAutoUpdate = false;
+        m.matrix.copy(new THREE.Matrix4().copy(node.matrixWorld).invert().multiply(o.matrixWorld));
+        piv.add(m);
+        if (!modelAxles.includes(piv)) { modelAxles.push(piv); extra.push(piv); }
+      } else {
+        m.matrixAutoUpdate = false;
+        m.matrix.copy(o.matrixWorld);
+        extra.push(m);
+      }
+    });
+  }
 
-  for (const s of [-1, 1]) {
+  if (!useModel) for (const s of [-1, 1]) {
     box(ST, 0.14, 0.42, Lt - 0.6, s * 0.48, deck - 0.3, (front + back) / 2);
     box(D, 0.12, 1.0, 0.12, s * 0.9, 0.6, -1.6);
     box(D, 0.32, 0.06, 0.32, s * 0.9, 0.08, -1.6);
@@ -581,8 +630,10 @@ export function buildTrailer(cargo) {
     box(RE, 0.38, 0.16, 0.05, s * 1.0, deck - 0.4, back - 0.03);
     for (let z = front - 1.5; z > back + 1; z -= 3) box(AM, 0.04, 0.08, 0.12, s * 1.28, deck - 0.1, z);
   }
-  box(D, 2.4, 0.16, 0.12, 0, deck - 0.75, back - 0.06);
-  for (let z = front - 1; z > back + 1; z -= 1.2) box(ST, 0.96, 0.1, 0.1, 0, deck - 0.3, z);
+  if (!useModel) {
+    box(D, 2.4, 0.16, 0.12, 0, deck - 0.75, back - 0.06);
+    for (let z = front - 1; z > back + 1; z -= 1.2) box(ST, 0.96, 0.1, 0.1, 0, deck - 0.3, z);
+  }
 
   if (type === 'box') {
     const h = 2.75, y = deck + h / 2;
@@ -617,8 +668,10 @@ export function buildTrailer(cargo) {
     for (let i = 0; i < 8; i++) for (const s of [-1, 1]) box(D, 0.06, h, 0.08, s * 1.26, deck + h / 2, front - 1 - i * 1.5);
     P.add(G.sphere(), mat(0, deck + h - 0.15, (front + back) / 2, 0, 0, 0, 2.3, 0.9, Lt - 0.5), 0xc9a45c);
   } else if (type === 'flatbed') {
-    box(P, 2.5, 0.22, Lt, 0, deck, (front + back) / 2, 0x6d4c2f);
-    box(P, 2.5, 1.2, 0.1, 0, deck + 0.7, front - 0.05, 0x34495e);
+    if (!useModel) {
+      box(P, 2.5, 0.22, Lt, 0, deck, (front + back) / 2, 0x6d4c2f);
+      box(P, 2.5, 1.2, 0.1, 0, deck + 0.7, front - 0.05, 0x34495e);
+    }
     const top = deck + 0.11;
     const straps = (y) => { for (let z = front - 1.8; z > back + 1; z -= 2.6) box(P, 2.56, 0.02, 0.05, 0, y, z, 0xf1c40f); };
     if (model === 'logs') {
@@ -642,6 +695,9 @@ export function buildTrailer(cargo) {
         box(D, 1.6, 0.25, 1.4, 0, top + 0.12, front - 2 - i * 3.0);
         box(P, 0.05, 1.8, 1.7, 0, top + 0.9, front - 2 - i * 3.0, 0xf1c40f);
       }
+    } else if (model === 'stone') {
+      for (let i = 0; i < 3; i++) box(P, 2.2, 1.35 + (i % 2) * 0.25, 2.6, 0, top + 0.7 + (i % 2) * 0.12, front - 2.6 - i * 3.8, [0x8d8a86, 0xa29e98, 0x7c7975][i], 0, (i - 1) * 0.04, 0);
+      straps(top + 1.6);
     } else if (model === 'beams') {
       for (let r = 0; r < 3; r++)
         for (let i = 0; i < 4; i++) {
@@ -702,8 +758,8 @@ export function buildTrailer(cargo) {
 
   meshesFrom([[P, M.flat], [D, M.dark], [C, M.flatChrome], [RE, M.red], [AM, M.amber], [PN, M.panel], [ST, M.steel]], root);
   for (const e of extra) if (e) { e.castShadow = true; root.add(e); }
-  const axles = [];
-  for (let i = 0; i < nAx; i++) {
+  const axles = [...modelAxles];
+  if (!useModel) for (let i = 0; i < nAx; i++) {
     const a = axleMesh(back + 1.6 + i * axleSpacing, 1.75, 0.5, 0.28, true);
     axles.push(a);
     root.add(a);

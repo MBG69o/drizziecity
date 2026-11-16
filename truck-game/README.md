@@ -25,7 +25,8 @@ Faça entregas pela cidade, suba de nível, compre caminhões mais fortes e libe
 * **19 tipos de carga**: encomendas (1 t), medicamentos, eletrônicos, hortifrúti, móveis, bebidas, ração,
   trator agrícola, toras, contêiner, soja a granel, combustível, cimento, bobinas de aço, vigas, escavadeira,
   transformador (56 t), pá eólica (62 t) e prensa industrial (85 t).
-* **7 caminhões** — Mini Carga 1.0 e Leve Baú 4.5 usam modelos 3D importados (Labo e Canter, fornecidos
+* **7 caminhões** — Cavalo 360 e Rodomax 480 usam o modelo Volvo FH 460 (Rick Modding); cargas de prancha
+  usam o reboque prancha com texturas PBR. Mini Carga 1.0 e Leve Baú 4.5 usam modelos 3D importados (Labo e Canter, fornecidos
   pelo dono do projeto em FBX/OBJ, convertidos para GLB otimizado); os demais são modelados no código. Caminhões com potência e capacidade diferentes — de um VUC 160 cv (5 t) ao Colosso 750 8x4 (90 t).
   Uma carga só fica disponível quando o jogador tem **nível** suficiente **e** um caminhão **forte** o bastante.
 * Implementos diferentes por carga: baú, tanque, graneleiro, prancha (madeira/contêiner/bobinas/vigas) e
@@ -35,7 +36,8 @@ Faça entregas pela cidade, suba de nível, compre caminhões mais fortes e libe
 
 ## Mundo
 
-* **3 cidades** — Drizzie City (metrópole), Vila Serrana (cidade do interior) e Porto Azul (litorânea com porto).
+* **4 cidades** — Drizzie City (metrópole), Vila Serrana (interior), Porto Azul (litoral com porto) e Monte Alto
+  (serra, com mineradora e vinícola, pela BR-040).
 * **Rodovias entre cidades** (BR-101, SP-280 e RS-030) com curvas, aclives/declives, aterros com taludes,
   defensas metálicas, balizadores, placas de destino e de velocidade.
 * Estradas atravessando **mata fechada**, **pontes sobre o rio** com pilares, lavouras, morros com

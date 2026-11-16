@@ -132,7 +132,7 @@ export class World {
     let y = 0;
     for (const h of this.hills) {
       const d2 = ((x - h.x) ** 2 + (z - h.z) ** 2) / (h.r * h.r);
-      if (d2 < 1) y = Math.max(y, h.h * Math.sqrt(1 - d2) - 4);
+      if (d2 < 1) y = Math.max(y, h.h * Math.sqrt(1 - d2) - 3);
     }
     return y;
   }
@@ -152,7 +152,7 @@ export class World {
   build() {
     const lam = (map, extra = {}) => new THREE.MeshLambertMaterial({ map, ...extra });
     const M = {
-      grass: lam(tex.grass(), { vertexColors: true, side: THREE.DoubleSide }),
+      grass: lam(tex.grass(), { vertexColors: true, side: THREE.DoubleSide, color: 0xc9d2b2 }),
       road: lam(tex.road()),
       hwy: lam(tex.highway()),
       inter: lam(tex.intersection()),
@@ -222,12 +222,28 @@ export class World {
     this.B = null;
   }
 
+  // distância real até a rodovia mais próxima (sem limite de raio)
+  hwDistFar(x, z) {
+    let d = Infinity;
+    for (const h of this.hws) for (let i = 0; i < h.n; i += 3) d = Math.min(d, (h.x[i] - x) ** 2 + (h.z[i] - z) ** 2);
+    return Math.sqrt(d);
+  }
+
   layoutCountry() {
     const r = this.r;
-    for (let i = 0; i < 300 && this.hills.length < 34; i++) {
-      const x = WORLD.x0 + r() * (WORLD.x1 - WORLD.x0), z = WORLD.z0 + r() * (WORLD.z1 - WORLD.z0);
-      const rad = 110 + r() * 220, h = 25 + r() * 70;
-      if (this.isFree(x, z, rad + 30)) this.hills.push({ x, z, r: rad, h });
+    for (let i = 0; i < 900 && this.hills.length < 46; i++) {
+      const x = WORLD.x0 - 300 + r() * (WORLD.x1 - WORLD.x0 + 600), z = WORLD.z0 - 300 + r() * (WORLD.z1 - WORLD.z0 + 300);
+      const rad = 120 + r() * 260, h = 30 + r() * 110;
+      // o morro (com taludes) não pode encostar em rodovia, rio, cidade, pátio ou mar
+      if (z + rad > SEA_Z - 60) continue;
+      if (this.hwDistFar(x, z) < rad * 1.2 + HW_HALF + 35) continue;
+      if (this.river.dist(x, z) < rad + RIVER_W) continue;
+      if (this.areas.some((a) => x + rad > a.x0 - 40 && x - rad < a.x1 + 40 && z + rad > a.z0 - 40 && z - rad < a.z1 + 40)) continue;
+      let riverNear = false;
+      for (let k = 0; k < this.river.n; k += 4) if ((this.river.x[k] - x) ** 2 + (this.river.z[k] - z) ** 2 < (rad + RIVER_W) ** 2) { riverNear = true; break; }
+      if (riverNear) continue;
+      if (this.hills.some((o) => Math.hypot(o.x - x, o.z - z) < (o.r + rad) * 0.55)) continue;
+      this.hills.push({ x, z, r: rad, h, rot: r() * 6.28, v: (r() * 4) | 0 });
     }
     // lavouras perto da fazenda, de Serrana e ao longo da SP-280
     const zones = [[-1000, 160, -600, 700], [-2900, -1600, -2300, -1100], [600, 150, 1700, 1000], [1200, -700, 1900, -150]];
@@ -732,18 +748,48 @@ export class World {
 
   buildHills() {
     if (!this.hills.length) return;
-    const g = new THREE.SphereGeometry(1, 22, 9, 0, Math.PI * 2, 0, Math.PI / 2);
-    const uv = g.attributes.uv;
-    for (let k = 0; k < uv.count; k++) uv.setXY(k, uv.getX(k) * 40, uv.getY(k) * 10);
-    const col = [];
-    for (let k = 0; k < uv.count; k++) col.push(0.72, 0.8, 0.64);
-    g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
-    const mesh = new THREE.InstancedMesh(g, this.M.grass, this.hills.length);
-    this.hills.forEach((h, i) => mesh.setMatrixAt(i, mat(h.x, -4, h.z, 0, 0, 0, h.r, h.h, h.r)));
-    mesh.computeBoundingSphere();
-    mesh.receiveShadow = true;
-    this.scene.add(mesh);
-    for (const h of this.hills) if (h.x > 300 && h.z < 900 && this.r() > 0.4) this.turbine(h.x, h.z, 50, 1, h.h - 6);
+    // 4 variações de relevo irregular; 2 e 3 têm topo rochoso
+    const geos = [0, 1, 2, 3].map((v) => {
+      const g = new THREE.SphereGeometry(1, 40, 14, 0, Math.PI * 2, 0, Math.PI / 2);
+      const p = g.attributes.position, uv = g.attributes.uv;
+      const col = [];
+      const c = new THREE.Color(), grass = new THREE.Color(0x6f8f4a), dry = new THREE.Color(0x8f8a5a), rock = new THREE.Color(0x77736d), snow = new THREE.Color(0xc8ccd0);
+      for (let k = 0; k < p.count; k++) {
+        let x = p.getX(k), y = p.getY(k), z = p.getZ(k);
+        const ang = Math.atan2(z, x);
+        const n1 = vnoise(Math.cos(ang) * 2.2 + v * 7, Math.sin(ang) * 2.2 + y * 2.5) - 0.5;
+        const n2 = vnoise(x * 5 + v * 3, z * 5 + y * 4) - 0.5;
+        const rr = 1 + n1 * 0.32 * (1 - y * 0.4);
+        const hy = y * (1 + n2 * 0.5) * (v >= 2 ? 1 + 0.25 * Math.pow(y, 3) : 1);
+        p.setXYZ(k, x * rr, Math.max(0, hy), z * rr);
+        uv.setXY(k, uv.getX(k) * 40, uv.getY(k) * 10);
+        const t = Math.max(0, hy);
+        if (v >= 2) {
+          c.copy(grass).lerp(rock, Math.min(1, Math.max(0, (t - 0.35) * 2.2)));
+          if (v === 3 && t > 0.85) c.lerp(snow, Math.min(1, (t - 0.85) * 5));
+        } else c.copy(grass).lerp(dry, Math.max(0, n2 + 0.3) * 0.6);
+        c.multiplyScalar(1.25);
+        col.push(c.r, c.g, c.b);
+      }
+      g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+      g.computeVertexNormals();
+      return g;
+    });
+    const groups = [[], [], [], []];
+    for (const h of this.hills) groups[h.h > 95 ? 2 + (h.v % 2) : h.v % 2].push(h);
+    const ic = new THREE.Color();
+    groups.forEach((list, v) => {
+      if (!list.length) return;
+      const mesh = new THREE.InstancedMesh(geos[v], this.M.grass, list.length);
+      list.forEach((h, i) => {
+        mesh.setMatrixAt(i, mat(h.x, -3, h.z, 0, h.rot || 0, 0, h.r, h.h, h.r * (0.8 + ((i * 7) % 5) * 0.08)));
+        mesh.setColorAt(i, ic.setHSL(0.25, 0.1, 0.9 + ((i * 13) % 7) / 60));
+      });
+      mesh.computeBoundingSphere();
+      mesh.receiveShadow = true;
+      this.scene.add(mesh);
+    });
+    for (const h of this.hills) if (h.x > 300 && h.z < 900 && h.h < 95 && this.r() > 0.45) this.turbine(h.x, h.z, 50, 1, h.h * 0.85 - 6);
   }
 
   // ---------- vegetação ----------
@@ -757,8 +803,10 @@ export class World {
       const dense = vnoise(x / 520, z / 520) * 0.8 + (x < -300 && z < 600 ? 0.55 : -0.15);
       if (r() > dense) continue;
       if (!this.isFree(x, z, 2)) continue;
-      const pine = x < -1500 || vnoise(x / 300 + 9, z / 300) > 0.62;
-      this.tree(x, z, 1.3 + r() * 0.8, pine ? 1 : 0, this.terrainH(x, z) - 0.2);
+      const pine = x < -1500 || x > 2600 || vnoise(x / 300 + 9, z / 300) > 0.62;
+      const ty = this.terrainH(x, z);
+      if (ty > 55) continue; // topo rochoso
+      this.tree(x, z, 1.3 + r() * 0.8, pine ? 1 : 0, ty * 0.85 - 0.6);
       placed++;
     }
     for (const f of this.fields) for (let t = 0; t < 5; t++) this.tree(f.x0 + r() * (f.x1 - f.x0), f.z0 - 5, 1.1, 0, 0);
@@ -781,43 +829,53 @@ export class World {
   }
 
   buildTrees() {
+    // árvores em cartões cruzados com folhagem recortada (leve e realista)
     const make = (kind) => {
-      const b = new Builder(true);
-      const trunk = new THREE.CylinderGeometry(0.2, 0.32, 3.2, 6);
-      trunk.translate(0, 1.6, 0);
-      b.add(trunk, mat(0, 0, 0), 0x6b4c33);
-      if (kind === 0) {
-        const ico = new THREE.IcosahedronGeometry(1, 0);
-        b.add(ico, mat(0, 4.6, 0, 0, 0, 0, 2.6, 2.3, 2.6), 0x5f9a3a);
-        b.add(ico, mat(1.1, 3.9, 0.5, 0.5, 0.3, 0, 1.7, 1.5, 1.7), 0x74ab45);
-        b.add(ico, mat(-0.9, 4.1, -0.6, 0.2, 1, 0, 1.8, 1.6, 1.8), 0x538a33);
-      } else {
-        const cone = new THREE.ConeGeometry(1, 1, 7);
-        b.add(cone, mat(0, 4.0, 0, 0, 0, 0, 2.4, 3.4, 2.4), 0x3c7a3a);
-        b.add(cone, mat(0, 5.9, 0, 0, 0.4, 0, 1.8, 3.0, 1.8), 0x438442);
-        b.add(cone, mat(0, 7.6, 0, 0, 0.8, 0, 1.1, 2.4, 1.1), 0x4a8e48);
+      const W = kind === 1 ? 4.6 : kind === 2 ? 5 : 6.6, H = kind === 1 ? 10 : kind === 2 ? 13 : 8.5;
+      const pos = [], nor = [], uv = [], idx = [];
+      const planes = 3;
+      for (let p = 0; p < planes; p++) {
+        const a = (p / planes) * Math.PI;
+        const cx = Math.cos(a) * W / 2, cz = Math.sin(a) * W / 2;
+        const o = pos.length / 3;
+        pos.push(-cx, 0, -cz, cx, 0, cz, cx, H, cz, -cx, H, -cz);
+        // normais "para cima/fora" = iluminação suave e uniforme
+        for (let k = 0; k < 4; k++) nor.push(0, 0.85, 0.15);
+        uv.push(0, 0, 1, 0, 1, 1, 0, 1);
+        idx.push(o, o + 1, o + 2, o, o + 2, o + 3);
       }
-      return b.geometry();
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+      g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+      g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+      g.setIndex(idx);
+      return g;
     };
-    const geos = [make(0), make(1)];
+    const geos = [make(0), make(1), make(2)];
+    const mats = [0, 1, 2].map((k) => new THREE.MeshLambertMaterial({ map: tex.treeCard(k), alphaTest: 0.45, side: THREE.DoubleSide }));
+    const depth = [0, 1, 2].map((k) => new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking, map: tex.treeCard(k), alphaTest: 0.45 }));
     const CH = 700;
     const groups = new Map();
     for (const t of this.trees) {
-      const k = Math.floor(t.x / CH) * 1000 + Math.floor(t.z / CH) + ':' + t.k;
+      // eucaliptos em parte das matas do leste/sul
+      let kind = t.k;
+      if (kind === 0 && ((t.x * 13 + t.z * 7) | 0) % 7 === 0 && t.x > -800) kind = 2;
+      const k = Math.floor(t.x / CH) * 1000 + Math.floor(t.z / CH) + ':' + kind;
       if (!groups.has(k)) groups.set(k, []);
       groups.get(k).push(t);
     }
     const c = new THREE.Color();
     for (const [k, list] of groups) {
       const kind = +k.split(':')[1];
-      const im = new THREE.InstancedMesh(geos[kind], this.M.leaf, list.length);
+      const im = new THREE.InstancedMesh(geos[kind], mats[kind], list.length);
       list.forEach((t, i) => {
-        im.setMatrixAt(i, mat(t.x, t.y, t.z, 0, t.rot, 0, t.s, t.s * (0.9 + (i % 5) * 0.06), t.s));
-        c.setHSL(0.15 + ((i * 37) % 10) / 150, 0.3, 0.8 + ((i * 13) % 10) / 45);
+        im.setMatrixAt(i, mat(t.x, t.y, t.z, 0, t.rot, 0, t.s * 0.95, t.s * (0.85 + (i % 5) * 0.07), t.s * 0.95));
+        c.setHSL(0.2 + ((i * 37) % 10) / 160, 0.25, 0.78 + ((i * 13) % 10) / 40);
         im.setColorAt(i, c);
       });
       im.computeBoundingSphere();
       im.castShadow = true;
+      im.customDepthMaterial = depth[kind];
       this.scene.add(im);
     }
   }

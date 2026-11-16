@@ -5,6 +5,8 @@ import { configureTextures, tex } from './textures.js';
 import { World } from './world.js';
 import { Rig, setTruckQuality, MODELS } from './truck.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { Sky } from 'three/examples/jsm/objects/Sky.js';
+import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { Traffic } from './traffic.js';
 import { findRoute, buildGraph } from './route.js';
 import { Audio } from './audio.js';
@@ -66,7 +68,7 @@ const Q = QUALITY[qName];
 
 // ---------------- Globais ----------------
 let renderer, scene, camera, world, rig, traffic, sun, sky, hemi, stars, headSpot;
-let pmrem = null, envScene = null, envNight = -1, clouds = null;
+let pmrem = null, envScene = null, envNight = -1, clouds = null, physSky = null, mountains = null;
 let night = 0;
 const audio = new Audio();
 audio.volume = S.settings.volume;
@@ -138,7 +140,8 @@ async function boot() {
   buildGraph(world);
   await step(62, 'Carregando caminhões 3D…');
   const gl = new GLTFLoader();
-  for (const name of ['labo', 'canter']) {
+  gl.setMeshoptDecoder(MeshoptDecoder);
+  for (const name of ['labo', 'canter', 'volvo', 'flatbed']) {
     try { MODELS[name] = (await gl.loadAsync(`models/${name}.glb`)).scene; } catch (e) { console.warn('modelo', name, e); }
   }
   await step(70, 'Ligando o motor…');
@@ -196,6 +199,16 @@ function applyTime(h) {
   stars.visible = stars.material.opacity > 0.01;
   renderer.toneMappingExposure = 1.0 + night * 0.25;
   clouds.material.color.setRGB(1, 1, 1).lerp(new THREE.Color(0.12, 0.14, 0.2), night).lerp(new THREE.Color(1.1, 0.75, 0.6), dusk * 0.7);
+  if (physSky) {
+    const az = ((h - 6) / 12) * Math.PI;
+    const el = Math.max(-0.3, elev) * 1.25;
+    physSky.material.uniforms.sunPosition.value.set(Math.cos(az) * Math.cos(el), Math.sin(el), Math.sin(az) * 0.6 * Math.cos(el));
+    physSky.material.uniforms.rayleigh.value = 1.2 + dusk * 1.8;
+    physSky.visible = night < 0.85;
+  }
+  // névoa atmosférica sobre a cordilheira (perspectiva aérea)
+  mountains.material.color.setRGB(1, 1, 1).lerp(scene.fog.color, 0.55);
+  mountains.material.color.multiplyScalar(1 - night * 0.75);
   updateEnv();
   world.setNight(night);
   traffic.setNight(night);
@@ -270,6 +283,38 @@ function titleCamera(dt) {
   sky.position.copy(camera.position);
 }
 
+// cordilheira no horizonte (acompanha o céu; tingida pela névoa)
+function buildMountains() {
+  const R = Q.far * 0.82;
+  const pos = [], col = [];
+  const rock = new THREE.Color(0x5b6470), snow = new THREE.Color(0xe8eef4), forest = new THREE.Color(0x3c5236);
+  let seed = 7;
+  const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  const N = 220;
+  const hts = [];
+  for (let i = 0; i <= N; i++) hts.push(0);
+  for (let o = 0; o < 4; o++) {
+    const f = [3, 7, 17, 41][o], a = [0.09, 0.05, 0.025, 0.012][o];
+    const ph = rnd() * 10;
+    for (let i = 0; i <= N; i++) hts[i] += a * (0.5 + 0.5 * Math.sin((i / N) * Math.PI * 2 * f + ph + Math.sin(i * 0.37 * (o + 1)) * 0.6));
+  }
+  for (let i = 0; i < N; i++) {
+    const a0 = (i / N) * Math.PI * 2, a1 = ((i + 1) / N) * Math.PI * 2;
+    const h0 = hts[i] * R, h1 = hts[i + 1] * R;
+    const P = (a, h) => [Math.cos(a) * R, h - R * 0.01, Math.sin(a) * R];
+    const b0 = P(a0, 0), b1 = P(a1, 0), t0 = P(a0, h0), t1 = P(a1, h1);
+    pos.push(...b0, ...b1, ...t1, ...b0, ...t1, ...t0);
+    const cb = forest, ct0 = h0 > R * 0.12 ? snow : rock, ct1 = h1 > R * 0.12 ? snow : rock;
+    col.push(cb.r, cb.g, cb.b, cb.r, cb.g, cb.b, ct1.r, ct1.g, ct1.b, cb.r, cb.g, cb.b, ct1.r, ct1.g, ct1.b, ct0.r, ct0.g, ct0.b);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  mountains = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ vertexColors: true, fog: false, depthWrite: false, side: THREE.DoubleSide, transparent: true, opacity: 1 }));
+  mountains.renderOrder = -0.8;
+  sky.add(mountains);
+}
+
 function buildClouds() {
   const g = new THREE.SphereGeometry(Q.far * 0.85, 32, 8, 0, Math.PI * 2, 0, Math.PI * 0.42);
   clouds = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ map: tex.clouds(), transparent: true, depthWrite: false, fog: false, side: THREE.BackSide, opacity: 0.9 }));
@@ -296,6 +341,18 @@ function buildSky() {
   scene.add(sky);
   buildStars();
   buildClouds();
+  buildMountains();
+  if (qName !== 'low') {
+    // céu físico (dispersão atmosférica)
+    physSky = new Sky();
+    physSky.scale.setScalar(Q.far * 0.9);
+    physSky.renderOrder = -2;
+    physSky.material.depthWrite = false;
+    const u = physSky.material.uniforms;
+    u.turbidity.value = 5; u.rayleigh.value = 1.6; u.mieCoefficient.value = 0.004; u.mieDirectionalG.value = 0.85;
+    sky.material.visible = false;
+    sky.add(physSky);
+  }
 }
 
 function placeAtStart() {
@@ -314,8 +371,8 @@ function buildMarkers() {
   zm.position.y = 0.08;
   marker.add(zm);
   marker.zone = zm;
-  const beam = new THREE.Mesh(new THREE.CylinderGeometry(3, 3, 120, 20, 1, true), new THREE.MeshBasicMaterial({ color: 0xffb703, transparent: true, opacity: 0.18, depthWrite: false, side: THREE.DoubleSide, fog: false, blending: THREE.AdditiveBlending }));
-  beam.position.y = 60;
+  const beam = new THREE.Mesh(new THREE.CylinderGeometry(3, 3, 60, 20, 1, true), new THREE.MeshBasicMaterial({ color: 0xffb703, transparent: true, opacity: 0.22, depthWrite: false, side: THREE.DoubleSide, fog: false, blending: THREE.AdditiveBlending }));
+  beam.position.y = 30;
   marker.add(beam);
   const cone = new THREE.Mesh(new THREE.ConeGeometry(1.6, 3.2, 4), new THREE.MeshBasicMaterial({ color: 0xffc400 }));
   cone.rotation.x = Math.PI;
@@ -1315,7 +1372,7 @@ function updateNav(dt) {
   if (!d) { marker.visible = false; navArrow.visible = false; return; }
   routeT -= dt;
   if (routeT <= 0) { route = findRoute(rig.x, rig.z, d); routeT = 0.5; }
-  marker.visible = true;
+  marker.visible = Math.hypot(d.zone.x - rig.x, d.zone.z - rig.z) < 600;
   marker.position.set(d.zone.x, 0, d.zone.z);
   marker.zone.scale.set(d.zone.w, d.zone.d, 1);
   const inside = inZone(d);

@@ -11,6 +11,7 @@ export const CITIES = [
   { id: 'drizzie', name: 'Drizzie City', nx: 8, nz: 8, x0: -560, z0: -560, kind: 'metro' },
   { id: 'serrana', name: 'Vila Serrana', nx: 4, nz: 4, x0: -3000, z0: -2300, kind: 'town' },
   { id: 'azul', name: 'Porto Azul', nx: 5, nz: 3, x0: 1900, z0: 1300, kind: 'port' },
+  { id: 'monte', name: 'Monte Alto', nx: 4, nz: 3, x0: 2700, z0: -2300, kind: 'mountain' },
 ];
 export const CITY = Object.fromEntries(CITIES.map((c) => [c.id, c]));
 export const cx1 = (c) => c.x0 + c.nx * BLOCK;
@@ -23,7 +24,7 @@ export function zoneOf(c, bx, bz) {
     if (bx >= 6) return 'industrial';
     return 'residential';
   }
-  if (c.kind === 'town') return bx === 1 && bz === 1 ? 'park' : 'town';
+  if (c.kind === 'town' || c.kind === 'mountain') return bx === 1 && bz === 1 ? 'park' : 'town';
   if (bz === c.nz - 1) return 'port';
   if (bx >= 3) return 'industrial';
   return 'town';
@@ -39,6 +40,8 @@ export const HIGHWAYS = [
     pts: [[-570, 0], [-720, 0], [-900, 0], [-1100, -160], [-1350, -480], [-1560, -820], [-1760, -1180], [-1980, -1520], [-2200, -1840], [-2330, -2020], [-2430, -2020]], hills: 7 },
   { id: 'SP-280', from: ['drizzie', 8, 4], to: ['azul', 2, 0],
     pts: [[570, 0], [760, 0], [960, 0], [1100, 0], [1350, 80], [1620, 280], [1860, 560], [2060, 860], [2180, 1100], [2180, 1290]], hills: 9 },
+  { id: 'BR-040', from: ['azul', 5, 1], to: ['monte', 2, 3],
+    pts: [[2610, 1440], [2760, 1440], [2950, 1380], [3150, 1150], [3300, 800], [3350, 400], [3250, 0], [3150, -400], [3250, -800], [3200, -1200], [3050, -1550], [2980, -1750], [2980, -1870]], hills: 16 },
   { id: 'RS-030', from: ['drizzie', 4, 0], to: null,
     pts: [[0, -570], [0, -800], [-120, -1080], [-420, -1380], [-800, -1640], [-1150, -1880], [-1450, -2000], [-1720, -2150], [-1960, -2420], [-2100, -2650], [-2100, -2900], [-2100, -3100]], hills: 10 },
 ];
@@ -55,6 +58,8 @@ export const LOCATIONS = [
   { id: 'siderurgica', name: 'Siderúrgica Aço Forte', city: 'drizzie', bx: 7, bz: 5, side: 'w', kind: 'steel', color: 0x8a3b2a },
   { id: 'silo', name: 'Silo Agrícola', city: 'serrana', bx: 0, bz: 1, side: 'e', kind: 'silo', color: 0xc8b26a },
   { id: 'fabrica', name: 'Fábrica de Móveis', city: 'serrana', bx: 2, bz: 2, side: 'w', kind: 'factory', color: 0x9a6b3f },
+  { id: 'mineradora', name: 'Mineradora Serra Negra', city: 'monte', bx: 3, bz: 0, side: 'w', kind: 'quarry', color: 0x6e5a4a },
+  { id: 'vinicola', name: 'Vinícola Monte Alto', city: 'monte', bx: 0, bz: 2, side: 'e', kind: 'farm', color: 0x7b1f3a },
   { id: 'porto', name: 'Porto Azul', city: 'azul', bx: 2, bz: 2, side: 'n', kind: 'port', color: 0x1f8fb0 },
   { id: 'refinaria', name: 'Refinaria Petrosul', city: 'azul', bx: 4, bz: 1, side: 'w', kind: 'refinery', color: 0xd8d8d8 },
   { id: 'fazenda', name: 'Fazenda Boa Vista', hw: 'BR-101', lot: [-862, 11, -742, 131], side: 'n', kind: 'farm', color: 0xb03a2e },
@@ -69,8 +74,8 @@ export const TRUCKS = [
   { id: 'mini', name: 'Mini Carga 1.0', hp: 95, cap: 1.5, mass: 1.0, level: 1, price: 0, rigid: true, axles: 2, model: 'labo', color: 0x3d7fd1, vmax: 95, desc: 'Picape de carga compacta para entregas leves.' },
   { id: 'urbano', name: 'Leve Baú 4.5', hp: 160, cap: 5, mass: 4.5, level: 2, price: 8000, rigid: true, axles: 2, model: 'canter', color: 0xf2f2f2, vmax: 100, desc: 'Caminhão leve com baú, ágil na cidade.' },
   { id: 'toco', name: 'Toco 11-240', hp: 240, cap: 12, mass: 7.5, level: 3, price: 15000, rigid: true, axles: 2, cab: 'cabover', roof: 'mid', color: 0x2f6fde, vmax: 100, desc: 'Caminhão médio de carroceria baú.' },
-  { id: 'cavalo', cfg: '4x2', name: 'Cavalo 360', hp: 360, cap: 30, mass: 8, level: 6, price: 60000, rigid: false, axles: 2, cab: 'cabover', roof: 'high', color: 0xd23a2a, vmax: 110, desc: 'Cavalo mecânico cara-chata para carretas.' },
-  { id: 'rodo', cfg: '6x2', name: 'Rodomax 480', hp: 480, cap: 45, mass: 9, level: 10, price: 140000, rigid: false, axles: 3, cab: 'cabover', roof: 'high', color: 0x1f9e6e, vmax: 110, desc: 'Cavalo 6x2 de teto alto para longas viagens.' },
+  { id: 'cavalo', cfg: '6x2', name: 'Cavalo 360', hp: 360, cap: 30, mass: 8.5, level: 6, price: 60000, rigid: false, axles: 3, model: 'volvo', cab: 'cabover', roof: 'high', color: 0xb5121b, vmax: 110, desc: 'Cavalo mecânico cara-chata para carretas.' },
+  { id: 'rodo', cfg: '6x4', name: 'Rodomax 480', hp: 480, cap: 45, mass: 9, level: 10, price: 140000, rigid: false, axles: 3, model: 'volvo', cab: 'cabover', roof: 'high', color: 0x1d3f6e, vmax: 110, desc: 'Cavalo 6x2 de teto alto para longas viagens.' },
   { id: 'titan', cfg: '6x4', name: 'Titan 620 Bicudo', hp: 620, cap: 65, mass: 10.5, level: 15, price: 280000, rigid: false, axles: 3, cab: 'conventional', roof: 'high', color: 0x222831, vmax: 105, desc: 'Bicudo 6x4 de capô longo e muita tração.' },
   { id: 'colosso', cfg: '8x4', name: 'Colosso 750 8x4', hp: 750, cap: 90, mass: 12.5, level: 20, price: 500000, rigid: false, axles: 4, cab: 'conventional', roof: 'high', color: 0xf0a000, vmax: 95, desc: 'Gigante para cargas especiais e indivisíveis.' },
 ];
@@ -91,6 +96,9 @@ export const CARGOS = [
   { id: 'graos', name: 'Soja a Granel', icon: '🫘', t: 28, lvl: 8, trailer: 'bulk', rate: 1.0, from: ['fazenda', 'silo'], to: ['porto'] },
   { id: 'combustivel', name: 'Combustível', icon: '⛽', t: 30, lvl: 9, trailer: 'tank', rate: 1.45, hazard: true, from: ['refinaria'], to: ['posto', 'fazenda', 'pedreira'] },
   { id: 'cimento', name: 'Cimento', icon: '🏗️', t: 32, lvl: 10, trailer: 'tank', model: 'silo', rate: 1.05, from: ['pedreira'], to: ['obra'] },
+  { id: 'vinho', name: 'Vinho em Caixas', icon: '🍷', t: 7, lvl: 3, trailer: 'box', rate: 1.3, fragile: true, from: ['vinicola'], to: ['mercado', 'cd', 'porto'] },
+  { id: 'minerio', name: 'Minério de Ferro', icon: '⛏️', t: 34, lvl: 11, trailer: 'bulk', rate: 1.1, from: ['mineradora'], to: ['siderurgica', 'porto'] },
+  { id: 'granito', name: 'Blocos de Granito', icon: '🪨', t: 40, lvl: 12, trailer: 'flatbed', model: 'stone', rate: 1.2, from: ['mineradora'], to: ['obra', 'porto'] },
   { id: 'bobinas', name: 'Bobinas de Aço', icon: '🧲', t: 36, lvl: 11, trailer: 'flatbed', model: 'coils', rate: 1.2, from: ['siderurgica'], to: ['porto', 'fabrica'] },
   { id: 'vigas', name: 'Vigas de Aço', icon: '🏢', t: 42, lvl: 13, trailer: 'flatbed', model: 'beams', rate: 1.25, from: ['siderurgica'], to: ['obra'] },
   { id: 'escavadeira', name: 'Escavadeira', icon: '🚧', t: 48, lvl: 15, trailer: 'lowboy', model: 'excavator', rate: 1.55, from: ['porto'], to: ['pedreira', 'obra'] },
@@ -108,4 +116,4 @@ export function trailerMass(cargo) {
 }
 
 // Limites do mundo (para o mapa)
-export const WORLD = { x0: -3400, z0: -3500, x1: 3000, z1: 2300 };
+export const WORLD = { x0: -3400, z0: -3500, x1: 3700, z1: 2300 };
