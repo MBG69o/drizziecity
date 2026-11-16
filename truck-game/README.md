@@ -4,7 +4,8 @@ Jogo mobile de caminhão em 3D para **Android 6.0 (API 23) até o Android 15 (AP
 Faça entregas pela cidade, suba de nível, compre caminhões mais fortes e libere cargas de **1 t até 85 t**.
 
 > **Versão de testes:** tudo liberado — nível máximo, todos os caminhões na garagem, R$ 10 milhões
-> (repostos automaticamente) e cargas sem limite de capacidade. Desligue com `TEST_MODE = false` em `web/src/main.js`.
+> (repostos automaticamente), cargas sem limite de capacidade e cargas de carreta/bitrem também em caminhões
+> rígidos (puxadas como reboque por cambão no engate traseiro). Desligue com `TEST_MODE = false` em `web/src/main.js`.
 
 ## Como jogar
 

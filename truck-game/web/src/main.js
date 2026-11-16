@@ -462,8 +462,8 @@ function lockReason(j, def = rig.def) {
   const c = CARGO[j.cargo];
   if (c.lvl > S.level) return `Requer nível ${c.lvl}`;
   if (c.t > def.cap && !TEST_MODE) return `Caminhão fraco (máx. ${def.cap} t)`;
-  if (def.rigid && c.trailer !== 'box') return 'Requer cavalo mecânico';
-  if (c.trailer === 'bitrem' && (def.axles < 3 || def.drive < 0.45)) return 'Bitrem exige cavalo com tração 6x4 ou 8x4';
+  if (def.rigid && c.trailer !== 'box' && !TEST_MODE) return 'Requer cavalo mecânico';
+  if (c.trailer === 'bitrem' && (def.axles < 3 || def.drive < 0.45) && !TEST_MODE) return 'Bitrem exige cavalo com tração 6x4 ou 8x4';
   return null;
 }
 const canTake = (j) => !lockReason(j);

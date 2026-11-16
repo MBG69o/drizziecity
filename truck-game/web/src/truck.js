@@ -867,14 +867,25 @@ export class Rig {
 
   attach(cargo) {
     this.cargo = cargo;
-    if (this.model.bedCargo) this.model.bedCargo.visible = true;
-    if (!this.def.rigid) {
+    // caminhão rígido com carga de carreta: puxa um reboque pelo engate traseiro (cambão)
+    const tow = this.def.rigid && cargo.trailer !== 'box';
+    if (this.model.bedCargo) this.model.bedCargo.visible = !tow;
+    this._hitch = null;
+    if (!this.def.rigid || tow) {
       if (cargo.trailer === 'bitrem') {
         const sub = { ...cargo, trailer: cargo.sub };
         this.trailer = buildTrailer(sub, { len: 9.2, lead: true });
         this.trailer2 = buildTrailer(sub, { len: 10.2, front: 0.5 });
         this.th2 = this.h;
       } else this.trailer = buildTrailer(cargo);
+      if (tow) {
+        const tr = this.trailer, gap = 1.5;
+        this._hitch = this.model.rearEnd - gap - tr.front;
+        // cambão: barra do engate do caminhão até a frente do reboque
+        const bar = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.14, gap + 0.3), new THREE.MeshStandardMaterial({ color: 0x2b2b2b, metalness: 0.6, roughness: 0.5 }));
+        bar.position.set(0, 0.85, tr.front + gap / 2);
+        tr.root.add(bar);
+      }
       for (const tr of [this.trailer, this.trailer2]) {
         if (!tr) continue;
         tr.blob.visible = !this.shadows;
@@ -891,7 +902,7 @@ export class Rig {
     if (this.model.bedCargo) this.model.bedCargo.visible = false;
     if (this.trailer) this.scene.remove(this.trailer.root);
     if (this.trailer2) this.scene.remove(this.trailer2.root);
-    this.trailer = null; this.trailer2 = null;
+    this.trailer = null; this.trailer2 = null; this._hitch = null;
     this.cargo = null;
     this.computePhys();
   }
@@ -900,10 +911,11 @@ export class Rig {
   computePhys() {
     const d = this.def, c = this.cargo;
     const mT = d.mass * 1000;
-    const mC = c ? c.t * 1000 : 0, mTr = c && !d.rigid ? trailerMass(c) * 1000 : 0;
-    const cgC = c ? (d.rigid ? d.cgH * 1.4 : cargoCG(c, false)) : 0;
-    const truckCG = d.rigid && c ? (mT * d.cgH + mC * cgC) / (mT + mC) : d.cgH;
-    const trailerCG = !d.rigid && c ? (mTr * 1.25 + mC * cgC) / (mTr + mC) : 0;
+    const onBed = d.rigid && !this.trailer; // carga na carroceria do próprio caminhão
+    const mC = c ? c.t * 1000 : 0, mTr = c && !onBed ? trailerMass(c) * 1000 : 0;
+    const cgC = c ? (onBed ? d.cgH * 1.4 : cargoCG(c, false)) : 0;
+    const truckCG = onBed && c ? (mT * d.cgH + mC * cgC) / (mT + mC) : d.cgH;
+    const trailerCG = !onBed && c ? (mTr * 1.25 + mC * cgC) / (mTr + mC) : 0;
     const ssf = Math.min((d.track || 2) / 2 / truckCG, trailerCG ? 1.0 / trailerCG : 9);
     const sub = c ? (c.trailer === 'bitrem' ? c.sub : c.trailer) : null;
     this.P = {
@@ -911,7 +923,8 @@ export class Rig {
       aRoll: G0 * ssf * 0.92,                     // aceleração lateral que tomba o conjunto
       tireMu: d.tireMu || 0.9,
       // peso sobre os eixos de tração (cavalo recebe ~45% da carreta pelo pino-rei)
-      driveMass: (d.drive || 0.4) * (mT + (d.rigid ? mC : (mTr + mC) * 0.5)) * 1.7,
+      // reboque de cambão não apoia peso no caminhão; semirreboque apoia ~45% no pino-rei
+      driveMass: (d.drive || 0.4) * (mT + (onBed ? mC : d.rigid ? 0 : (mTr + mC) * 0.5)) * 1.7,
       steerLock: d.steerLock || 0.6,
       yawTau: 0.12 + (mT + mC + mTr) / 260000,      // inércia de giro
       cda: this.trailer ? (sub === 'box' ? 9 : 7) * (this.trailer2 ? 1.25 : 1) : d.rigid ? 6.5 : 5,
@@ -955,6 +968,9 @@ export class Rig {
   // autonomia estimada (km) com o consumo médio recente
   get range() { return this.fuel / Math.max(this.lpm, 1e-5) / 1000; }
 
+  // ponto de articulação: quinta-roda do cavalo ou engate do reboque
+  get hitch() { return this._hitch ?? this.model.hitchZ; }
+
   get mass() { return this.P ? this.P.mass : this.def.mass * 1000; }
   get speedKmh() { return Math.abs(this.v) * 3.6; }
   // comprimento total (para a câmera)
@@ -971,7 +987,7 @@ export class Rig {
   // posição do engate da segunda carreta (bitrem)
   couple(out) {
     const md = this.model, t1 = this.trailer;
-    const hx = this.x + Math.sin(this.h) * md.hitchZ, hz = this.z + Math.cos(this.h) * md.hitchZ;
+    const hx = this.x + Math.sin(this.h) * this.hitch, hz = this.z + Math.cos(this.h) * this.hitch;
     out.x = hx + Math.sin(this.th) * t1.coupleZ; out.z = hz + Math.cos(this.th) * t1.coupleZ;
     return out;
   }
@@ -981,7 +997,7 @@ export class Rig {
     if (this.trailer) {
       let tx, tz;
       if (this.trailer2) { this.couple(tmp); tx = tmp.x - Math.sin(this.th2) * this.trailer2.Lt * 0.45; tz = tmp.z - Math.cos(this.th2) * this.trailer2.Lt * 0.45; }
-      else { const hx = this.x + fx * this.model.hitchZ, hz = this.z + fz * this.model.hitchZ, L = this.trailer.Lt * 0.45; tx = hx - Math.sin(this.th) * L; tz = hz - Math.cos(this.th) * L; }
+      else { const hx = this.x + fx * this.hitch, hz = this.z + fz * this.hitch, L = this.trailer.Lt * 0.45; tx = hx - Math.sin(this.th) * L; tz = hz - Math.cos(this.th) * L; }
       out.x = (this.x + fx * this.model.wb * 0.5 + tx) / 2;
       out.z = (this.z + fz * this.model.wb * 0.5 + tz) / 2;
     } else {
@@ -1196,7 +1212,7 @@ export class Rig {
 
     // ---- carretas (articulação) ----
     if (this.trailer) {
-      const hz = this.model.hitchZ;
+      const hz = this.hitch;
       const rel = wrap(this.h - this.th);
       let dth = (v * Math.sin(rel) - hz * this.yaw * Math.cos(rel)) / this.trailer.Lk;
       // carreta escorrega (L) se frear forte em curva / lama
@@ -1242,7 +1258,7 @@ export class Rig {
       for (let s = tr.front - 1.2; s > tr.back + 0.5; s -= 2.4) out.push({ x: hx + tx * s, z: hz + tz * s, r: 1.35, t: true });
       out.push({ x: hx + tx * (tr.back + 1.3), z: hz + tz * (tr.back + 1.3), r: 1.35, t: true });
     };
-    if (this.trailer) addTr(this.trailer, this.x + fx * md.hitchZ, this.z + fz * md.hitchZ, this.th);
+    if (this.trailer) addTr(this.trailer, this.x + fx * this.hitch, this.z + fz * this.hitch, this.th);
     if (this.trailer2) { const c = this.couple({}); addTr(this.trailer2, c.x, c.z, this.th2); }
     return out;
   }
@@ -1328,8 +1344,8 @@ export class Rig {
       return { ya, tp };
     };
     if (this.trailer) {
-      const hx = this.x + fx * md.hitchZ, hz = this.z + fz * md.hitchZ;
-      const yh = yr + (yf - yr) * (md.hitchZ / md.wb);
+      const hx = this.x + fx * this.hitch, hz = this.z + fz * this.hitch;
+      const yh = yr + (yf - yr) * (this.hitch / md.wb);
       const r1 = placeTr(this.trailer, hx, hz, yh, this.th, 'tpitch');
       if (this.trailer2) {
         const c = this.couple({});
