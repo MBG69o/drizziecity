@@ -1115,6 +1115,7 @@ export class Rig {
   }
 
   update(dt, inp, world, obstacles) {
+    this._sdt = dt;
     this.world = world;
     if (this.rolled) {
       // deitado: arrasta de lado até parar, sem direção nem tração
@@ -1424,6 +1425,17 @@ export class Rig {
     }
     this.y = yr;
     this.pitch = Math.atan2(yf - yr, md.wb);
+    // pose visual suavizada: o piso é feito de segmentos retos (rodovia e malha do
+    // terreno), então altura e inclinação mudam aos degraus nas emendas. A física
+    // usa o valor bruto; o modelo (e a câmera da cabine presa nele) usa o filtrado.
+    const sdt = this._sdt || 0;
+    this._sdt = 0;
+    if (this.vy === undefined || sdt <= 0 || Math.abs(yr - this.vy) > 1.5) { this.vy = yr; this.vpitch = this.pitch; }
+    else {
+      this.vy += (yr - this.vy) * (1 - Math.exp(-sdt * 22));
+      this.vpitch += (this.pitch - this.vpitch) * (1 - Math.exp(-sdt * 10));
+    }
+    const vyr = this.vy, vyf = vyr + Math.tan(this.vpitch) * md.wb;
     // rolagem da carroceria pela força lateral e tombamento
     const rs = this.rollSide || 1;
     // giro em torno do pneu externo: o centro sobe e desloca para o lado
@@ -1434,8 +1446,8 @@ export class Rig {
     const P = this.P || {};
     const RT = rollAt(P.bT || 1, this.rollT.phi, phiSusp(this.susp, this.rollT.phi, 0.05));
     const rgt = [Math.cos(this.h), -Math.sin(this.h)]; // eixo x local no mundo
-    md.root.position.set(this.x + rgt[0] * RT.lx, yr + RT.ly, this.z + rgt[1] * RT.lx);
-    md.root.rotation.set(-this.pitch, this.h, RT.ang);
+    md.root.position.set(this.x + rgt[0] * RT.lx, vyr + RT.ly, this.z + rgt[1] * RT.lx);
+    md.root.rotation.set(-this.vpitch, this.h, RT.ang);
     for (let i = 0; i < md.front.length; i++) {
       const w = md.front[i];
       w.rotation.y = this.steer * (i < 2 ? 1 : 0.6);
@@ -1443,8 +1455,9 @@ export class Rig {
     }
     for (const a of md.rear) a.rotation.x = this.wheelRot;
     const lat = (this.yaw || 0) * this.v;
-    md.body.rotation.z += (clamp(-lat * 0.01, -0.06, 0.06) - md.body.rotation.z) * 0.2;
-    md.body.rotation.x += (clamp(-this.acc * 0.006, -0.03, 0.03) - md.body.rotation.x) * 0.2;
+    const kb = sdt > 0 ? 1 - Math.exp(-sdt * 6) : 0.2;
+    md.body.rotation.z += (clamp(-lat * 0.01, -0.06, 0.06) - md.body.rotation.z) * kb;
+    md.body.rotation.x += (clamp(-this.acc * 0.006, -0.03, 0.03) - md.body.rotation.x) * kb;
     const placeTr = (tr, hx, hz, hy, th, key) => {
       const ax = hx - Math.sin(th) * tr.Lk, az = hz - Math.cos(th) * tr.Lk;
       const ya = W ? W.heightAt(ax, az) : 0;
@@ -1460,7 +1473,7 @@ export class Rig {
     };
     if (this.trailer) {
       const hx = this.x + fx * this.hitch, hz = this.z + fz * this.hitch;
-      const yh = yr + (yf - yr) * (this.hitch / md.wb);
+      const yh = vyr + (vyf - vyr) * (this.hitch / md.wb);
       const r1 = placeTr(this.trailer, hx, hz, yh, this.th, 'tpitch');
       if (this.trailer2) {
         const c = this.couple({});

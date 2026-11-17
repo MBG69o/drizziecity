@@ -279,8 +279,13 @@ export class Cockpit {
     if (this.clT <= 0) { this.clT = 0.08; this.drawCluster(rig, ctl, info); this.gpsTex.needsUpdate = true; }
     // câmera: olho do motorista, olhar livre arrastando a tela
     this.bob += dt * (1 + rig.speedKmh * 0.05);
-    const shake = (rig.shake || 0) * 0.35;
-    const eye = this._v.set(0, 0.03 * Math.sin(this.bob * 0.7) * Math.min(1, rig.speedKmh / 40) + (Math.random() - 0.5) * shake, -0.08).applyMatrix4(g.matrixWorld);
+    // trepidação do piso como ruído suave (soma de senos), não um valor aleatório
+    // novo a cada quadro, que fazia a imagem "pular" ao dirigir
+    this.shT = (this.shT || 0) + dt;
+    const tgt = (rig.shake || 0) * 0.35;
+    this.shA = (this.shA || 0) + (tgt - (this.shA || 0)) * (1 - Math.exp(-dt * 4));
+    const t = this.shT, n = Math.sin(t * 17.3) * 0.5 + Math.sin(t * 29.1 + 1.3) * 0.3 + Math.sin(t * 7.7 + 2.1) * 0.2;
+    const eye = this._v.set(0, 0.03 * Math.sin(this.bob * 0.7) * Math.min(1, rig.speedKmh / 40) + n * this.shA * 0.35, -0.08).applyMatrix4(g.matrixWorld);
     camera.position.copy(eye);
     const yaw = clamp(cam.orbit, -1.9, 1.9) + input.steer * 0.12;
     const pitch = -0.2;
