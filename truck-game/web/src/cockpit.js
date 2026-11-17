@@ -370,7 +370,7 @@ export class Cockpit {
     lamp(512, 368, '(P)', '#ff3b3b', !!ctl.hand);
     lamp(556, 368, 'FM', '#f5c13a', rig.retarder);
     lamp(110, 368, '⛽', '#ff8a1a', rig.fuel / rig.def.tank < 0.12);
-    lamp(170, 368, '⚠', '#ff3b3b', rig.fade < 0.85 || rig.flat);
+    lamp(170, 368, '⚠', '#ff3b3b', rig.flat);
     lamp(W - 120, 368, '🔋', '#ff3b3b', !on);
     t.needsUpdate = true;
   }

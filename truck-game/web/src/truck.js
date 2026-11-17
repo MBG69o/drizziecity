@@ -1169,9 +1169,9 @@ export class Rig {
 
     // tração limitada pela aderência do piso sobre os eixos de tração
     const Ftrac = mu * G0 * Pp.driveMass * (1 - this.sink * 0.45);
-    // freios: aquecem nas descidas longas e perdem eficiência (fading)
-    const fade = clamp(1 - Math.max(0, this.brakeT - 0.55) * 1.4, 0.3, 1);
-    this.fade = fade;
+    // freios sempre com eficiência total (superaquecimento removido)
+    const fade = 1;
+    this.fade = 1;
     const Fbrk = Math.min(6.8, mu * G0 * 0.95) * m * fade;
     let Fdrive = 0, Fb = 0;
     // limitador: o motor não empurra acima da velocidade máxima (mas a gravidade pode)
@@ -1208,10 +1208,6 @@ export class Rig {
       R += 0.5 * 1000 * 0.45 * (this.model.cabW || 2.4) * Math.min(water, 1.2) * v * v + m * 0.6 * water;
       if (this.engineOn && water > (def.rigid && def.mass < 6 ? 0.55 : 0.95) && Math.abs(v) > 0.5) { this.engineOn = false; if (this.onDrown) this.onDrown(); }
     }
-    // temperatura dos freios
-    const pBrake = Fb * av / m;                    // W/kg dissipados
-    this.brakeT += dt * (pBrake / 220 - (0.01 + av * 0.0007) * this.brakeT);
-    this.brakeT = Math.max(0, this.brakeT);
 
     // ---- curva: aderência lateral x força centrífuga ----
     const lockV = Pp.steerLock / (1 + (v * v) / 260);

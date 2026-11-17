@@ -1535,7 +1535,6 @@ function updateHUD(dt) {
   let w = '';
   if (rig.rolled) w = '';
   else if (rig.stuck) w = '<b class="r">ATOLADO — chame o guincho ou tente de ré</b>';
-  else if (rig.fade < 0.85) w = '<b class="r">FREIOS SUPERAQUECIDOS — use o freio-motor</b>';
   else if (rig.slip > 0.08) w = '<b class="o">DERRAPANDO — curva rápida demais</b>';
   else if (rig.sink > 0.25) w = '<b class="o">AFUNDANDO NA LAMA — não pare, acelere leve</b>';
   else if (rig.wheelspin > 0.25) w = '<b class="o">PATINANDO — pouca tração no piso</b>';
