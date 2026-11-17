@@ -109,12 +109,39 @@ export class Stream {
 }
 
 export class Highway {
+  teeStart(pts, p, half) {
+    let bi = 0, bd = Infinity;
+    for (let k = 0; k < p.n; k++) { const d = (p.x[k] - pts[0][0]) ** 2 + (p.z[k] - pts[0][1]) ** 2; if (d < bd) { bd = d; bi = k; } }
+    const px = p.x[bi], pz = p.z[bi];
+    let nx = -p.dz[bi], nz = p.dx[bi];
+    if ((pts[1][0] - px) * nx + (pts[1][1] - pz) * nz < 0) { nx = -nx; nz = -nz; }
+    this.tee = { x: px, z: pz, nx, nz, tx: p.dx[bi], tz: p.dz[bi], k: bi };
+    const a = p.half + 12, b = p.half + 30;
+    const out = [[px, pz], [px + nx * a, pz + nz * a], [px + nx * b, pz + nz * b]];
+    // descarta pontos de controle próximos do entroncamento ou "para trás" da saída
+    for (let i = 1; i < pts.length; i++) {
+      const dx = pts[i][0] - px, dz = pts[i][1] - pz;
+      if (Math.hypot(dx, dz) < p.half + 60 || dx * nx + dz * nz < b + 10) continue;
+      out.push(...pts.slice(i));
+      break;
+    }
+    return out.length > 3 ? out : pts;
+  }
+
   constructor(def, river, terrain, parents, streams = []) {
     this.def = def;
     this.id = def.id;
     this.half = def.half;
     this.surface = def.surface;
-    const { x, z } = sampleCurve(def.pts, 4);
+    // estrada secundária: sai da principal em ângulo reto (entroncamento em T),
+    // em vez de cruzar a pista de lado num ângulo raso
+    let pts = def.pts;
+    let parent0 = null;
+    if (def.from && def.from[0] === 'hw') {
+      parent0 = parents.find((h) => h.id === def.from[1]);
+      if (parent0) pts = this.teeStart(def.pts, parent0, def.half);
+    }
+    const { x, z } = sampleCurve(pts, 4);
     const n = (this.n = x.length);
     this.x = x; this.z = z;
     this.s = new Float32Array(n);

@@ -37,7 +37,8 @@ export class Terrain {
     this.river = river;
     this.streams = streams;
     this.flat = [];
-    for (const c of CITIES) this.flat.push({ x0: c.x0, z0: c.z0, x1: cx1(c), z1: cz1(c), r: 380 });
+    // a rua da borda da cidade passa 10 m para fora do quarteirão: a área plana cobre ela inteira
+    for (const c of CITIES) this.flat.push({ x0: c.x0 - 18, z0: c.z0 - 18, x1: cx1(c) + 18, z1: cz1(c) + 18, r: 380 });
     for (const L of LOCATIONS) if (L.lot) this.flat.push({ x0: L.lot[0], z0: L.lot[1], x1: L.lot[2], z1: L.lot[3], r: 230 });
     this._q = {};
   }
@@ -179,8 +180,30 @@ export class Terrain {
   clampToRoads() {
     const G = this.grid, W = G.nx + 1, H = G.H;
     if (!this.hws) return;
+    // pontos da borda das cidades (rua externa + calçada): o terreno não pode passar por cima
+    const edge = [];
+    for (const c of CITIES) {
+      const x0 = c.x0 - 14, z0 = c.z0 - 14, x1 = cx1(c) + 14, z1 = cz1(c) + 14;
+      for (let x = x0; x <= x1; x += 4) for (const z of [z0, z0 + 7, z0 + 14, z1 - 14, z1 - 7, z1]) edge.push(x, z);
+      for (let z = z0; z <= z1; z += 4) for (const x of [x0, x0 + 7, x0 + 14, x1 - 14, x1 - 7, x1]) edge.push(x, z);
+    }
+    const lower = (x, z, top) => {
+      const fx = (x - G.X0) / G.s, fz = (z - G.Z0) / G.s;
+      const ci = Math.max(0, Math.min(G.nx - 1, Math.floor(fx))), cj = Math.max(0, Math.min(G.nz - 1, Math.floor(fz)));
+      const u = fx - ci, v = fz - cj;
+      const a = cj * W + ci, b = a + 1, c = a + W, d = c + 1;
+      let ia, ib, ic, wa, wb, wc;
+      if (u + v < 1) { ia = a; ib = b; ic = c; wa = 1 - u - v; wb = u; wc = v; }
+      else { ia = d; ib = c; ic = b; wa = u + v - 1; wb = 1 - u; wc = 1 - v; }
+      const e = H[ia] * wa + H[ib] * wb + H[ic] * wc - top;
+      if (e <= 0.001) return 0;
+      const s2 = wa * wa + wb * wb + wc * wc;
+      H[ia] -= (e * wa) / s2; H[ib] -= (e * wb) / s2; H[ic] -= (e * wc) / s2;
+      return e;
+    };
     for (let pass = 0; pass < 8; pass++) {
       let worst = 0;
+      for (let k = 0; k < edge.length; k += 2) worst = Math.max(worst, lower(edge[k], edge[k + 1], -0.15));
       for (const h of this.hws) {
         for (let i = 0; i < h.n; i++) {
           const top = h.y[i] - (h.bridge[i] ? 2.2 : h.ford[i] ? 0.05 : 0.12);

@@ -316,8 +316,8 @@ export class World {
         if (!end || end[0] === 'hw') continue;
         const c = CITY[end[0]];
         const x = c.x0 + end[1] * BLOCK, z = c.z0 + end[2] * BLOCK;
+        // a rodovia começa exatamente na borda da rua da cidade (sem placa de asfalto sobrando)
         this.areas.push({ x0: x - 22, z0: z - 22, x1: x + 22, z1: z + 22, pad: true });
-        B.hwy.ground(x - 22, z - 22, x + 22, z + 22, 0.015, 18);
       }
     }
     for (const L of LOCATIONS) if (L.lot) this.areas.push({ x0: L.lot[0], z0: L.lot[1], x1: L.lot[2], z1: L.lot[3], lot: L.id });
@@ -996,6 +996,25 @@ export class World {
         if (h.y[a] - Math.min(t1, t2) > 2.5) { this.rails.push({ h, i: a }); this.rails.push({ h, i: a + 1 }); }
       }
       if (i % 12 === 0 && h.surface === 'asphalt') for (const side of [-1, 1]) this.posts.push({ x: h.x[a] + ra[0] * side * (E + 0.7), y: h.y[a], z: h.z[a] + ra[1] * side * (E + 0.7), rot: Math.atan2(h.dx[a], h.dz[a]) });
+    }
+    // boca do entroncamento: alarga a saída da estrada secundária junto à pista principal
+    if (h.parent && h.tee) {
+      const p = h.parent, T0 = h.tee, bh = h.half, ph = p.half;
+      const B0 = this.tileB(T0.x, T0.z);
+      const RB0 = h.surface === 'asphalt' ? B0.hwy : B0[h.surface];
+      let kf = 0; while (kf < h.n - 1 && h.s[kf] < ph + 9) kf++;
+      const yF = h.y[kf] + 0.055;
+      const at = (d, w, y) => [T0.x + T0.nx * d + T0.tx * w, y, T0.z + T0.nz * d + T0.tz * w];
+      const fl = bh + 7;
+      const nl = at(ph - 0.4, -fl, 0), nr = at(ph - 0.4, fl, 0), fr = at(ph + 9, bh, yF), fL = at(ph + 9, -bh, yF);
+      // a borda junto da pista principal acompanha a altura dela (rampa/curva)
+      nl[1] = p.yAt(nl[0], nl[2]) + 0.02; nr[1] = p.yAt(nr[0], nr[2]) + 0.02;
+      const uvOf = (q) => h.surface === 'asphalt' ? [0.13 + 0.06 * (((q[0] + q[2]) / 7) % 1 + 1) % 1, q[2] / 18] : [q[0] / (bh * 2), q[2] / (bh * 2)];
+      const uvs = [nl, nr, fr, fL].flatMap(uvOf);
+      // orientação do quad para a normal ficar para cima
+      const cross = (nr[0] - nl[0]) * (fL[2] - nl[2]) - (nr[2] - nl[2]) * (fL[0] - nl[0]);
+      if (cross < 0) RB0.quad(nl, nr, fr, fL, [0, 1, 0], uvs);
+      else RB0.quad(nr, nl, fL, fr, [0, 1, 0], [uvs[2], uvs[3], uvs[0], uvs[1], uvs[6], uvs[7], uvs[4], uvs[5]]);
     }
     // placas: vau e ponte de madeira
     const warn = (i, title, sub) => {
