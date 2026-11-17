@@ -1433,7 +1433,9 @@ export class Rig {
     }
     const vyr = this.vy, vyf = vyr + Math.tan(this.vpitch) * md.wb;
     // rolagem da carroceria pela força lateral e tombamento
-    const rs = this.rollSide || 1;
+    // lado do giro: liftSide = sinal de v·yaw (+1 = curva para o lado +x local = esquerda).
+    // As rodas de DENTRO levantam e o caminhão tomba para FORA da curva (−x local).
+    const rs = -(this.rollSide || 1);
     // giro em torno do pneu externo: o centro sobe e desloca para o lado
     const rollAt = (b, phi, susp) => {
       const s = Math.sin(phi), c = Math.cos(phi);
@@ -1452,7 +1454,7 @@ export class Rig {
     for (const a of md.rear) a.rotation.x = this.wheelRot;
     const lat = (this.yaw || 0) * this.v;
     const kb = sdt > 0 ? 1 - Math.exp(-sdt * 6) : 0.2;
-    md.body.rotation.z += (clamp(-lat * 0.01, -0.06, 0.06) - md.body.rotation.z) * kb;
+    md.body.rotation.z += (clamp(lat * 0.01, -0.06, 0.06) - md.body.rotation.z) * kb; // inclina para fora da curva
     md.body.rotation.x += (clamp(-this.acc * 0.006, -0.03, 0.03) - md.body.rotation.x) * kb;
     const placeTr = (tr, hx, hz, hy, th, key) => {
       const ax = hx - Math.sin(th) * tr.Lk, az = hz - Math.cos(th) * tr.Lk;
