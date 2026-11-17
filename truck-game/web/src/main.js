@@ -184,15 +184,16 @@ function mpDialog(msg = '') {
   let name = S.name;
   try { const mp = JSON.parse(localStorage.getItem(MP_KEY)); if (mp && mp.name && mp.name !== DEFAULTS.name) name = mp.name; } catch (e) { /* */ }
   popup(`<h2>🌐 Multiplayer online</h2>
-    <p class="mp-note">Até 8 jogadores por sala. O online tem um <b>save separado</b>: seu progresso no modo sozinho não muda.</p>
-    <label class="mp-l">Seu nome<input id="mpname" maxlength="16" value="${esc(name)}"></label>
-    <div class="mp-row"><button class="btn" data-act="mpjoin" data-arg="pub">🚚 Entrar em sala pública</button>
-    <button class="btn alt" data-act="mpjoin" data-arg="create">🔒 Criar sala privada</button></div>
-    <div class="mp-row"><input id="mpcode" maxlength="4" placeholder="CÓDIGO" style="text-transform:uppercase;width:7.5em">
-    <button class="btn alt" data-act="mpjoin" data-arg="code">Entrar com código</button></div>
+    <p class="mp-note">Até 8 jogadores por sala • <b>save separado</b>: seu progresso no modo sozinho não muda.</p>
+    <div class="mp-grid">
+      <label class="mp-l full">Seu nome<input id="mpname" maxlength="16" value="${esc(name)}"></label>
+      <button class="btn" data-act="mpjoin" data-arg="pub">🚚 Sala pública</button>
+      <button class="btn alt" data-act="mpjoin" data-arg="create">🔒 Criar sala privada</button>
+      <div class="mp-code-row full"><input id="mpcode" maxlength="4" placeholder="CÓDIGO"><button class="btn alt" data-act="mpjoin" data-arg="code">Entrar com código</button></div>
+    </div>
     <details class="mp-adv"><summary>Servidor</summary><input id="mpsrv" value="${esc(srv)}" spellcheck="false"></details>
     <div id="mpmsg" class="mp-msg">${esc(msg)}</div>
-    <div class="mp-row"><button class="btn ghost" data-act="popclose">Fechar</button></div>`);
+    <div class="pbtns"><button class="btn ghost" data-act="popclose">Fechar</button></div>`);
 }
 
 let mpBusy = false;
@@ -256,20 +257,20 @@ function mpLeave() {
 function mpPanel() {
   if (!net || !net.online) {
     popup(`<h2>🌐 Multiplayer</h2><p class="mp-note">Você está sem conexão com a sala.</p>
-      <div class="mp-row"><button class="btn" data-act="mpretry">🔄 Reconectar</button><button class="btn alt" data-act="mp">Outra sala</button></div>
-      <div class="mp-row"><button class="btn ghost" data-act="mpleave">Sair do online</button><button class="btn ghost" data-act="popclose">Fechar</button></div>`);
+      <div class="pbtns"><button class="btn" data-act="mpretry">🔄 Reconectar</button><button class="btn alt" data-act="mp">Outra sala</button></div>
+      <div class="pbtns"><button class="btn ghost" data-act="mpleave">Sair do online</button><button class="btn ghost" data-act="popclose">Fechar</button></div>`);
     return;
   }
-  const list = [`<li><b>${esc(S.name)}</b> <small>(você)</small> — ${esc(rig.def.name)}</li>`];
+  const list = [`<li><b>${esc(S.name)} (você)</b><span>${esc(rig.def.name)}</span></li>`];
   for (const p of net.players.values()) {
     const d = Math.hypot(p.x - rig.x, p.z - rig.z);
-    list.push(`<li><b>${esc(p.name)}</b> — ${p.rig ? esc(p.rig.def.name) + ` • ${d < 1000 ? Math.round(d) + ' m' : (d / 1000).toFixed(1) + ' km'}` : 'carregando…'}</li>`);
+    list.push(`<li><b>${esc(p.name)}</b><span>${p.rig ? esc(p.rig.def.name) + ` • ${d < 1000 ? Math.round(d) + ' m' : (d / 1000).toFixed(1) + ' km'}` : 'carregando…'}</span></li>`);
   }
   popup(`<h2>🌐 Sala ${net.room} <small>${net.pub ? 'pública' : 'privada'}</small></h2>
     ${net.pub ? '' : `<p class="mp-note">Código da sala: <b class="mp-code">${net.room}</b> — passe para os amigos entrarem.</p>`}
     <ul class="mp-list">${list.join('')}</ul>
     <div class="mp-quick">${net.quick.map((q, i) => `<button class="btn alt" data-act="mpchat" data-arg="${i}">${esc(q)}</button>`).join('')}</div>
-    <div class="mp-row"><button class="btn ghost" data-act="mpleave">Sair do online</button><button class="btn" data-act="popclose">Fechar</button></div>`);
+    <div class="pbtns"><button class="btn ghost" data-act="mpleave">Sair do online</button><button class="btn" data-act="popclose">Fechar</button></div>`);
 }
 
 // ---------------- Boot ----------------
@@ -840,7 +841,7 @@ function completeJob() {
   popup(`<h2>Entrega concluída! ✅</h2><div>${c.icon} ${c.name} • ${c.t} t → ${LOC[job.to].name}</div>
     <div class="big">${fmt(total)}</div>
     <div class="lines">${lines.map((l) => `<div><span>${l[0]}</span><b>${l[1]}</b></div>`).join('')}</div>
-    <button class="btn" data-act="popjobs">Próximo frete</button> <button class="btn alt" data-act="popclose">Continuar dirigindo</button>`,
+    <div class="pbtns"><button class="btn" data-act="popjobs">📋 Próximo frete</button><button class="btn alt" data-act="popclose">Continuar dirigindo</button></div>`,
   ups);
   jobs = genJobs();
   save();
@@ -865,7 +866,7 @@ function levelUpPopup(lv) {
     <div class="lines">${cs.map((c) => `<div><span>${c.icon} Nova carga: ${c.name}</span><b>${c.t} t</b></div>`).join('')}
     ${ts.map((t) => `<div><span>🚚 Novo caminhão: ${t.name}</span><b>${fmt(t.price)}</b></div>`).join('')}
     ${!cs.length && !ts.length ? '<div><span>Fretes mais longos e lucrativos</span><b>+XP</b></div>' : ''}</div>
-    <button class="btn" data-act="popclose">Show!</button>`);
+    <div class="pbtns"><button class="btn" data-act="popclose">Show!</button></div>`);
 }
 
 // ---------------- Entrada ----------------
@@ -1200,6 +1201,7 @@ function drawMinimap() {
 function openMap() {
   const bm = $('bigmap'), cv = $('bigmapc');
   bm.classList.remove('hidden');
+  bm.querySelector('.mpleg').classList.toggle('hidden', !(net && net.online));
   const dpr = Math.min(2, window.devicePixelRatio || 1);
   const ww = window.innerWidth * 0.96, wh = window.innerHeight * 0.92;
   const Wm = WORLD.x1 - WORLD.x0, Hm = WORLD.z1 - WORLD.z0;
@@ -1228,9 +1230,9 @@ function openMap() {
   for (const L of LOCATIONS) {
     const d = world.depots[L.id];
     mapIcon(ctx, d.zone.x, d.zone.z, tgt === d ? accentHex() : L.id === 'garagem' ? '#2f6fde' : '#222', 6 * dpr / k);
-    label(L.name, d.zone.x, d.zone.z - 14 * dpr / k, 10 * dpr);
+    if (tgt === d || L.id === 'garagem') label(L.name, d.zone.x, d.zone.z - 14 * dpr / k, 12 * dpr, tgt === d ? accentHex() : '#fff');
   }
-  for (const st of world.stations) { fuelIcon(ctx, st.x, st.z, 6 * dpr / k); label(st.name, st.x, st.z - 12 * dpr / k, 9 * dpr, '#ffb3b3'); }
+  for (const st of world.stations) fuelIcon(ctx, st.x, st.z, 5 * dpr / k);
   drawNetPlayers(ctx, 6 * dpr / k, 2 * dpr / k);
   if (net && net.online) for (const p of net.players.values()) if (p.rig) label(p.name, p.x, p.z - 12 * dpr / k, 10 * dpr, '#7cc7ff');
   ctx.save();
@@ -1340,7 +1342,7 @@ function showTitle() {
 function openModal(tab) {
   state = state === 'title' ? 'title' : 'menu';
   $('modal').classList.remove('hidden');
-  $('mstat').innerHTML = `Nv <b>${S.level}</b> • ${fmt(S.money)}`;
+  $('mstat').innerHTML = `<span class="pill lv">⭐ Nível ${S.level}</span><span class="pill money">${fmt(S.money)}</span>`;
   ctl.gas = ctl.brake = ctl.left = ctl.right = false;
   document.querySelectorAll('.pad').forEach((p) => p.classList.remove('on'));
   renderTab(tab);
@@ -1380,10 +1382,11 @@ function jobCard(j, i) {
   const why = lockReason(j);
   const tags = [c.fragile ? '<span class="chip tag">Frágil</span>' : '', c.hazard ? '<span class="chip tag">Perigosa</span>' : '', c.trailer === 'lowboy' ? '<span class="chip tag">Indivisível</span>' : ''].join('');
   return `<div class="card ${why ? 'locked' : ''}">
-    <div class="ic">${c.icon}</div><h3>${c.name}</h3><div class="t">${c.t} toneladas</div>
-    <div class="route">📍 ${LOC[j.from].name} → 🏁 ${LOC[j.to].name}</div>
+    <div class="head"><div class="ic">${c.icon}</div><div><h3>${c.name}</h3><div class="t">${c.t} toneladas</div></div></div>
+    <div class="route"><div><i>📍</i>${LOC[j.from].name}</div><div><i>🏁</i>${LOC[j.to].name}</div></div>
     <div class="row"><span class="chip pay">${fmt(j.pay)}</span><span class="chip xp">+${j.xp} XP</span><span class="chip">${(j.dist / 1000).toFixed(1)} km</span><span class="chip">⏱ ${Math.ceil(j.time / 60)} min</span>${tags}</div>
-    ${why ? `<div class="row"><span class="chip warn">🔒 ${why}</span></div>` : `<button class="btn" data-act="accept" data-arg="${i}" ${S.job ? 'disabled' : ''}>Aceitar frete</button>`}
+    <div class="spacer"></div>
+    ${why ? `<div class="row"><span class="chip warn">🔒 ${why}</span></div>` : `<button class="btn" data-act="accept" data-arg="${i}" ${S.job ? 'disabled' : ''}>${S.job ? 'Termine o frete atual' : 'Aceitar frete'}</button>`}
   </div>`;
 }
 
@@ -1391,18 +1394,18 @@ function jobsHTML() {
   let head = '';
   if (S.job) {
     const j = S.job, c = CARGO[j.cargo];
-    head = `<div class="card" style="margin-bottom:10px;border-color:#ffb703"><div class="ic">${c.icon}</div><h3>Frete ativo: ${c.name} (${c.t} t)</h3>
-      <div class="route">${j.phase === 'pickup' ? 'Coletar em' : 'Entregar em'} <b>${LOC[j.phase === 'pickup' ? j.from : j.to].name}</b> • Avaria ${j.damage.toFixed(0)}% • Pagamento ${fmt(j.pay)}</div>
+    head = `<div class="card active"><div class="head"><div class="ic">${c.icon}</div><div style="flex:1"><h3>Frete ativo: ${c.name}</h3><div class="t">${c.t} t • ${j.phase === 'pickup' ? 'Coletar em' : 'Entregar em'} ${LOC[j.phase === 'pickup' ? j.from : j.to].name}</div></div></div>
+      <div class="row"><span class="chip pay">${fmt(j.pay)}</span><span class="chip ${j.damage > 0 ? 'warn' : ''}">Avaria ${j.damage.toFixed(0)}%</span></div>
       <button class="btn danger" data-act="cancel">Cancelar frete${j.phase === 'deliver' ? ' (multa 25%)' : ''}</button></div>`;
   }
-  return `${head}<div class="tbar"><div class="grow">Caminhão atual: <b>${rig.def.name}</b> — até <b>${rig.def.cap} t</b> • Nível ${S.level}</div>
-    <button class="btn alt" data-act="refresh" style="margin:0">🔄 Atualizar</button></div>
+  return `${head}<div class="tbar"><div class="grow">🚚 <b>${rig.def.name}</b> • carrega até <b>${rig.def.cap} t</b></div>
+    <button class="btn alt" data-act="refresh">🔄 Novos fretes</button></div>
     <div class="grid">${jobs.map(jobCard).join('')}</div>`;
 }
 
 function garageHTML() {
   const maxHp = 750, maxCap = 90;
-  return `<div class="tbar"><div class="grow">Saldo: <b style="color:#7ee787">${fmt(S.money)}</b> • A força do caminhão define as cargas que ele consegue puxar.</div></div><div class="grid">` +
+  return `<div class="tbar"><div class="grow">A potência e a capacidade definem quais cargas cada caminhão consegue levar.</div></div><div class="grid">` +
     TRUCKS.map((t) => {
       const owned = S.owned.includes(t.id);
       const cur = S.truck === t.id;
@@ -1410,18 +1413,18 @@ function garageHTML() {
       let btn;
       if (cur) btn = '<button class="btn alt" disabled>Em uso</button>';
       else if (owned) btn = `<button class="btn" data-act="use" data-arg="${t.id}">Usar</button>`;
-      else if (lockLv) btn = `<span class="chip warn">🔒 Nível ${t.level}</span>`;
+      else if (lockLv) btn = `<div class="row"><span class="chip warn">🔒 Libera no nível ${t.level}</span></div>`;
       else btn = `<button class="btn" data-act="buy" data-arg="${t.id}" ${S.money < t.price ? 'disabled' : ''}>Comprar ${fmt(t.price)}</button>`;
       const col = '#' + new THREE.Color(t.color).getHexString();
       return `<div class="card ${lockLv && !owned ? 'locked' : ''}">
         <div class="truckpic" style="background:linear-gradient(135deg, ${col}, #1b2230)">${t.rigid ? '🚚' : '🚛'}</div>
-        <h3>${t.name}</h3><div style="font-size:12px;opacity:.8;margin:2px 0 8px">${t.desc}</div>
+        <h3>${t.name}${cur ? ' <span class="chip tag" style="font-size:11px">Em uso</span>' : owned ? ' <span class="chip pay" style="font-size:11px">Seu</span>' : ''}</h3><div class="desc">${t.desc}</div>
         <div class="stat"><span>Potência</span><b>${t.hp} cv</b></div><div class="meter"><i style="width:${(t.hp / maxHp) * 100}%"></i></div>
         <div class="stat"><span>Capacidade</span><b>${t.cap} t</b></div><div class="meter"><i style="width:${(t.cap / maxCap) * 100}%"></i></div>
         <div class="stat"><span>Velocidade máx.</span><b>${t.vmax} km/h</b></div>
         <div class="stat"><span>Tanque • autonomia</span><b>${t.tank} L • ~${autonomy(t)} km</b></div>
         <div class="stat"><span>Tipo</span><b>${t.rigid ? 'Rígido (baú)' : `Cavalo mecânico ${t.cfg}`}</b></div>
-        ${btn}</div>`;
+        <div class="spacer"></div>${btn}</div>`;
     }).join('') + '</div>';
 }
 
@@ -1557,28 +1560,28 @@ function profileHTML() {
 
 function settingsHTML() {
   const seg = (act, cur, opts) => `<div class="seg">${opts.map(([v, l]) => `<button data-act="${act}" data-arg="${v}" class="${cur === v ? 'on' : ''}">${l}</button>`).join('')}</div>`;
-  return `<div class="set"><div><b>Qualidade gráfica</b><br><small style="opacity:.7">Atual: ${qName === 'low' ? 'Leve' : qName === 'medium' ? 'Médio' : 'Ultra'} • resolução dinâmica ativa</small></div>
+  return `<div class="sec">Gráficos</div><div class="set"><div><b>Qualidade gráfica</b><br><small>Atual: ${qName === 'low' ? 'Leve' : qName === 'medium' ? 'Médio' : 'Ultra'} • resolução dinâmica ativa</small></div>
       ${seg('quality', S.settings.quality, [['auto', 'Auto'], ['low', 'Leve'], ['medium', 'Médio'], ['high', 'Ultra']])}</div>
-    <div class="set"><div><b>Direção</b><br><small style="opacity:.7">Volante, setas ou inclinação do celular</small></div>
-      ${seg('steermode', S.settings.steer, [['wheel', 'Volante'], ['buttons', 'Setas'], ['tilt', 'Inclinação']])}</div>
-    <div class="set"><div><b>Câmbio</b><br><small style="opacity:.7">Manual D/N/R ou automático (segurar freio parado = ré)</small></div>
-      ${seg('gearbox', S.settings.gearbox, [['manual', 'D / N / R'], ['auto', 'Automático']])}</div>
-    <div class="set"><div><b>Horário</b><br><small style="opacity:.7">Ciclo de dia e noite com faróis e iluminação urbana</small></div>
-      ${seg('timemode', S.settings.time, [['cycle', 'Ciclo'], ['day', 'Dia'], ['dusk', 'Entardecer'], ['night', 'Noite']])}</div>
-    <div class="set"><div><b>Clima</b><br><small style="opacity:.7">Automático muda sozinho: sol, nuvens, chuva e tempestades com alagamentos</small></div>
-      ${seg('wmode', S.settings.weather || 'auto', [['auto', 'Automático'], ['sol', 'Sol'], ['nublado', 'Nublado'], ['chuva', 'Chuva'], ['tempestade', 'Tempestade']])}</div>
-    <div class="set"><div><b>Velocímetro</b><br><small style="opacity:.7">Estilo dos mostradores do painel</small></div>
-      ${seg('gauge', S.settings.gauge, [['analog', 'Analógico'], ['digital', 'Digital'], ['sport', 'Esportivo'], ['classic', 'Clássico']])}</div>
-    <div class="set"><div><b>Cor do painel</b><br><small style="opacity:.7">Cor de destaque da interface</small></div>
-      ${seg('accent', S.settings.accent, [['amber', 'Âmbar'], ['blue', 'Azul'], ['green', 'Verde'], ['red', 'Vermelho'], ['purple', 'Roxo']])}</div>
-    <div class="set"><div><b>Tamanho dos controles</b></div>
-      ${seg('hudsize', S.settings.hud, [['small', 'Pequeno'], ['normal', 'Normal'], ['large', 'Grande']])}</div>
-    <div class="set"><b>Volume</b><input id="vol" type="range" min="0" max="1" step="0.05" value="${S.settings.volume}"></div>
     <div class="set"><b>Mostrar FPS</b>${seg('fps', S.settings.fps ? 1 : 0, [[1, 'Sim'], [0, 'Não']])}</div>
-    <div class="set"><div><b>Desatolar</b><br><small style="opacity:.7">Leva o caminhão de volta para a rua mais próxima</small></div><button class="btn alt" data-act="rescue" style="margin:0">Reposicionar</button></div>
-    <div class="set"><div><b>Controles no teclado</b><br><small style="opacity:.7">Z/X pisca-pisca • WASD/setas • Espaço freio • E motor • R ré • N neutro • P freio de mão • L faróis • H buzina • C câmera • M mapa</small></div></div>
-    <div class="set"><b>Menu principal</b><button class="btn alt" data-act="tomenu" style="margin:0">Voltar ao menu</button></div>
-    <div class="set"><b>Apagar progresso</b><button class="btn danger" data-act="reset" style="margin:0">Resetar</button></div>`;
+    <div class="sec">Controles</div><div class="set"><div><b>Direção</b><br><small>Volante, setas ou inclinação do celular</small></div>
+      ${seg('steermode', S.settings.steer, [['wheel', 'Volante'], ['buttons', 'Setas'], ['tilt', 'Inclinação']])}</div>
+    <div class="set"><div><b>Câmbio</b><br><small>Manual D/N/R ou automático (segurar freio parado = ré)</small></div>
+      ${seg('gearbox', S.settings.gearbox, [['manual', 'D / N / R'], ['auto', 'Automático']])}</div>
+    <div class="set"><div><b>Tamanho dos controles</b><br><small>Volante, pedais e painel</small></div>
+      ${seg('hudsize', S.settings.hud, [['small', 'Pequeno'], ['normal', 'Normal'], ['large', 'Grande']])}</div>
+    <div class="sec">Mundo</div><div class="set"><div><b>Horário</b><br><small>Ciclo de dia e noite com faróis e iluminação urbana</small></div>
+      ${seg('timemode', S.settings.time, [['cycle', 'Ciclo'], ['day', 'Dia'], ['dusk', 'Entardecer'], ['night', 'Noite']])}</div>
+    <div class="set"><div><b>Clima</b><br><small>Automático muda sozinho: sol, nuvens, chuva e tempestades com alagamentos</small></div>
+      ${seg('wmode', S.settings.weather || 'auto', [['auto', 'Automático'], ['sol', 'Sol'], ['nublado', 'Nublado'], ['chuva', 'Chuva'], ['tempestade', 'Tempestade']])}</div>
+    <div class="sec">Visual e som</div><div class="set"><div><b>Velocímetro</b><br><small>Estilo dos mostradores do painel</small></div>
+      ${seg('gauge', S.settings.gauge, [['analog', 'Analógico'], ['digital', 'Digital'], ['sport', 'Esportivo'], ['classic', 'Clássico']])}</div>
+    <div class="set"><div><b>Cor do painel</b><br><small>Cor de destaque da interface</small></div>
+      ${seg('accent', S.settings.accent, [['amber', 'Âmbar'], ['blue', 'Azul'], ['green', 'Verde'], ['red', 'Vermelho'], ['purple', 'Roxo']])}</div>
+    <div class="set"><b>Volume</b><input id="vol" type="range" min="0" max="1" step="0.05" value="${S.settings.volume}"></div>
+    <div class="sec">Outros</div><div class="set"><div><b>Desatolar</b><br><small>Leva o caminhão de volta para a rua mais próxima</small></div><button class="btn alt" data-act="rescue" style="margin:0;flex:none">Reposicionar</button></div>
+    <div class="set"><div><b>Controles no teclado</b><br><small>Z/X pisca-pisca • WASD/setas • Espaço freio • E motor • R ré • N neutro • P freio de mão • L faróis • H buzina • C câmera • M mapa</small></div></div>
+    <div class="set"><b>Menu principal</b><button class="btn alt" data-act="tomenu" style="margin:0;flex:none">Voltar ao menu</button></div>
+    <div class="set"><b>Apagar progresso</b><button class="btn danger" data-act="reset" style="margin:0;flex:none">Resetar</button></div>`;
 }
 
 function rescue() {

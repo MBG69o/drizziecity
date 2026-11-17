@@ -44,7 +44,7 @@
     <div id="tispecs"></div>
     <div class="t-stats" id="tstats"></div>
   </div>
-  <div class="ver">v2.8.0 • VERSÃO DE TESTES (tudo liberado)</div>
+  <div class="ver">v2.8.1 • VERSÃO DE TESTES (tudo liberado)</div>
 </div>
 
 <!-- ============ HUD (limpo) ============ -->
@@ -75,7 +75,7 @@
     <button id="brake" class="pad pedal brake"><i></i></button>
     <button id="gas" class="pad pedal gas"><i></i></button>
   </div>
-  <button id="enginebtn" class="hidden"><span>Ligar<br>Motor</span><i></i></button>
+  <button id="enginebtn" class="hidden"><span>⏻<br>Ligar motor</span></button>
 
   <!-- mostrador único -->
   <div id="cluster">
@@ -104,10 +104,10 @@
 <div id="modal" class="hidden">
   <div class="sheet">
     <div class="tabs">
-      <button data-tab="jobs">Fretes</button>
-      <button data-tab="garage">Garagem</button>
-      <button data-tab="profile">Perfil</button>
-      <button data-tab="settings">Ajustes</button>
+      <button data-tab="jobs"><i>📋</i><span>Fretes</span></button>
+      <button data-tab="garage"><i>🚚</i><span>Garagem</span></button>
+      <button data-tab="profile"><i>⭐</i><span>Perfil</span></button>
+      <button data-tab="settings"><i>⚙️</i><span>Ajustes</span></button>
       <span id="mstat"></span>
       <button class="close" data-act="close">✕</button>
     </div>
@@ -116,7 +116,7 @@
 </div>
 
 <div id="popup" class="hidden"><div class="card pop" id="popcard"></div></div>
-<div id="bigmap" class="hidden"><canvas id="bigmapc"></canvas><button class="rb close2" data-act="closemap">✕</button></div>
+<div id="bigmap" class="hidden"><canvas id="bigmapc"></canvas><div class="maplegend"><b>🗺️ Mapa</b><div><i style="background:#3ee07a"></i>Você</div><div><i style="background:var(--red)"></i>Destino do frete</div><div><i style="background:#2f6fde"></i>Garagem</div><div><i style="background:#e5484d"></i>Posto de combustível</div><div class="mpleg hidden"><i style="background:#36a3ff"></i>Outros jogadores</div></div><button class="rb close2" data-act="closemap">✕</button></div>
 
 <script src="game.js"></script>
 </body>

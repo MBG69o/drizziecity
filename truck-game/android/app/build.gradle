@@ -10,8 +10,8 @@ android {
         applicationId 'com.drizzie.truck'
         minSdk 23          // Android 6.0 Marshmallow
         targetSdk 35       // Android 15
-        versionCode 19
-        versionName '2.8.0'
+        versionCode 20
+        versionName '2.8.1'
     }
 
     signingConfigs {
