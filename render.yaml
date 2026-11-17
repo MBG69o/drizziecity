@@ -1,0 +1,11 @@
+# Blueprint do Render (render.com): cria o servidor do multiplayer do Drizzie Truck.
+services:
+  - type: web
+    name: drizzie-truck-mp
+    runtime: node
+    plan: free
+    rootDir: truck-game/server
+    buildCommand: npm install
+    startCommand: node server.js
+    healthCheckPath: /
+    autoDeploy: true

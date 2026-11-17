@@ -253,3 +253,24 @@ input[type=range] { width: 180px; accent-color: #e3243b; }
 #hint { left: 50%; top: 76px; transform: translateX(-50%); padding: 6px 14px; border-radius: 14px; background: rgba(10,14,20,.78); font-size: 12px; white-space: nowrap; pointer-events: none; }
 #hint b { color: var(--red); }
 #hint b.ok { color: #3ee07a; }
+
+/* ---- multiplayer ---- */
+.t-mp { margin-top: 8px; background: #1f6fd6; color: #fff !important; padding: 11px; font-size: 16px; }
+#mpbar { margin-top: 8px; padding: 7px 10px; border-radius: 10px; background: rgba(31,111,214,.25); font-size: 13px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+#mpbar .t-edit { width: auto; height: auto; padding: 4px 10px; border-radius: 8px; font-size: 12px; }
+#mpbar.hidden { display: none; }
+.rb.mphud { width: auto; padding: 0 10px; font-size: 14px; color: #fff; white-space: nowrap; }
+.rb.mphud .off { color: #ff6b6b; }
+.mp-note { font-size: 13px; opacity: .85; margin: 4px 0 8px; font-style: normal; }
+.mp-l { display: block; text-align: left; font-size: 13px; font-style: normal; margin: 6px 0; }
+#popup input { display: block; width: 100%; box-sizing: border-box; margin-top: 4px; padding: 9px 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,.2); background: rgba(0,0,0,.35); color: #fff; font-size: 16px; font-style: normal; }
+.mp-row { display: flex; gap: 8px; justify-content: center; align-items: flex-end; flex-wrap: wrap; }
+.mp-row input { display: inline-block !important; width: auto; margin-top: 10px !important; }
+.mp-adv { text-align: left; font-size: 12px; margin-top: 10px; opacity: .8; font-style: normal; }
+.mp-msg { min-height: 1.3em; margin-top: 8px; font-size: 14px; color: #ffd27a; font-style: normal; }
+.mp-list { text-align: left; font-size: 14px; margin: 8px 0; padding-left: 18px; font-style: normal; max-height: 30vh; overflow: auto; }
+.mp-list li { padding: 2px 0; }
+.mp-quick { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
+.mp-quick .btn { margin-top: 4px; padding: 7px 12px; font-size: 13px; }
+.mp-code { font-size: 22px; letter-spacing: 3px; color: #7cc7ff; }
+.btn.ghost { background: transparent; color: #fff; border: 1px solid rgba(255,255,255,.25); }

@@ -84,6 +84,33 @@ export class Audio {
     }
   }
 
+  // buzina de outro jogador (multiplayer), com volume pela distância
+  remoteHorn(key, on, vol = 0.1) {
+    if (!this.ctx) return;
+    this.rh = this.rh || {};
+    const cur = this.rh[key];
+    if (on && !cur && vol > 0.005) {
+      const g = this.ctx.createGain();
+      g.gain.value = vol;
+      const a = this.ctx.createOscillator(), b = this.ctx.createOscillator();
+      a.type = b.type = 'sawtooth';
+      a.frequency.value = 220; b.frequency.value = 294;
+      const f = this.ctx.createBiquadFilter();
+      f.frequency.value = 1500;
+      a.connect(f); b.connect(f); f.connect(g).connect(this.master);
+      a.start(); b.start();
+      // segurança: nunca toca mais que 4 s se o "soltar" se perder na rede
+      a.stop(this.ctx.currentTime + 4); b.stop(this.ctx.currentTime + 4);
+      this.rh[key] = [a, b, g];
+      a.onended = () => { if (this.rh[key] && this.rh[key][0] === a) delete this.rh[key]; };
+    } else if (!on && cur) {
+      const [a, b, g] = cur;
+      g.gain.setTargetAtTime(0, this.ctx.currentTime, 0.03);
+      try { a.stop(this.ctx.currentTime + 0.2); b.stop(this.ctx.currentTime + 0.2); } catch (e) { /* */ }
+      delete this.rh[key];
+    }
+  }
+
   beep(freq = 880, dur = 0.12, type = 'sine', vol = 0.25) {
     if (!this.ctx) return;
     const o = this.ctx.createOscillator(), g = this.ctx.createGain();

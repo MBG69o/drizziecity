@@ -27,6 +27,8 @@
       <button class="t-edit" data-act="rename" title="Mudar nome">✎</button>
     </div>
     <button id="play" class="t-main">▶&nbsp; Pegar a estrada</button>
+    <button id="mpbtn" class="t-main t-mp" data-act="mp">🌐 Multiplayer online</button>
+    <div id="mpbar" class="hidden"></div>
     <div class="t-grid">
       <button data-act="jobs"><i>📋</i>Fretes</button>
       <button data-act="garage"><i>🚚</i>Concessionária</button>
@@ -42,7 +44,7 @@
     <div id="tispecs"></div>
     <div class="t-stats" id="tstats"></div>
   </div>
-  <div class="ver">v2.7.5 • VERSÃO DE TESTES (tudo liberado)</div>
+  <div class="ver">v2.8.0 • VERSÃO DE TESTES (tudo liberado)</div>
 </div>
 
 <!-- ============ HUD (limpo) ============ -->
@@ -50,6 +52,7 @@
   <div id="mapwrap"><canvas id="minimap" width="260" height="260"></canvas><div id="dist"></div></div>
   <div id="jobpanel"><span id="jobtitle"></span><span id="jobsub"></span></div>
   <div id="topbtns">
+    <button id="mphud" class="rb mphud hidden" data-act="mppanel" title="Multiplayer"></button>
     <button class="rb" data-act="camera" title="Câmera"><svg viewBox="0 0 24 24"><path d="M3 7h12v10H3zM15 10l6-3v10l-6-3z" fill="none" stroke="currentColor" stroke-width="1.8"/></svg></button>
     <button class="rb" data-act="menu" title="Menu"><svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" stroke-width="2.2"/></svg></button>
   </div>

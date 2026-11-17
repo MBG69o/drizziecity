@@ -12,9 +12,11 @@ import { Weather } from './weather.js';
 import { Cockpit } from './cockpit.js';
 import { findRoute, buildGraph } from './route.js';
 import { Audio } from './audio.js';
+import { Net, DEFAULT_SERVER } from './net.js';
 
 const $ = (id) => document.getElementById(id);
-const SAVE_KEY = 'drizzieTruck.v1';
+const SP_KEY = 'drizzieTruck.v1', MP_KEY = 'drizzieTruck.mp1'; // save do modo sozinho e do online (separados)
+let SAVE_KEY = SP_KEY;
 const fmt = (n) => 'R$ ' + Math.round(n).toLocaleString('pt-BR');
 const RH = ROAD_W / 2;
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -94,9 +96,181 @@ let zoneTimer = 0;
 const obstacles = [];
 const ctl = { gas: false, brake: false, left: false, right: false, tilt: 0, wheel: 0, wheelHeld: false, gear: 'D', hand: false, blink: 0, blinkArm: false };
 const input = { throttle: 0, brake: 0, steer: 0, gear: 'D', handbrake: false };
-let lightsManual = null, weather = null, cockpit = null;
+let lightsManual = null, weather = null, cockpit = null, net = null;
 const cam = { yaw: 0, orbit: 0, orbitT: 0, mode: S.settings.camera || 0, pos: new THREE.Vector3(), look: new THREE.Vector3() };
 let pr = Q.pr;
+
+// ---------------- Multiplayer online ----------------
+// Perfil separado (MP_KEY): dinheiro, caminhões, fretes e estatísticas do online não
+// misturam com o modo sozinho. Os ajustes (gráficos, controles, som) são os mesmos.
+const isMP = () => SAVE_KEY === MP_KEY;
+const esc = (t) => String(t).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+function setupNet() {
+  net = new Net(scene, world);
+  net.onChat = (name, msg) => { audio.beep(1250, 0.06, 'sine', 0.12); toast(`💬 <b>${esc(name)}:</b> ${esc(msg)}`, 3500); };
+  net.onJoin = (name) => { audio.beep(988, 0.08); toast(`🟢 <b>${esc(name)}</b> entrou na sala`, 2600); updateMpHud(); };
+  net.onLeave = (name) => { toast(`🔴 <b>${esc(name)}</b> saiu da sala`, 2600); updateMpHud(); };
+  net.onClock = (c) => { if (isMP() && isFinite(c)) { S.clock = c; applyTime(S.clock); } };
+  net.onHorn = (p, on) => {
+    const d = Math.hypot(p.x - rig.x, p.z - rig.z);
+    audio.remoteHorn(p.id, on, d > 350 ? 0 : 0.16 * (1 - d / 350));
+  };
+  net.onDrop = () => { toast('⚠️ <b>Conexão perdida.</b> Tentando reconectar…', 3000); updateMpHud(); mpReconnect(1); };
+  // buzina do jogador também toca para os outros
+  const horn = audio.horn.bind(audio);
+  audio.horn = (on) => { horn(on); if (net && net.online) net.horn(on); };
+}
+
+function netFrame(dt) {
+  if (!net || !net.online) return;
+  net.update(dt, performance.now() / 1000, camera.position);
+  net.tick(dt, rig, { beam: Math.max(0, rig.beamMode || 0), blink: ctl.blink || 0 });
+  mpHudT -= dt;
+  if (mpHudT <= 0) { mpHudT = 1; updateMpHud(); }
+}
+let mpHudT = 0;
+
+function drawNetPlayers(ctx, r, lw) {
+  if (!net || !net.online) return;
+  ctx.fillStyle = '#36a3ff'; ctx.strokeStyle = '#fff'; ctx.lineWidth = lw;
+  for (const p of net.players.values()) {
+    if (!p.rig) continue;
+    ctx.beginPath(); ctx.arc(p.x, p.z, r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+  }
+}
+
+function updateMpHud() {
+  const b = $('mphud');
+  if (!b) return;
+  const on = isMP();
+  b.classList.toggle('hidden', !on);
+  if (on) b.innerHTML = net && net.online ? `👥 <b>${net.count}</b>/${net.max}` : '👥 <b class="off">off</b>';
+}
+
+// troca o jogo inteiro para o perfil online (ou de volta ao sozinho)
+function switchProfile(mp) {
+  if (isMP() === mp) return;
+  save();
+  if (S.job && S.job.phase === 'deliver') rig.detach();
+  rig.unpark();
+  for (const p of dropped) rig.unpark(p);
+  dropped.length = 0;
+  rig.detach();
+  SAVE_KEY = mp ? MP_KEY : SP_KEY;
+  const settings = S.settings, oldName = S.name;
+  const n = loadSave();
+  for (const k of Object.keys(S)) delete S[k];
+  Object.assign(S, n, { settings });
+  if (mp && S.stats.deliveries === 0 && S.name === DEFAULTS.name) S.name = oldName;
+  unlockAll();
+  route = null; nextWp = null;
+  marker.visible = false; navArrow.visible = false;
+  rig.setTruck(TRUCK[S.truck] || TRUCKS[0]);
+  rig.v = 0; rig.rolled = 0; rig.engineOn = false;
+  placeAtStart();
+  restoreTruckState();
+  if (S.job && S.job.phase === 'deliver') rig.attach(CARGO[S.job.cargo]);
+  else if (S.job) parkAtDepot(S.job);
+  jobs = genJobs();
+  applyTime(S.clock);
+  updateCamera(0, true);
+  cullT = 0;
+  save();
+}
+
+function mpDialog(msg = '') {
+  const srv = S.settings.mpServer || DEFAULT_SERVER;
+  let name = S.name;
+  try { const mp = JSON.parse(localStorage.getItem(MP_KEY)); if (mp && mp.name && mp.name !== DEFAULTS.name) name = mp.name; } catch (e) { /* */ }
+  popup(`<h2>🌐 Multiplayer online</h2>
+    <p class="mp-note">Até 8 jogadores por sala. O online tem um <b>save separado</b>: seu progresso no modo sozinho não muda.</p>
+    <label class="mp-l">Seu nome<input id="mpname" maxlength="16" value="${esc(name)}"></label>
+    <div class="mp-row"><button class="btn" data-act="mpjoin" data-arg="pub">🚚 Entrar em sala pública</button>
+    <button class="btn alt" data-act="mpjoin" data-arg="create">🔒 Criar sala privada</button></div>
+    <div class="mp-row"><input id="mpcode" maxlength="4" placeholder="CÓDIGO" style="text-transform:uppercase;width:7.5em">
+    <button class="btn alt" data-act="mpjoin" data-arg="code">Entrar com código</button></div>
+    <details class="mp-adv"><summary>Servidor</summary><input id="mpsrv" value="${esc(srv)}" spellcheck="false"></details>
+    <div id="mpmsg" class="mp-msg">${esc(msg)}</div>
+    <div class="mp-row"><button class="btn ghost" data-act="popclose">Fechar</button></div>`);
+}
+
+let mpBusy = false;
+async function mpConnect(mode) {
+  if (mpBusy) return;
+  const name = ($('mpname') && $('mpname').value.trim()) || S.name;
+  const code = $('mpcode') ? $('mpcode').value.trim().toUpperCase() : '';
+  const srv = ($('mpsrv') && $('mpsrv').value.trim()) || DEFAULT_SERVER;
+  if (mode === 'code' && code.length !== 4) { $('mpmsg').textContent = 'Digite o código de 4 letras da sala.'; return; }
+  S.settings.mpServer = srv === DEFAULT_SERVER ? undefined : srv;
+  mpBusy = true;
+  document.querySelectorAll('#popcard button').forEach((b) => { b.disabled = true; });
+  const status = (t) => { const m = $('mpmsg'); if (m) m.textContent = t; };
+  try {
+    if (net.online) net.close();
+    await net.connect(srv, { name: name.slice(0, 16), mode, code, truck: S.truck }, status);
+    mpBusy = false;
+    closePopup();
+    switchProfile(true);
+    S.name = name.slice(0, 16); save();
+    updateMpHud();
+    toast(`🌐 Sala <b>${net.room}</b> ${net.pub ? '(pública)' : '(privada — passe o código para os amigos)'} • ${net.count}/${net.max}`, 4500);
+    if (state === 'title') $('play').click();
+  } catch (e) {
+    mpBusy = false;
+    document.querySelectorAll('#popcard button').forEach((b) => { b.disabled = false; });
+    status('❌ ' + (e.message || 'Não foi possível conectar'));
+  }
+}
+
+async function mpReconnect(n) {
+  if (!net || net.online || !isMP() || !net.opts) return;
+  const o = net.opts;
+  try {
+    await net.connect(o.url, { name: S.name, mode: 'code', code: net.room, truck: S.truck }, () => {});
+    toast('🟢 Reconectado!', 2000);
+    updateMpHud();
+  } catch (e) {
+    if (e.fatal || n >= 3) {
+      // a sala acabou ou o servidor não volta: tenta uma sala pública
+      if (net.pub && n < 4) {
+        try { await net.connect(o.url, { name: S.name, mode: 'pub', truck: S.truck }, () => {}); toast(`🟢 Reconectado na sala <b>${net.room}</b>`, 2500); updateMpHud(); return; } catch (e2) { /* */ }
+      }
+      toast('🔴 Sem conexão com o servidor. Toque em 👥 para tentar de novo.', 4000);
+      updateMpHud();
+      return;
+    }
+    setTimeout(() => mpReconnect(n + 1), 3000);
+  }
+}
+
+function mpLeave() {
+  if (net) net.close();
+  closePopup();
+  switchProfile(false);
+  updateMpHud();
+  toast('Você voltou para o modo sozinho', 2500);
+  showTitle();
+}
+
+function mpPanel() {
+  if (!net || !net.online) {
+    popup(`<h2>🌐 Multiplayer</h2><p class="mp-note">Você está sem conexão com a sala.</p>
+      <div class="mp-row"><button class="btn" data-act="mpretry">🔄 Reconectar</button><button class="btn alt" data-act="mp">Outra sala</button></div>
+      <div class="mp-row"><button class="btn ghost" data-act="mpleave">Sair do online</button><button class="btn ghost" data-act="popclose">Fechar</button></div>`);
+    return;
+  }
+  const list = [`<li><b>${esc(S.name)}</b> <small>(você)</small> — ${esc(rig.def.name)}</li>`];
+  for (const p of net.players.values()) {
+    const d = Math.hypot(p.x - rig.x, p.z - rig.z);
+    list.push(`<li><b>${esc(p.name)}</b> — ${p.rig ? esc(p.rig.def.name) + ` • ${d < 1000 ? Math.round(d) + ' m' : (d / 1000).toFixed(1) + ' km'}` : 'carregando…'}</li>`);
+  }
+  popup(`<h2>🌐 Sala ${net.room} <small>${net.pub ? 'pública' : 'privada'}</small></h2>
+    ${net.pub ? '' : `<p class="mp-note">Código da sala: <b class="mp-code">${net.room}</b> — passe para os amigos entrarem.</p>`}
+    <ul class="mp-list">${list.join('')}</ul>
+    <div class="mp-quick">${net.quick.map((q, i) => `<button class="btn alt" data-act="mpchat" data-arg="${i}">${esc(q)}</button>`).join('')}</div>
+    <div class="mp-row"><button class="btn ghost" data-act="mpleave">Sair do online</button><button class="btn" data-act="popclose">Fechar</button></div>`);
+}
 
 // ---------------- Boot ----------------
 const step = (p, msg) => new Promise((res) => {
@@ -207,6 +381,7 @@ async function boot() {
   };
   trafficQuality(qName === 'low');
   traffic = new Traffic(scene, Q.traffic, world);
+  setupNet();
   buildMarkers();
   await step(85, 'Desenhando o mapa…');
   buildMapCanvas();
@@ -1011,6 +1186,7 @@ function drawMinimap() {
   if (world.floodLevel > 0.05) { ctx.fillStyle = 'rgba(70,140,220,0.75)'; for (const f of world.floods) { ctx.beginPath(); ctx.arc(f.x, f.z, Math.max(f.r, 6 / k), 0, 7); ctx.fill(); } }
   ctx.fillStyle = 'rgba(255,255,255,0.7)';
   for (const c of traffic.cars) if (c.mode) ctx.fillRect(c.x - 2 / k, c.z - 2 / k, 4 / k, 4 / k);
+  drawNetPlayers(ctx, 7 / k, 3 / k);
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.translate(W / 2, H * 0.62);
   ctx.fillStyle = '#3ee07a';
@@ -1055,6 +1231,8 @@ function openMap() {
     label(L.name, d.zone.x, d.zone.z - 14 * dpr / k, 10 * dpr);
   }
   for (const st of world.stations) { fuelIcon(ctx, st.x, st.z, 6 * dpr / k); label(st.name, st.x, st.z - 12 * dpr / k, 9 * dpr, '#ffb3b3'); }
+  drawNetPlayers(ctx, 6 * dpr / k, 2 * dpr / k);
+  if (net && net.online) for (const p of net.players.values()) if (p.rig) label(p.name, p.x, p.z - 12 * dpr / k, 10 * dpr, '#7cc7ff');
   ctx.save();
   ctx.translate(rig.x, rig.z);
   ctx.rotate(Math.PI + rig.h);
@@ -1075,8 +1253,14 @@ function setupUI() {
     const a = b.dataset.act, arg = b.dataset.arg;
     if (a === 'jobs' || a === 'garage' || a === 'settings') openModal(a);
     else if (a === 'menu' || a === 'pause') openModal('jobs');
-    else if (a === 'rename') { const n = prompt('Nome do motorista:', S.name); if (n && n.trim()) { S.name = n.trim().slice(0, 18); save(); showTitle(); } }
+    else if (a === 'rename') { const n = prompt('Nome do motorista:', S.name); if (n && n.trim()) { S.name = n.trim().slice(0, isMP() ? 16 : 18); save(); showTitle(); if (net && net.online) net.rename(S.name); } }
     else if (a === 'map') openMap();
+    else if (a === 'mp') mpDialog();
+    else if (a === 'mpjoin') mpConnect(arg);
+    else if (a === 'mpleave') mpLeave();
+    else if (a === 'mppanel') mpPanel();
+    else if (a === 'mpchat') { net.chat(+arg); closePopup(); }
+    else if (a === 'mpretry') { closePopup(); toast('Reconectando…', 1500); mpReconnect(1); }
     else if (a === 'gauge') { S.settings.gauge = arg; save(); renderTab('settings'); }
     else if (a === 'accent') { S.settings.accent = arg; applyTheme(); save(); renderTab('settings'); }
     else if (a === 'hudsize') { S.settings.hud = arg; applyTheme(); save(); renderTab('settings'); }
@@ -1136,6 +1320,13 @@ function showTitle() {
   $('hud').classList.add('hidden');
   $('title').classList.remove('hidden');
   $('pname').textContent = S.name;
+  const mpb = $('mpbar');
+  if (mpb) {
+    mpb.classList.toggle('hidden', !isMP());
+    if (isMP()) mpb.innerHTML = `🌐 <b>Online</b> • ${net && net.online ? `Sala ${net.room} • ${net.count}/${net.max} jogadores` : 'desconectado'} <button class="t-edit" data-act="mpleave">Sair do online</button>`;
+    $('mpbtn').innerHTML = isMP() ? '👥 Sala / Chat' : '🌐 Multiplayer online';
+    $('mpbtn').dataset.act = isMP() ? 'mppanel' : 'mp';
+  }
   $('plvl').textContent = `Nível ${S.level} • ${S.xp}/${xpForLevel(S.level)} XP`;
   $('tmoney').textContent = fmt(S.money);
   const t = rig.def;
@@ -1168,7 +1359,7 @@ function popup(html, ups = []) {
 }
 function closePopup() {
   $('popup').classList.add('hidden');
-  if ($('modal').classList.contains('hidden')) state = 'drive';
+  if (state === 'menu' && $('modal').classList.contains('hidden')) state = 'drive';
   const q = popup.queue || [];
   if (q.length) { const lv = q.shift(); popup.queue = q; levelUpPopup(lv); popup.queue = q; }
 }
@@ -1595,6 +1786,7 @@ function loop(now) {
     if (timeT <= 0) { timeT = 0.5; applyTime(S.clock); }
     traffic.obstacles(obstacles);
     traffic.update(dt, rig, rig._cs || []);
+    netFrame(dt);
     world.update(dt, t);
     weather.update(dt, camera, world);
     if (cockpit && cockpit.active) { cockpit.setActive(false); camera.near = 0.5; }
@@ -1611,6 +1803,7 @@ function loop(now) {
   const sim = state === 'drive';
   if (sim) {
     traffic.obstacles(obstacles);
+    if (net && net.online) net.circles(obstacles);
     if (rig.parked) rig.parkedCircles(rig.parked, obstacles);
     for (let k = dropped.length - 1; k >= 0; k--) {
       const p = dropped[k];
@@ -1621,9 +1814,10 @@ function loop(now) {
     if (rig.lastImpact > 0) onImpact(rig.lastImpact);
     S.stats.km += (Math.abs(rig.v) * dt) / 1000;
     const cs = rig._cs || [];
-    traffic.update(dt, rig, cs);
+    traffic.update(dt, rig, net && net.online ? net.circles(cs.slice()) : cs);
     if (state === 'drive') updateJob(dt);
   }
+  netFrame(dt);
   world.update(dt, t);
   weather.update(dt, camera, world);
   cullT -= dt; if (cullT <= 0) { cullT = 0.4; world.cullAt(camera.position.x, camera.position.z, Q.far); }
@@ -1751,6 +1945,6 @@ window.addEventListener('error', (e) => {
 });
 
 // Expõe ganchos para testes automatizados
-window.__game = { get traffic() { return traffic; }, get weather() { return weather; }, makeCam: (x, y, z, tx, ty, tz) => { const c = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 1, Q.far); c.position.set(x, y, z); c.lookAt(tx, ty, tz); sky.position.copy(c.position); mountains.position.y = -y - 4; return c; }, TRUCK, CARGO, get scene() { return scene; }, get sun() { return sun; }, get renderer() { return renderer; }, S, get rig() { return rig; }, get state() { return state; }, ctl, acceptJob: (i) => acceptJob(i), get jobs() { return jobs; }, world: () => world, cam };
+window.__game = { get traffic() { return traffic; }, get weather() { return weather; }, makeCam: (x, y, z, tx, ty, tz) => { const c = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 1, Q.far); c.position.set(x, y, z); c.lookAt(tx, ty, tz); sky.position.copy(c.position); mountains.position.y = -y - 4; return c; }, TRUCK, CARGO, get scene() { return scene; }, get sun() { return sun; }, get renderer() { return renderer; }, S, get rig() { return rig; }, get state() { return state; }, ctl, acceptJob: (i) => acceptJob(i), get jobs() { return jobs; }, world: () => world, cam, get net() { return net; } };
 
 boot().catch((e) => { $("loadmsg").textContent = "Erro ao iniciar: " + e.message; console.error(e); });
