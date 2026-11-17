@@ -57,9 +57,9 @@ function save() {
 
 // ---------------- Qualidade gráfica ----------------
 const QUALITY = {
-  low: { pr: 1.0, minPr: 0.75, shadows: false, shadowSize: 0, tex: 512, aniso: 2, traffic: 10, fogNear: 150, fogFar: 650, far: 900, trees: 9000, terrainStep: 42 },
-  medium: { pr: 1.5, minPr: 0.85, shadows: true, shadowSize: 1024, tex: 1024, aniso: 4, traffic: 16, fogNear: 260, fogFar: 1050, far: 1500, trees: 16000, terrainStep: 32 },
-  high: { pr: 2.0, minPr: 1.0, shadows: true, shadowSize: 2048, tex: 1024, aniso: 8, traffic: 22, fogNear: 380, fogFar: 1600, far: 2600, trees: 26000, terrainStep: 25 },
+  low: { pr: 1.0, minPr: 0.75, shadows: false, shadowSize: 0, tex: 512, aniso: 2, traffic: 10, fogNear: 150, fogFar: 650, far: 900, trees: 9000, terrainStep: 42, treeFar: 600 },
+  medium: { pr: 1.5, minPr: 0.85, shadows: true, shadowSize: 1024, tex: 1024, aniso: 4, traffic: 16, fogNear: 260, fogFar: 1050, far: 1500, trees: 16000, terrainStep: 32, treeFar: 950 },
+  high: { pr: 1.75, minPr: 0.8, shadows: true, shadowSize: 2048, tex: 1024, aniso: 8, traffic: 20, fogNear: 380, fogFar: 1600, far: 2200, trees: 24000, terrainStep: 25, treeFar: 1300 },
 };
 function detectQuality() {
   let r = '';
@@ -121,7 +121,8 @@ async function boot() {
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.0;
   renderer.shadowMap.enabled = Q.shadows;
-  renderer.shadowMap.type = qName === 'high' ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap;
+  renderer.shadowMap.type = THREE.PCFShadowMap; // PCFSoft custava muito no Ultra
+  renderer.shadowMap.autoUpdate = false; // sombra redesenhada a cada 2 quadros (ver loop)
   const maxA = renderer.capabilities.getMaxAnisotropy();
   configureTextures(Q.tex, Math.min(maxA, Q.aniso));
   setTruckQuality(qName);
@@ -217,6 +218,7 @@ async function boot() {
   if (qName !== 'low') { pmrem = new THREE.PMREMGenerator(renderer); buildEnvScene(); }
   applyTime(S.clock);
   await step(100, 'Pronto!');
+  if (qName === 'high') prewarmGPU();
   renderer.compile(scene, camera);
   $('loading').classList.add('hidden');
   showTitle();
@@ -1581,7 +1583,7 @@ function loop(now) {
   t += dt;
   frames++;
   fpsT += dt;
-  if (fpsT >= 1.5) {
+  if (fpsT >= 1.0) {
     const fps = frames / fpsT;
     adaptResolution(fps);
     if (S.settings.fps) $('fps').textContent = `${fps.toFixed(0)} FPS • ${qName} • ${(pr).toFixed(2)}x • ${renderer.info.render.calls} dc`;
@@ -1600,6 +1602,7 @@ function loop(now) {
     titleCamera(dt);
     cullT -= dt; if (cullT <= 0) { cullT = 0.4; world.cullAt(camera.position.x, camera.position.z, Q.far); }
     audio.engine(0, 0, false);
+    if (Q.shadows) renderer.shadowMap.needsUpdate = (frames & 1) === 0;
     renderer.render(scene, camera);
     return;
   }
@@ -1633,6 +1636,7 @@ function loop(now) {
   if ((frames & 1) === 0) drawMinimap();
   saveT += dt;
   if (saveT > 8) { saveT = 0; save(); }
+  if (Q.shadows) renderer.shadowMap.needsUpdate = (frames & 1) === 0;
   renderer.render(scene, camera);
   if (refreshMats > 0 && --refreshMats === 0) scene.traverse((o) => { if (o.material) [].concat(o.material).forEach((m) => { m.needsUpdate = true; }); });
 }
@@ -1704,12 +1708,30 @@ function updateNav(dt) {
   } else navArrow.visible = false;
 }
 
+// Ultra: envia toda a geometria do mapa para a GPU ainda na tela de carregamento,
+// evitando os engasgos quando um trecho novo do mapa aparece pela primeira vez.
+function prewarmGPU() {
+  const rt = new THREE.WebGLRenderTarget(8, 8);
+  const vis = world.cull.map((c) => c.obj.visible), fc = [];
+  for (const c of world.cull) c.obj.visible = true;
+  scene.traverse((o) => { if (o.isMesh || o.isLine || o.isPoints) { fc.push([o, o.frustumCulled]); o.frustumCulled = false; } });
+  renderer.shadowMap.needsUpdate = false; // mesmos shaders do jogo, sem passe de sombra
+  renderer.setRenderTarget(rt);
+  renderer.render(scene, camera);
+  renderer.setRenderTarget(null);
+  for (const [o, f] of fc) o.frustumCulled = f;
+  world.cull.forEach((c, i) => { c.obj.visible = vis[i]; });
+  rt.dispose();
+}
+
 function adaptResolution(fps) {
+  // resolução dinâmica: mira ~50+ FPS; reage rápido quando cai e sobe devagar
   const dpr = window.devicePixelRatio || 1;
-  const cap = Math.min(dpr, Q.pr);
+  const cap = Math.min(dpr, Q.pr), floor = Q.minPr * Math.min(1, dpr);
   let np = pr;
-  if (fps < 27) np = Math.max(Q.minPr * Math.min(1, dpr), pr * 0.88);
-  else if (fps > 52) np = Math.min(cap, pr * 1.06);
+  if (fps < 30) np = Math.max(floor, pr * 0.82);
+  else if (fps < 45) np = Math.max(floor, pr * 0.9);
+  else if (fps > 57) np = Math.min(cap, pr * 1.05);
   if (Math.abs(np - pr) > 0.01) {
     pr = np;
     renderer.setPixelRatio(pr);

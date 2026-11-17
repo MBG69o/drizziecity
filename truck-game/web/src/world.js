@@ -1167,7 +1167,7 @@ export class World {
     const geos = [make(0), make(1), make(2)];
     const mats = [0, 1, 2].map((k) => new THREE.MeshLambertMaterial({ map: tex.treeCard(k), alphaTest: 0.45, side: THREE.DoubleSide }));
     const depth = [0, 1, 2].map((k) => new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking, map: tex.treeCard(k), alphaTest: 0.45 }));
-    const CH = 700;
+    const CH = 500;
     const groups = new Map();
     // nenhuma copa sobre pistas, pátios, postos ou entroncamentos
     const rural = this.areas.filter((a) => !a.city);
@@ -1202,7 +1202,7 @@ export class World {
       im.castShadow = true;
       im.customDepthMaterial = depth[kind];
       this.scene.add(im);
-      this.cull.push({ obj: im, x: im.boundingSphere.center.x, z: im.boundingSphere.center.z, r: im.boundingSphere.radius });
+      this.cull.push({ obj: im, x: im.boundingSphere.center.x, z: im.boundingSphere.center.z, r: im.boundingSphere.radius, far: this.q.treeFar });
     }
   }
 
@@ -1324,7 +1324,7 @@ export class World {
 
   // esconde o que está além do alcance da câmera (mapa grande)
   cullAt(x, z, far) {
-    for (const c of this.cull) c.obj.visible = Math.hypot(c.x - x, c.z - z) - c.r < far;
+    for (const c of this.cull) c.obj.visible = Math.hypot(c.x - x, c.z - z) - c.r < Math.min(far, c.far || far);
   }
 
   update(dt, t) {

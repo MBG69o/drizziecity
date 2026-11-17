@@ -8,10 +8,11 @@ const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 // posição do olho e medidas da cabine por caminhão (x local +: lado esquerdo = motorista)
 function layout(def, md) {
   const id = def.id;
-  if (id === 'mini') return { eye: [0.33, 1.42, md.zf - 1.7], hw: 0.74, dx: 0.33, scale: 0.8, hood: 0.6, wz: 0.95 };
-  if (id === 'urbano') return { eye: [0.45, 2.15, md.zf - 1.15], hw: 0.98, dx: 0.45, scale: 0.92, hood: 0, wz: 1.0 };
-  if (def.cab === 'conventional') return { eye: [0.55, 2.55, (md.cabFront || md.zf) - 1.3], hw: 1.18, dx: 0.55, scale: 1, hood: 2.6, wz: 1.1 };
-  if (id === 'toco') return { eye: [0.52, 2.35, md.zf - 1.3], hw: 1.1, dx: 0.52, scale: 1, hood: 0, wz: 1.1 };
+  // wz = distância do olho ao para-brisa; o volante e o painel são posicionados a partir dela
+  if (id === 'mini') return { eye: [0.33, 1.42, md.zf - 1.75], hw: 0.8, dx: 0.33, scale: 1, hood: 0.45, wz: 1.12 };
+  if (id === 'urbano') return { eye: [0.45, 2.15, md.zf - 1.32], hw: 1.0, dx: 0.45, scale: 1, hood: 0, wz: 1.17 };
+  if (def.cab === 'conventional') return { eye: [0.55, 2.55, (md.cabFront || md.zf) - 1.42], hw: 1.18, dx: 0.55, scale: 1, hood: 2.6, wz: 1.2 };
+  if (id === 'toco') return { eye: [0.52, 2.35, md.zf - 1.42], hw: 1.1, dx: 0.52, scale: 1, hood: 0, wz: 1.2 };
   return { eye: [0.55, 2.62, md.zf - 1.45], hw: 1.2, dx: 0.55, scale: 1, hood: 0, wz: 1.2 };
 }
 
@@ -73,7 +74,7 @@ export class Cockpit {
       this.rtL = new THREE.WebGLRenderTarget(256, 160);
       this.rtR = new THREE.WebGLRenderTarget(256, 160);
       for (const rt of [this.rtL, this.rtR]) rt.texture.colorSpace = THREE.SRGBColorSpace;
-      this.mcam = new THREE.PerspectiveCamera(32, 256 / 160, 1, 400);
+      this.mcam = new THREE.PerspectiveCamera(32, 256 / 160, 1, 300);
     }
     this._v = new THREE.Vector3(); this._w = new THREE.Vector3(); this._q = new THREE.Quaternion();
   }
@@ -104,13 +105,14 @@ export class Cockpit {
     // painel (duas camadas: tampo inclinado e frente)
     box(mDash, hw * 2, 0.3 * k, 0.62, cx, -0.53 * k, wz - 0.3, -0.1);
     box(mDash, hw * 2, 0.5 * k, 0.1, cx, -0.86 * k, wz - 0.62);
-    box(mDark, 0.7 * k, 0.05 * k, 0.2, 0, -0.29 * k, wz - 0.36, -0.12); // capota do quadro
+    box(mDark, 0.74, 0.05, 0.26, 0, -0.21, wz - 0.42, -0.12); // capota do quadro
+    box(mDark, 0.74, 0.3, 0.12, 0, -0.37, wz - 0.3); // nicho do quadro
     box(mDash, hw * 2, 0.75 * k, 0.1, cx, -1.0 * k, wz - 0.45); // parte baixa do painel
     box(mDark, hw * 2, 0.05, 1.8, cx, -1.25 * k, wz - 1.0); // assoalho
     // quadro de instrumentos (canvas)
     const clM = new THREE.MeshBasicMaterial({ map: this.cl.t, toneMapped: false });
     const cl = new THREE.Mesh(new THREE.PlaneGeometry(0.66 * k, 0.25 * k), clM);
-    cl.position.set(0, -0.37 * k, wz - 0.4); cl.rotation.set(0.45, Math.PI, 0); g.add(cl);
+    cl.position.set(0, -0.335, wz - 0.4); cl.rotation.set(0.3, Math.PI, 0); g.add(cl);
     // console central com GPS
     box(mDark, 0.36 * k, 0.26 * k, 0.06, cx * 0.95, -0.5 * k, wz - 0.6, 0.45);
     const gps = new THREE.Mesh(new THREE.PlaneGeometry(0.3 * k, 0.21 * k), new THREE.MeshBasicMaterial({ map: this.gpsTex, toneMapped: false }));
@@ -175,7 +177,7 @@ export class Cockpit {
     }
     // volante
     const wheel = new THREE.Group();
-    wheel.position.set(0, -0.47 * k, 0.6 * k);
+    wheel.position.set(0, -0.6, wz - 0.6); // sempre à frente do painel
     wheel.rotation.x = 1.05; // face voltada para o motorista, coluna descendo para o painel
     const rimR = 0.24 * k;
     const rim = new THREE.Mesh(new THREE.TorusGeometry(rimR, 0.026 * k, 10, 40), lm(0x26282b));
@@ -199,7 +201,7 @@ export class Cockpit {
     const watch = lm(0x2a2a2a);
     this.handRoot = new THREE.Group();
     wheel.add(this.handRoot);
-    for (const [sd, a] of [[1, Math.PI * 0.2], [-1, Math.PI * 0.8]]) { // +x = esquerda do motorista
+    for (const [sd, a] of [[1, Math.PI * 0.06], [-1, Math.PI * 0.94]]) { // pegada "9 e 3" // +x = esquerda do motorista
       const h = new THREE.Group();
       h.position.set(Math.cos(a) * rimR, Math.sin(a) * rimR, -0.012);
       h.rotation.z = a - Math.PI / 2;
@@ -214,7 +216,7 @@ export class Cockpit {
       const upper = new THREE.Mesh(new THREE.CylinderGeometry(0.042 * k, 0.046 * k, 1, 10), sleeve);
       const wrist = new THREE.Mesh(new THREE.CylinderGeometry(0.034 * k, 0.034 * k, 0.05, 10), sd > 0 ? watch : skin);
       g.add(fore, upper, wrist);
-      this.hands.push({ h, sd, fore, upper, wrist, a0: a, shoulder: new THREE.Vector3(sd * 0.3 * k, -0.46 * k, 0.0) });
+      this.hands.push({ h, sd, fore, upper, wrist, a0: a, shoulder: new THREE.Vector3(sd * 0.24, -0.5, -0.24) });
     }
     g.add(wheel);
     this.wheel = wheel;
@@ -286,9 +288,11 @@ export class Cockpit {
     dir.applyQuaternion(g.getWorldQuaternion(this._q));
     camera.lookAt(eye.x + dir.x, eye.y + dir.y, eye.z + dir.z);
     camera.fov = 72;
-    camera.near = 0.05;
+    camera.near = 0.1;
     // retrovisores: um por quadro, alternando
-    if (this.mirrors) {
+    // (um espelho a cada 2 quadros = cada um a ~15 Hz; câmera curta, sem sombras novas)
+    this.mirF = (this.mirF || 0) + 1;
+    if (this.mirrors && this.mirF % 2 === 0) {
       this.mirT = (this.mirT + 1) % 2;
       const m = this.mirrorPos[this.mirT], rt = this.mirT === 0 ? this.rtL : this.rtR;
       const p = new THREE.Vector3(m.x + m.sd * 0.1, m.y, m.z).applyMatrix4(g.matrixWorld);
