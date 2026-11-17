@@ -1,7 +1,7 @@
 // Rodovias em spline (curvas suaves), perfil de elevação (morros e pontes)
 // e índice espacial para consultas rápidas (colisão, altura, rota, tráfego).
 import * as THREE from 'three';
-import { HIGHWAYS, RIVER, RIVER_W, STREAMS } from './data.js';
+import { HIGHWAYS, LOCATIONS, RIVER, RIVER_W, STREAMS } from './data.js';
 
 const smooth = (t) => (t <= 0 ? 0 : t >= 1 ? 1 : t * t * (3 - 2 * t));
 
@@ -25,6 +25,22 @@ export class PolyIndex {
           l.push(owner, i);
         }
     }
+  }
+  // folga até a borda da pista mais próxima (considera todas as vias da célula)
+  clearance(x, z) {
+    const l = this.map.get(Math.floor(x / this.cell) * 100000 + Math.floor(z / this.cell));
+    let m = Infinity;
+    if (!l) return m;
+    for (let k = 0; k < l.length; k += 2) {
+      const o = l[k], i = l[k + 1];
+      const ax = o.x[i], az = o.z[i], vx = o.x[i + 1] - ax, vz = o.z[i + 1] - az;
+      const len2 = vx * vx + vz * vz || 1;
+      let t = ((x - ax) * vx + (z - az) * vz) / len2;
+      t = t < 0 ? 0 : t > 1 ? 1 : t;
+      const d = Math.hypot(x - ax - vx * t, z - az - vz * t) - o.half;
+      if (d < m) m = d;
+    }
+    return m;
   }
   // mais próximo (dentro de pad): retorna objeto reutilizado
   nearest(x, z, out) {
@@ -150,6 +166,29 @@ export class Highway {
     this.ford = new Uint8Array(n);
     this.fords = [];
     const fixed = new Uint8Array(n);
+    // entroncamento: o começo da estrada secundária acompanha a pista principal
+    // (sem degrau nem pista atravessando a outra)
+    this.inParent = new Uint8Array(n);
+    if (this.parent) {
+      const p = this.parent;
+      for (let i = 0; i < Math.min(n, 80); i++) {
+        let bi = 0, bd = Infinity;
+        for (let k = 0; k < p.n; k++) { const d = (p.x[k] - x[i]) ** 2 + (p.z[k] - z[i]) ** 2; if (d < bd) { bd = d; bi = k; } }
+        const d = Math.sqrt(bd);
+        if (d > p.half + 2) break;
+        y[i] = p.y[bi] - 0.03; fixed[i] = 1;
+        if (d < p.half - 0.6) this.inParent[i] = 1;
+      }
+    }
+    // pátios à beira da estrada ficam no plano (y = 0): a pista desce até eles
+    for (const L of LOCATIONS) {
+      if (!L.lot || L.hw !== def.id) continue;
+      const [lx0, lz0, lx1, lz1] = L.lot;
+      for (let i = 0; i < n; i++) {
+        const dx = Math.max(lx0 - x[i], 0, x[i] - lx1), dz = Math.max(lz0 - z[i], 0, z[i] - lz1);
+        if (Math.hypot(dx, dz) < 70 && !this.bridge[i]) { y[i] = 0; fixed[i] = 1; }
+      }
+    }
     for (const st of streams) {
       let i = 0;
       while (i < n) {
@@ -176,7 +215,8 @@ export class Highway {
         for (let i = 1; i < n; i++) if (!fixed[i]) { const d = (this.s[i] - this.s[i - 1]) * g; y[i] = Math.min(y[i - 1] + d, Math.max(y[i - 1] - d, y[i])); }
         for (let i = n - 2; i >= 0; i--) if (!fixed[i]) { const d = (this.s[i + 1] - this.s[i]) * g; y[i] = Math.min(y[i + 1] + d, Math.max(y[i + 1] - d, y[i])); }
       }
-      y[0] = y0; y[n - 1] = 0;
+      if (!fixed[0]) y[0] = y0;
+      if (!fixed[n - 1]) y[n - 1] = 0;
     }
   }
 

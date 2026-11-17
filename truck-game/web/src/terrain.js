@@ -117,6 +117,7 @@ export class Terrain {
     for (let j = 0; j <= nz; j++)
       for (let i = 0; i <= nx; i++) H[j * (nx + 1) + i] = this.height(X0 + i * spacing, Z0 + j * spacing);
     this.grid = { X0, Z0, nx, nz, s: spacing, H };
+    this.clampToRoads();
     this.chunks = [];
     const CH = 18; // pedaços menores = culling mais eficiente no mapa grande
     const col = new THREE.Color(), grass = new THREE.Color(0x7d9a52), dry = new THREE.Color(0xa59a62), forest = new THREE.Color(0x5d7a40),
@@ -170,6 +171,39 @@ export class Terrain {
         const bs = g.boundingSphere;
         this.chunks.push({ obj: m, x: bs.center.x, z: bs.center.z, r: bs.radius });
       }
+  }
+
+  // A malha do relevo é bem mais espaçada que a largura das pistas: nas encostas a
+  // interpolação levantava o capim por cima do asfalto. Aqui os vértices são
+  // rebaixados até que a superfície fique sempre abaixo de toda a pista (com folga).
+  clampToRoads() {
+    const G = this.grid, W = G.nx + 1, H = G.H;
+    if (!this.hws) return;
+    for (let pass = 0; pass < 8; pass++) {
+      let worst = 0;
+      for (const h of this.hws) {
+        for (let i = 0; i < h.n; i++) {
+          const top = h.y[i] - (h.bridge[i] ? 2.2 : h.ford[i] ? 0.05 : 0.12);
+          const rx = -h.dz[i], rz = h.dx[i], E = h.half + (h.bridge[i] ? 0.5 : 1.6);
+          for (let k = -4; k <= 4; k++) {
+            const o = (E * k) / 4, x = h.x[i] + rx * o, z = h.z[i] + rz * o;
+            const fx = (x - G.X0) / G.s, fz = (z - G.Z0) / G.s;
+            const ci = Math.max(0, Math.min(G.nx - 1, Math.floor(fx))), cj = Math.max(0, Math.min(G.nz - 1, Math.floor(fz)));
+            const u = fx - ci, v = fz - cj;
+            const a = cj * W + ci, b = a + 1, c = a + W, d = c + 1;
+            let ia, ib, ic, wa, wb, wc;
+            if (u + v < 1) { ia = a; ib = b; ic = c; wa = 1 - u - v; wb = u; wc = v; }
+            else { ia = d; ib = c; ic = b; wa = u + v - 1; wb = 1 - u; wc = 1 - v; }
+            const e = H[ia] * wa + H[ib] * wb + H[ic] * wc - top;
+            if (e <= 0.001) continue;
+            if (e > worst) worst = e;
+            const s2 = wa * wa + wb * wb + wc * wc;
+            H[ia] -= (e * wa) / s2; H[ib] -= (e * wb) / s2; H[ic] -= (e * wc) / s2;
+          }
+        }
+      }
+      if (worst < 0.01) break;
+    }
   }
 
   // altura igual à da malha (interpolação na grade) — para árvores e objetos

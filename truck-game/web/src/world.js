@@ -929,6 +929,8 @@ export class World {
       const va = h.s[a] / tile, vb = h.s[b] / tile;
       const P = (k, rr, o, y) => [h.x[k] + rr[0] * o, y, h.z[k] + rr[1] * o];
       const wood = h.bridge[a] === 2 || h.bridge[b] === 2;
+      // trecho inteiro dentro da pista principal (entroncamento): não desenha por cima
+      if (h.inParent[a] && h.inParent[b]) continue;
       if (!wood) RB.quad(P(a, ra, -E, ya), P(a, ra, E, ya), P(b, rb, E, yb), P(b, rb, -E, yb), [0, 1, 0], [0, va, 1, va, 1, vb, 0, vb]);
       else {
         // ponte de madeira: tabuleiro de tábuas, longarinas, guarda-corpo e estacas no leito
@@ -959,6 +961,18 @@ export class World {
       const bridge = h.bridge[a] === 1 || h.bridge[b] === 1;
       for (const side of [-1, 1]) {
         const ea = P(a, ra, side * E, ya - 0.04), eb = P(b, rb, side * E, yb - 0.04);
+        // talude: onde o relevo ficou abaixo da pista, a borda desce até o chão (sem pista flutuando)
+        if (!bridge && !wood && !h.ford[a] && !h.inParent[a]) {
+          const ga = P(a, ra, side * (E + 2.5), 0), gb = P(b, rb, side * (E + 2.5), 0);
+          const da = h.y[a] - T.meshHeight(ga[0], ga[2]), db = h.y[b] - T.meshHeight(gb[0], gb[2]);
+          if (Math.max(da, db) > 0.35) {
+            const oa = E + 1 + Math.min(6, Math.max(0, da)) * 0.8, ob = E + 1 + Math.min(6, Math.max(0, db)) * 0.8;
+            const ta = P(a, ra, side * oa, ya - 0.3 - Math.min(6, Math.max(0, da))), tb = P(b, rb, side * ob, yb - 0.3 - Math.min(6, Math.max(0, db)));
+            const qa = P(a, ra, side * E, ya - 0.02), qb = P(b, rb, side * E, yb - 0.02);
+            const uv = [0, va, 1, va, 1, vb, 0, vb];
+            if (side > 0) B.dirt.quad(qa, ta, tb, qb, [0, 1, 0], uv); else B.dirt.quad(ta, qa, qb, tb, [0, 1, 0], uv);
+          }
+        }
         if (bridge) {
           // lateral da laje + guarda-corpo de concreto
           B.bridge.quad([ea[0], ya - 1.6, ea[2]], [eb[0], yb - 1.6, eb[2]], [eb[0], yb + 1.0, eb[2]], [ea[0], ya + 1.0, ea[2]], [ra[0] * side, 0, ra[1] * side], [h.s[a] / 4, 0, h.s[b] / 4, 0, h.s[b] / 4, 0.6, h.s[a] / 4, 0.6]);
@@ -1155,6 +1169,18 @@ export class World {
     const depth = [0, 1, 2].map((k) => new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking, map: tex.treeCard(k), alphaTest: 0.45 }));
     const CH = 700;
     const groups = new Map();
+    // nenhuma copa sobre pistas, pátios, postos ou entroncamentos
+    const rural = this.areas.filter((a) => !a.city);
+    this.trees = this.trees.filter((t) => {
+      const rad = (t.k === 1 ? 2.3 : t.k === 2 ? 2.5 : 3.2) * t.s;
+      if (this.hwIdx.clearance(t.x, t.z) < rad + 1.5) return false;
+      for (const st of this.streams) if (st.dist(t.x, t.z) < st.w / 2 + 1) return false;
+      for (const a of rural) {
+        if (a.circle) { if (Math.hypot(t.x - a.x, t.z - a.z) < a.r + rad + 1) return false; }
+        else if (t.x > a.x0 - rad && t.x < a.x1 + rad && t.z > a.z0 - rad && t.z < a.z1 + rad) return false;
+      }
+      return true;
+    });
     for (const t of this.trees) {
       // eucaliptos em parte das matas do leste/sul
       let kind = t.k;
